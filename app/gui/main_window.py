@@ -1,6 +1,8 @@
 import os
 import threading
 import winsound
+import tempfile
+import webbrowser
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import (
@@ -11,6 +13,19 @@ from tkinter import (
 )
 from datetime import datetime
 import pyvisa
+
+PLOT_COLORS = [
+    "#2196F3",  # blue
+    "#F44336",  # red
+    "#4CAF50",  # green
+    "#FF9800",  # orange
+    "#9C27B0",  # purple
+    "#00BCD4",  # cyan
+    "#795548",  # brown
+    "#607D8B",  # blue-grey
+    "#E91E63",  # pink
+    "#009688",  # teal
+]
 
 from app.utils.constants import APP_NAME, stop_event
 from app.utils.sound import play_completion_sound
@@ -32,6 +47,7 @@ class JVMeasurementApp:
     def __init__(self, root):
         self.root            = root
         self.input_widgets   = []
+        self.session_data    = []
         # Persistent instrument state — set by open_instrument_dialog(),
         # cleared by disconnect().  run_measurement() uses self.instrument
         # directly with no reconnect overhead.
@@ -257,6 +273,12 @@ class JVMeasurementApp:
                                state=DISABLED)
         self.stop_btn.pack(side=LEFT, padx=5)
 
+        self.plot_btn = Button(btn_frame, text="\U0001f4ca Open Interactive Plot",
+                               command=self.open_interactive_plot,
+                               bg="#1976D2", fg="white", width=22,
+                               state=DISABLED)
+        self.plot_btn.pack(side=LEFT, padx=5)
+
         # ── Measurement Log ───────────────────────────────────────────────────
         log_frame = LabelFrame(control_frame, text="Measurement Log",
                                padx=5, pady=5)
@@ -304,6 +326,9 @@ class JVMeasurementApp:
                               command=self.browse_folder)
         file_menu.add_command(label="Export Measurement Log\u2026",
                               command=self._export_log)
+        file_menu.add_separator()
+        file_menu.add_command(label="Clear Session Data",
+                              command=self._clear_session_data)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self._on_exit)
         menubar.add_cascade(label="File", menu=file_menu)
@@ -438,6 +463,190 @@ class JVMeasurementApp:
             "License: MIT"
         )
 
+    def _clear_session_data(self):
+        if not messagebox.askokcancel(
+            "Clear Session Data",
+            "This will clear all measurement data from the current session.\n"
+            "The exported Excel files are not affected.\n\n"
+            "Continue?"
+        ):
+            return
+        self.session_data = []
+        self.plot_btn.config(state=DISABLED)
+
+    def open_interactive_plot(self):
+        try:
+            import plotly.graph_objects as go
+        except ImportError:
+            messagebox.showerror(
+                "Missing dependency",
+                "plotly is not installed.\nRun: pip install plotly"
+            )
+            return
+
+        if not self.session_data:
+            return
+
+        fig = go.Figure()
+
+        for entry in self.session_data:
+            col   = entry["color"]
+            name  = entry["sample_name"]
+            v_f   = entry["v_fwd"]
+            j_f   = entry["j_fwd"]
+            v_r   = entry["v_rev"]
+            j_r   = entry["j_rev"]
+            p_f   = v_f * j_f
+            p_r   = v_r * j_r
+
+            marker_fwd = dict(symbol="circle", size=6,
+                              color=col, line=dict(color=col, width=1))
+            marker_rev = dict(symbol="circle", size=6,
+                              color=col, line=dict(color=col, width=1))
+
+            jv_hover = (
+                "<b>V:</b> %{x:.3f} V<br>"
+                "<b>J:</b> %{y:.3f} mA/cm\u00b2"
+                "<extra>%{fullData.name}</extra>"
+            )
+            pw_hover = (
+                "<b>V:</b> %{x:.3f} V<br>"
+                "<b>P:</b> %{y:.3f} mW/cm\u00b2"
+                "<extra>%{fullData.name}</extra>"
+            )
+
+            # Forward J-V
+            fig.add_trace(go.Scatter(
+                x=v_f, y=j_f,
+                mode="lines+markers",
+                name=f"{name} \u2014 Fwd J-V",
+                line=dict(color=col, dash="solid", width=2),
+                marker=marker_fwd,
+                hovertemplate=jv_hover,
+                yaxis="y1",
+            ))
+            # Reverse J-V
+            fig.add_trace(go.Scatter(
+                x=v_r, y=j_r,
+                mode="lines+markers",
+                name=f"{name} \u2014 Rev J-V",
+                line=dict(color=col, dash="dash", width=2),
+                marker=marker_rev,
+                hovertemplate=jv_hover,
+                yaxis="y1",
+            ))
+            # Forward Power
+            fig.add_trace(go.Scatter(
+                x=v_f, y=p_f,
+                mode="lines+markers",
+                name=f"{name} \u2014 Fwd P",
+                line=dict(color=col, dash="solid", width=1.5),
+                marker=dict(symbol="circle", size=5,
+                            color=col, line=dict(color=col, width=1)),
+                hovertemplate=pw_hover,
+                yaxis="y2",
+                opacity=0.65,
+            ))
+            # Reverse Power
+            fig.add_trace(go.Scatter(
+                x=v_r, y=p_r,
+                mode="lines+markers",
+                name=f"{name} \u2014 Rev P",
+                line=dict(color=col, dash="dash", width=1.5),
+                marker=dict(symbol="circle", size=5,
+                            color=col, line=dict(color=col, width=1)),
+                hovertemplate=pw_hover,
+                yaxis="y2",
+                opacity=0.65,
+            ))
+
+        last = self.session_data[-1]
+        annotation_text = (
+            f"<b>Last: {last['sample_name']}</b><br>"
+            f"Illumination: {last['illumination']:.1f} mW/cm\u00b2<br>"
+            f"<b>Reverse scan:</b><br>"
+            f"\u00a0\u00a0Voc: {last['Voc_rev']:.3f} V<br>"
+            f"\u00a0\u00a0Jsc: {last['Jsc_rev']:.3f} mA/cm\u00b2<br>"
+            f"\u00a0\u00a0FF: {last['FF_rev']:.1f} %<br>"
+            f"\u00a0\u00a0PCE: {last['PCE_rev']:.2f} %<br>"
+            f"<b>HI: {last['HI']:+.1f} %</b>"
+        )
+
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=0.98, y=0.98,
+            xanchor="right", yanchor="top",
+            text=annotation_text,
+            showarrow=False,
+            font=dict(size=11, family="Arial"),
+            bgcolor="rgba(255,255,255,0.92)",
+            bordercolor="#BDBDBD",
+            borderwidth=1,
+            borderpad=8,
+            align="left",
+        )
+
+        fig.update_layout(
+            title=dict(
+                text="J-V Characteristics \u2014 Session Overview",
+                font=dict(size=16, family="Arial"),
+            ),
+            xaxis=dict(
+                title="Voltage (V)",
+                showgrid=True,
+                gridcolor="#E0E0E0",
+                gridwidth=1,
+                zeroline=True,
+                zerolinecolor="#BDBDBD",
+                zerolinewidth=1.5,
+                ticks="outside",
+                mirror=True,
+                showline=True,
+                linecolor="#424242",
+            ),
+            yaxis=dict(
+                title="Current Density (mA/cm\u00b2)",
+                showgrid=True,
+                gridcolor="#E0E0E0",
+                gridwidth=1,
+                ticks="outside",
+                mirror=False,
+                showline=True,
+                linecolor="#424242",
+            ),
+            yaxis2=dict(
+                title="Power Density (mW/cm\u00b2)",
+                overlaying="y",
+                side="right",
+                showgrid=False,
+                ticks="outside",
+                showline=True,
+                linecolor="#424242",
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            legend=dict(
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="#E0E0E0",
+                borderwidth=1,
+                font=dict(size=11),
+                itemclick="toggle",
+                itemdoubleclick="toggleothers",
+            ),
+            hovermode="closest",
+            font=dict(family="Arial, sans-serif", size=12, color="#212121"),
+            margin=dict(l=70, r=80, t=60, b=60),
+        )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".html", delete=False,
+            prefix="jv_plot_", encoding="utf-8"
+        ) as f:
+            fig.write_html(f.name, include_plotlyjs="cdn")
+            temp_path = f.name
+
+        webbrowser.open(f"file:///{os.path.abspath(temp_path).replace(chr(92), '/')}")
+
     # ── GUI helpers ───────────────────────────────────────────────────────────
 
     def _tooltip(self, field_name):
@@ -452,6 +661,10 @@ class JVMeasurementApp:
         state = NORMAL if self.prebias_enabled_var.get() else DISABLED
         self.prebias_voltage_entry.config(state=state)
         self.prebias_duration_entry.config(state=state)
+
+    def _toggle_light_soaking_entry(self):
+        state = NORMAL if self.light_soaking_var.get() else DISABLED
+        self.light_soaking_entry.config(state=state)
 
     def browse_folder(self):
         folder = filedialog.askdirectory()
@@ -487,6 +700,8 @@ class JVMeasurementApp:
                 raise ValueError("NPLC must be between 0.01 and 25")
             if self.prebias_enabled_var.get() and self.prebias_duration_var.get() <= 0:
                 raise ValueError("Pre-bias duration must be positive")
+            if self.light_soaking_var.get() and self.light_soaking_duration_var.get() <= 0:
+                raise ValueError("Light soaking duration must be positive")
             try:
                 illum = float(self.illumination_var.get())
             except ValueError:
@@ -513,6 +728,7 @@ class JVMeasurementApp:
         self.stop_btn.config(state=NORMAL if not enable else DISABLED)
         if enable:
             self._toggle_prebias_entries()
+            self._toggle_light_soaking_entry()
 
     def draw_placeholder_plot(self):
         self.ax.clear()
@@ -616,12 +832,31 @@ class JVMeasurementApp:
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
 
-    def update_results_display(self, fwd, rev, HI):
+    def update_results_display(self, fwd, rev, HI, v_f, j_f, v_r, j_r):
         Voc_f, Jsc_f, FF_f, PCE_f, Rs_f, Rsh_f = fwd
         Voc_r, Jsc_r, FF_r, PCE_r, Rs_r, Rsh_r = rev
+
+        # ── Accumulate session data ───────────────────────────────────────────
+        color = PLOT_COLORS[len(self.session_data) % len(PLOT_COLORS)]
+        self.session_data.append({
+            "sample_name": self.sample_name_var.get(),
+            "timestamp":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "illumination": float(self.illumination_var.get()),
+            "v_fwd": v_f, "j_fwd": j_f,
+            "v_rev": v_r, "j_rev": j_r,
+            "Voc_fwd": Voc_f, "Jsc_fwd": Jsc_f, "FF_fwd": FF_f, "PCE_fwd": PCE_f,
+            "Voc_rev": Voc_r, "Jsc_rev": Jsc_r, "FF_rev": FF_r, "PCE_rev": PCE_r,
+            "HI": HI,
+            "color": color,
+        })
+        self.plot_btn.config(state=NORMAL)
+
         pb = (f"Pre-bias: {self.prebias_voltage_var.get():.2f} V "
               f"for {self.prebias_duration_var.get():.1f} s\n"
               if self.prebias_enabled_var.get() else "")
+        ls = (f"Light soaking: {self.light_soaking_duration_var.get():.0f} s\n"
+              if self.light_soaking_var.get() else "")
+        n = len(self.session_data)
         self.add_to_log(
             f"Sample: {self.sample_name_var.get()}\n"
             f"Instrument: {self.instrument_idn or 'unknown'}\n"
@@ -629,7 +864,7 @@ class JVMeasurementApp:
             f"Delay/pt: {self.delay_ms_var.get():.0f} ms  |  "
             f"NPLC: {self.nplc_var.get():.2f}  |  "
             f"4-Wire: {'ON' if self.four_wire_var.get() else 'OFF'}\n"
-            f"{pb}\n"
+            f"{pb}{ls}\n"
             f"Forward Scan:\n"
             f"  Voc:  {Voc_f:.3f} V\n  Jsc:  {Jsc_f:.3f} mA/cm\u00b2\n"
             f"  FF:   {FF_f:.2f} %\n  PCE:  {PCE_f:.2f} %\n"
@@ -639,6 +874,8 @@ class JVMeasurementApp:
             f"  FF:   {FF_r:.2f} %\n  PCE:  {PCE_r:.2f} %\n"
             f"  Rs:   {Rs_r:.2f} \u03a9\u00b7cm\u00b2\n  Rsh:  {Rsh_r:.2f} \u03a9\u00b7cm\u00b2\n\n"
             f"Hysteresis Index (HI): {HI:.2f} %\n"
+            f"Session total: {n} measurement(s) \u2014 "
+            f"click \"\U0001f4ca Open Interactive Plot\" to view all\n"
         )
 
     # ── Measurement thread ────────────────────────────────────────────────────
@@ -715,6 +952,17 @@ class JVMeasurementApp:
                     self.four_wire_var.get(),
                 )
 
+            # ── Light Soaking (optional) ──────────────────────────────────
+            if self.light_soaking_var.get():
+                apply_light_soaking(
+                    self.instrument,
+                    self.light_soaking_duration_var.get(),
+                    stop_event,
+                    self.status_var.set,
+                )
+                if stop_event.is_set():
+                    return
+
             # ── Illuminated J-V ───────────────────────────────────────────
             self.status_var.set("Measuring forward scan\u2026")
             v_f, j_f = measure_scan(
@@ -762,7 +1010,7 @@ class JVMeasurementApp:
             fwd = (Voc_f, Jsc_f, FF_f, PCE_f, Rs_f, Rsh_f)
             rev = (Voc_r, Jsc_r, FF_r, PCE_r, Rs_r, Rsh_r)
 
-            self.update_results_display(fwd, rev, HI)
+            self.update_results_display(fwd, rev, HI, v_f, j_f, v_r, j_r)
             self.update_plot(v_f, j_f, v_r, j_r, v_f * j_f, v_r * j_r,
                              v_df=v_df, j_df=j_df, v_dr=v_dr, j_dr=j_dr)
             save_data(
