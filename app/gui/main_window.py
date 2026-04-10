@@ -15,16 +15,16 @@ from datetime import datetime
 import pyvisa
 
 PLOT_COLORS = [
-    "#2196F3",  # blue
-    "#F44336",  # red
-    "#4CAF50",  # green
-    "#FF9800",  # orange
-    "#9C27B0",  # purple
-    "#00BCD4",  # cyan
-    "#795548",  # brown
-    "#607D8B",  # blue-grey
-    "#E91E63",  # pink
-    "#009688",  # teal
+    "#1565C0",  # deep blue
+    "#B71C1C",  # deep red
+    "#1B5E20",  # deep green
+    "#E65100",  # deep orange
+    "#4A148C",  # deep purple
+    "#006064",  # deep cyan
+    "#3E2723",  # deep brown
+    "#37474F",  # blue-grey
+    "#880E4F",  # deep pink
+    "#004D40",  # deep teal
 ]
 
 from app.utils.constants import APP_NAME, stop_event
@@ -314,6 +314,7 @@ class JVMeasurementApp:
                             fontsize=12, labelpad=10, position=(1, 0.5))
         self.canvas = FigureCanvasTkAgg(self.fig, plot_frame)
         self.canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+        self.cursor = None   # mplcursors handle — kept to avoid garbage collection
         self.draw_placeholder_plot()
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
@@ -464,15 +465,20 @@ class JVMeasurementApp:
         )
 
     def _clear_session_data(self):
+        if not self.session_data:
+            messagebox.showinfo("Clear Session", "Session is already empty.")
+            return
+        n = len(self.session_data)
         if not messagebox.askokcancel(
             "Clear Session Data",
-            "This will clear all measurement data from the current session.\n"
-            "The exported Excel files are not affected.\n\n"
-            "Continue?"
+            f"This will remove {n} measurement(s) from the session view.\n"
+            "Exported Excel files are not affected.\n\nContinue?"
         ):
             return
-        self.session_data = []
+        self.session_data.clear()
         self.plot_btn.config(state=DISABLED)
+        self.draw_placeholder_plot()
+        self.status_var.set("Session data cleared.")
 
     def open_interactive_plot(self):
         try:
@@ -749,7 +755,7 @@ class JVMeasurementApp:
                      ha="center", va="center", fontsize=12, color="gray")
         self.fig.subplots_adjust(left=0.15, right=0.85, top=0.85)
         self.ax.grid(True)
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     # ── Measurement flow ──────────────────────────────────────────────────────
 
@@ -832,7 +838,8 @@ class JVMeasurementApp:
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
 
-    def update_results_display(self, fwd, rev, HI, v_f, j_f, v_r, j_r):
+    def update_results_display(self, fwd, rev, HI, v_f, j_f, v_r, j_r,
+                               v_df=None, j_df=None, v_dr=None, j_dr=None):
         Voc_f, Jsc_f, FF_f, PCE_f, Rs_f, Rsh_f = fwd
         Voc_r, Jsc_r, FF_r, PCE_r, Rs_r, Rsh_r = rev
 
@@ -844,6 +851,10 @@ class JVMeasurementApp:
             "illumination": float(self.illumination_var.get()),
             "v_fwd": v_f, "j_fwd": j_f,
             "v_rev": v_r, "j_rev": j_r,
+            "power_fwd": v_f * j_f,
+            "power_rev": v_r * j_r,
+            "v_dark_fwd": v_df, "j_dark_fwd": j_df,
+            "v_dark_rev": v_dr, "j_dark_rev": j_dr,
             "Voc_fwd": Voc_f, "Jsc_fwd": Jsc_f, "FF_fwd": FF_f, "PCE_fwd": PCE_f,
             "Voc_rev": Voc_r, "Jsc_rev": Jsc_r, "FF_rev": FF_r, "PCE_rev": PCE_r,
             "HI": HI,
@@ -1010,9 +1021,10 @@ class JVMeasurementApp:
             fwd = (Voc_f, Jsc_f, FF_f, PCE_f, Rs_f, Rsh_f)
             rev = (Voc_r, Jsc_r, FF_r, PCE_r, Rs_r, Rsh_r)
 
-            self.update_results_display(fwd, rev, HI, v_f, j_f, v_r, j_r)
-            self.update_plot(v_f, j_f, v_r, j_r, v_f * j_f, v_r * j_r,
-                             v_df=v_df, j_df=j_df, v_dr=v_dr, j_dr=j_dr)
+            self.update_results_display(fwd, rev, HI, v_f, j_f, v_r, j_r,
+                                        v_df=v_df, j_df=j_df,
+                                        v_dr=v_dr, j_dr=j_dr)
+            self.update_plot()
             save_data(
                 self.export_folder_var.get(),
                 self.sample_name_var.get(),
@@ -1046,55 +1058,193 @@ class JVMeasurementApp:
 
     # ── Plot ──────────────────────────────────────────────────────────────────
 
-    def update_plot(self, v_f, j_f, v_r, j_r, p_f, p_r,
-                    v_df=None, j_df=None, v_dr=None, j_dr=None):
-        has_dark = v_df is not None
+    def update_plot(self):
+        """
+        Redraw the complete session plot from self.session_data.
+        Each measurement gets its own color.
+        Forward scan: solid line + filled circle markers.
+        Reverse scan: dashed line + hollow circle markers.
+        Dark J-V (when present): lighter dashed lines, no markers.
+        Legend entries are clickable to toggle visibility.
+        Hover tooltip shows J and V values at each data point.
+        """
+        import mplcursors
 
         self.ax.clear()
         self.ax2.clear()
         self.ax2.yaxis.set_label_position("right")
 
-        self.ax.set_xlim(0, 1.1)
+        if not self.session_data:
+            self.draw_placeholder_plot()
+            return
 
-        if has_dark:
+        # Check whether any entry has dark data
+        has_any_dark = any(e["v_dark_fwd"] is not None for e in self.session_data)
+        if has_any_dark:
             self.ax.set_ylim(-20, 30)
             self.ax2.set_ylim(-20, 30)
-            # Reference line at J = 0 to separate dark and illuminated regions
-            self.ax.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--", zorder=1)
+            self.ax.axhline(0, color="#aaaaaa", linewidth=0.8,
+                            linestyle="--", zorder=1)
         else:
             self.ax.set_ylim(0, 30)
             self.ax2.set_ylim(0, 30)
 
-        lines = []
+        all_lines   = []   # every line object (for mplcursors + legend map)
+        jv_lines    = []   # J-V lines only (hover attached here)
+        legend_lines = []  # lines that go into the legend
 
-        # ── Dark curves (plotted first so illuminated curves sit on top) ──────
-        if has_dark:
-            cdf, = self.ax.plot(v_df, j_df, color="#7b8cbe", linestyle="--",
-                                linewidth=1.4, label="Dark Forward J")
-            cdr, = self.ax.plot(v_dr, j_dr, color="#be7b7b", linestyle="--",
-                                linewidth=1.4, label="Dark Reverse J")
-            lines += [cdf, cdr]
+        for entry in self.session_data:
+            color  = entry["color"]
+            label  = entry["sample_name"]
+            v_f    = entry["v_fwd"]
+            j_f    = entry["j_fwd"]
+            v_r    = entry["v_rev"]
+            j_r    = entry["j_rev"]
+            p_f    = entry["power_fwd"]
+            p_r    = entry["power_rev"]
+            v_df   = entry["v_dark_fwd"]
+            j_df   = entry["j_dark_fwd"]
+            v_dr   = entry["v_dark_rev"]
+            j_dr   = entry["j_dark_rev"]
 
-        # ── Illuminated curves ────────────────────────────────────────────────
-        cf, = self.ax.plot(v_f, j_f, "b-",  linewidth=1.8, label="Forward J (light)")
-        cr, = self.ax.plot(v_r, j_r, "r-",  linewidth=1.8, label="Reverse J (light)")
-        pf, = self.ax2.plot(v_f, p_f, "b--", linewidth=1.2, alpha=0.7,
-                             label="Forward Power")
-        pr, = self.ax2.plot(v_r, p_r, "r--", linewidth=1.2, alpha=0.7,
-                             label="Reverse Power")
-        lines += [cf, cr, pf, pr]
+            # ── Dark curves (plotted first, no markers, reduced opacity) ─────
+            if v_df is not None:
+                dark_col = color + "66"   # 40% opacity via hex alpha
+                ld_f, = self.ax.plot(
+                    v_df, j_df,
+                    color=color, linestyle="--", linewidth=1.2,
+                    alpha=0.4, label=f"{label} \u2014 Dark Fwd",
+                    zorder=2,
+                )
+                ld_r, = self.ax.plot(
+                    v_dr, j_dr,
+                    color=color, linestyle=":", linewidth=1.2,
+                    alpha=0.4, label=f"{label} \u2014 Dark Rev",
+                    zorder=2,
+                )
+                all_lines  += [ld_f, ld_r]
+                legend_lines += [ld_f, ld_r]
 
-        name = self.sample_name_var.get() or "Unnamed Sample"
-        self.ax.set_title(f"{name}\nJ-V Characteristics",
-                          fontsize=14, fontweight="bold", pad=20)
-        self.ax.legend(lines, [l.get_label() for l in lines],
-                       loc="upper right", frameon=True, framealpha=0.9,
-                       fontsize=9)
-        self.ax.set_xlabel("Voltage (V)", fontsize=12, labelpad=10)
-        self.ax.set_ylabel("Current Density (mA/cm\u00b2)",
-                           fontsize=12, labelpad=10, position=(0, 0.5))
-        self.ax2.set_ylabel("Power Density (mW/cm\u00b2)",
-                            fontsize=12, labelpad=10, position=(1, 0.5))
+            # ── Forward J-V: solid line + filled circles ──────────────────────
+            line_jf, = self.ax.plot(
+                v_f, j_f,
+                color=color, linestyle="-",
+                marker="o", markersize=5,
+                markerfacecolor=color, markeredgecolor=color,
+                linewidth=1.8,
+                label=f"{label} \u2014 Fwd J-V",
+                zorder=3,
+            )
+
+            # ── Reverse J-V: dashed line + hollow circles ─────────────────────
+            line_jr, = self.ax.plot(
+                v_r, j_r,
+                color=color, linestyle="--",
+                marker="o", markersize=5,
+                markerfacecolor="white", markeredgecolor=color,
+                markeredgewidth=1.5,
+                linewidth=1.8,
+                label=f"{label} \u2014 Rev J-V",
+                zorder=3,
+            )
+
+            # ── Forward Power on ax2 ──────────────────────────────────────────
+            line_pf, = self.ax2.plot(
+                v_f, p_f,
+                color=color, linestyle="-",
+                marker="s", markersize=4,
+                markerfacecolor=color, markeredgecolor=color,
+                linewidth=1.2, alpha=0.5,
+                label=f"{label} \u2014 Fwd P",
+                zorder=2,
+            )
+
+            # ── Reverse Power on ax2 ─────────────────────────────────────────
+            line_pr, = self.ax2.plot(
+                v_r, p_r,
+                color=color, linestyle="--",
+                marker="s", markersize=4,
+                markerfacecolor="white", markeredgecolor=color,
+                markeredgewidth=1.2,
+                linewidth=1.2, alpha=0.5,
+                label=f"{label} \u2014 Rev P",
+                zorder=2,
+            )
+
+            all_lines    += [line_jf, line_jr, line_pf, line_pr]
+            jv_lines     += [line_jf, line_jr]
+            legend_lines += [line_jf, line_jr, line_pf, line_pr]
+
+        # ── Axis labels and title ─────────────────────────────────────────────
+        self.ax.set_xlabel("Voltage (V)", labelpad=8)
+        self.ax.set_ylabel("Current Density (mA/cm\u00b2)", labelpad=8)
+        self.ax2.set_ylabel("Power Density (mW/cm\u00b2)", labelpad=8)
+
+        last  = self.session_data[-1]
+        n     = len(self.session_data)
+        suffix = f" (+{n - 1} more)" if n > 1 else ""
+        self.ax.set_title(
+            f"{last['sample_name']}{suffix} \u2014 J-V Characteristics",
+            fontsize=12, fontweight="bold", pad=12,
+        )
+
+        # ── Combined legend from both axes ────────────────────────────────────
+        handles_ax1, labels_ax1 = self.ax.get_legend_handles_labels()
+        handles_ax2, labels_ax2 = self.ax2.get_legend_handles_labels()
+        legend = self.ax.legend(
+            handles_ax1 + handles_ax2,
+            labels_ax1  + labels_ax2,
+            loc="upper right", frameon=True, framealpha=0.9, fontsize=8,
+        )
+
+        # ── Clickable legend: click to toggle line visibility ─────────────────
+        legend_line_map = {}
+        for leg_line, orig_line in zip(
+            legend.get_lines(), handles_ax1 + handles_ax2
+        ):
+            leg_line.set_picker(True)
+            leg_line.set_pickradius(6)
+            legend_line_map[leg_line] = orig_line
+
+        def on_legend_pick(event):
+            leg_line = event.artist
+            if leg_line not in legend_line_map:
+                return
+            orig_line = legend_line_map[leg_line]
+            visible = not orig_line.get_visible()
+            orig_line.set_visible(visible)
+            leg_line.set_alpha(1.0 if visible else 0.25)
+            self.canvas.draw_idle()
+
+        self.fig.canvas.mpl_connect("pick_event", on_legend_pick)
+
+        # ── mplcursors: hover tooltip on J-V lines only ───────────────────────
+        if self.cursor is not None:
+            try:
+                self.cursor.remove()
+            except Exception:
+                pass
+
+        self.cursor = mplcursors.cursor(jv_lines, hover=True, highlight=True)
+
+        @self.cursor.connect("add")
+        def on_hover(sel):
+            x_val = sel.target[0]
+            y_val = sel.target[1]
+            lbl   = sel.artist.get_label()
+            sel.annotation.set_text(
+                f"{lbl}\nV = {x_val:.3f} V\nJ = {y_val:.3f} mA/cm\u00b2"
+            )
+            sel.annotation.get_bbox_patch().set(
+                facecolor="white",
+                alpha=0.92,
+                edgecolor="#90A4AE",
+                linewidth=0.8,
+                boxstyle="round,pad=0.4",
+            )
+            sel.annotation.set_fontsize(9)
+
+        # ── Final layout (unchanged visual style) ─────────────────────────────
         self.fig.subplots_adjust(left=0.15, right=0.85, top=0.85)
         self.ax.grid(True)
-        self.canvas.draw()
+        self.canvas.draw_idle()
