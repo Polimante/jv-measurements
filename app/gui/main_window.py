@@ -1016,32 +1016,41 @@ class JVMeasurementApp:
             loc="upper right", frameon=True, framealpha=0.9, fontsize=8,
         )
 
-        # ── Clickable legend: click to toggle line visibility ─────────────────
-        legend_line_map = {}
-        for leg_line, orig_line in zip(
-            legend.get_lines(), handles_ax1 + handles_ax2
-        ):
-            leg_line.set_picker(True)
-            leg_line.set_pickradius(6)
-            legend_line_map[leg_line] = orig_line
+        # ── Clickable legend: left-click on any legend entry to toggle ────────
+        # pick_event is unreliable in the Tkinter backend when mplcursors is
+        # active, so we use button_press_event and do the hit-testing manually.
+        _all_orig = handles_ax1 + handles_ax2
+        _leg_ref  = legend
 
-        # Capture legend_line_map in the closure explicitly to avoid stale refs
-        _map = legend_line_map
-
-        def on_legend_pick(event):
-            leg_line = event.artist
-            if leg_line not in _map:
+        def on_legend_click(event):
+            if event.button != 1:          # left-click only
                 return
-            orig_line = _map[leg_line]
-            visible = not orig_line.get_visible()
-            orig_line.set_visible(visible)
-            leg_line.set_alpha(1.0 if visible else 0.25)
-            self.canvas.draw_idle()
+            frame_bbox = _leg_ref.get_frame().get_bbox()
+            if not frame_bbox.contains(event.x, event.y):
+                return                     # click was outside the legend box
+            texts    = _leg_ref.get_texts()
+            leglines = _leg_ref.get_lines()
+            for i, txt in enumerate(texts):
+                # hit-test against the text label bounding box
+                hit, _ = txt.contains(event)
+                # also accept clicks on the short sample line to the left
+                if not hit and i < len(leglines):
+                    hit, _ = leglines[i].contains(event)
+                if hit and i < len(_all_orig):
+                    orig    = _all_orig[i]
+                    visible = not orig.get_visible()
+                    orig.set_visible(visible)
+                    if i < len(leglines):
+                        leglines[i].set_alpha(1.0 if visible else 0.25)
+                    txt.set_alpha(1.0 if visible else 0.35)
+                    self.canvas.draw_idle()
+                    return
 
-        # Disconnect previous handler before registering a new one
         if self._pick_cid is not None:
             self.fig.canvas.mpl_disconnect(self._pick_cid)
-        self._pick_cid = self.fig.canvas.mpl_connect("pick_event", on_legend_pick)
+        self._pick_cid = self.fig.canvas.mpl_connect(
+            "button_press_event", on_legend_click
+        )
 
         # ── mplcursors: hover tooltip on J-V lines only ───────────────────────
         if self.cursor is not None:
