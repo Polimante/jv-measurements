@@ -48,6 +48,7 @@ class JVMeasurementApp:
         self.root            = root
         self.input_widgets   = []
         self.session_data    = []
+        self._pick_cid       = None   # mpl pick_event connection id
         # Persistent instrument state — set by open_instrument_dialog(),
         # cleared by disconnect().  run_measurement() uses self.instrument
         # directly with no reconnect overhead.
@@ -273,12 +274,6 @@ class JVMeasurementApp:
                                state=DISABLED)
         self.stop_btn.pack(side=LEFT, padx=5)
 
-        self.plot_btn = Button(btn_frame, text="\U0001f4ca Open Interactive Plot",
-                               command=self.open_interactive_plot,
-                               bg="#1976D2", fg="white", width=22,
-                               state=DISABLED)
-        self.plot_btn.pack(side=LEFT, padx=5)
-
         # ── Measurement Log ───────────────────────────────────────────────────
         log_frame = LabelFrame(control_frame, text="Measurement Log",
                                padx=5, pady=5)
@@ -476,182 +471,9 @@ class JVMeasurementApp:
         ):
             return
         self.session_data.clear()
-        self.plot_btn.config(state=DISABLED)
         self.draw_placeholder_plot()
         self.status_var.set("Session data cleared.")
 
-    def open_interactive_plot(self):
-        try:
-            import plotly.graph_objects as go
-        except ImportError:
-            messagebox.showerror(
-                "Missing dependency",
-                "plotly is not installed.\nRun: pip install plotly"
-            )
-            return
-
-        if not self.session_data:
-            return
-
-        fig = go.Figure()
-
-        for entry in self.session_data:
-            col   = entry["color"]
-            name  = entry["sample_name"]
-            v_f   = entry["v_fwd"]
-            j_f   = entry["j_fwd"]
-            v_r   = entry["v_rev"]
-            j_r   = entry["j_rev"]
-            p_f   = v_f * j_f
-            p_r   = v_r * j_r
-
-            marker_fwd = dict(symbol="circle", size=6,
-                              color=col, line=dict(color=col, width=1))
-            marker_rev = dict(symbol="circle", size=6,
-                              color=col, line=dict(color=col, width=1))
-
-            jv_hover = (
-                "<b>V:</b> %{x:.3f} V<br>"
-                "<b>J:</b> %{y:.3f} mA/cm\u00b2"
-                "<extra>%{fullData.name}</extra>"
-            )
-            pw_hover = (
-                "<b>V:</b> %{x:.3f} V<br>"
-                "<b>P:</b> %{y:.3f} mW/cm\u00b2"
-                "<extra>%{fullData.name}</extra>"
-            )
-
-            # Forward J-V
-            fig.add_trace(go.Scatter(
-                x=v_f, y=j_f,
-                mode="lines+markers",
-                name=f"{name} \u2014 Fwd J-V",
-                line=dict(color=col, dash="solid", width=2),
-                marker=marker_fwd,
-                hovertemplate=jv_hover,
-                yaxis="y1",
-            ))
-            # Reverse J-V
-            fig.add_trace(go.Scatter(
-                x=v_r, y=j_r,
-                mode="lines+markers",
-                name=f"{name} \u2014 Rev J-V",
-                line=dict(color=col, dash="dash", width=2),
-                marker=marker_rev,
-                hovertemplate=jv_hover,
-                yaxis="y1",
-            ))
-            # Forward Power
-            fig.add_trace(go.Scatter(
-                x=v_f, y=p_f,
-                mode="lines+markers",
-                name=f"{name} \u2014 Fwd P",
-                line=dict(color=col, dash="solid", width=1.5),
-                marker=dict(symbol="circle", size=5,
-                            color=col, line=dict(color=col, width=1)),
-                hovertemplate=pw_hover,
-                yaxis="y2",
-                opacity=0.65,
-            ))
-            # Reverse Power
-            fig.add_trace(go.Scatter(
-                x=v_r, y=p_r,
-                mode="lines+markers",
-                name=f"{name} \u2014 Rev P",
-                line=dict(color=col, dash="dash", width=1.5),
-                marker=dict(symbol="circle", size=5,
-                            color=col, line=dict(color=col, width=1)),
-                hovertemplate=pw_hover,
-                yaxis="y2",
-                opacity=0.65,
-            ))
-
-        last = self.session_data[-1]
-        annotation_text = (
-            f"<b>Last: {last['sample_name']}</b><br>"
-            f"Illumination: {last['illumination']:.1f} mW/cm\u00b2<br>"
-            f"<b>Reverse scan:</b><br>"
-            f"\u00a0\u00a0Voc: {last['Voc_rev']:.3f} V<br>"
-            f"\u00a0\u00a0Jsc: {last['Jsc_rev']:.3f} mA/cm\u00b2<br>"
-            f"\u00a0\u00a0FF: {last['FF_rev']:.1f} %<br>"
-            f"\u00a0\u00a0PCE: {last['PCE_rev']:.2f} %<br>"
-            f"<b>HI: {last['HI']:+.1f} %</b>"
-        )
-
-        fig.add_annotation(
-            xref="paper", yref="paper",
-            x=0.98, y=0.98,
-            xanchor="right", yanchor="top",
-            text=annotation_text,
-            showarrow=False,
-            font=dict(size=11, family="Arial"),
-            bgcolor="rgba(255,255,255,0.92)",
-            bordercolor="#BDBDBD",
-            borderwidth=1,
-            borderpad=8,
-            align="left",
-        )
-
-        fig.update_layout(
-            title=dict(
-                text="J-V Characteristics \u2014 Session Overview",
-                font=dict(size=16, family="Arial"),
-            ),
-            xaxis=dict(
-                title="Voltage (V)",
-                showgrid=True,
-                gridcolor="#E0E0E0",
-                gridwidth=1,
-                zeroline=True,
-                zerolinecolor="#BDBDBD",
-                zerolinewidth=1.5,
-                ticks="outside",
-                mirror=True,
-                showline=True,
-                linecolor="#424242",
-            ),
-            yaxis=dict(
-                title="Current Density (mA/cm\u00b2)",
-                showgrid=True,
-                gridcolor="#E0E0E0",
-                gridwidth=1,
-                ticks="outside",
-                mirror=False,
-                showline=True,
-                linecolor="#424242",
-            ),
-            yaxis2=dict(
-                title="Power Density (mW/cm\u00b2)",
-                overlaying="y",
-                side="right",
-                showgrid=False,
-                ticks="outside",
-                showline=True,
-                linecolor="#424242",
-            ),
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            legend=dict(
-                bgcolor="rgba(255,255,255,0.9)",
-                bordercolor="#E0E0E0",
-                borderwidth=1,
-                font=dict(size=11),
-                itemclick="toggle",
-                itemdoubleclick="toggleothers",
-            ),
-            hovermode="closest",
-            font=dict(family="Arial, sans-serif", size=12, color="#212121"),
-            margin=dict(l=70, r=80, t=60, b=60),
-        )
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".html", delete=False,
-            prefix="jv_plot_", encoding="utf-8"
-        ) as f:
-            fig.write_html(f.name, include_plotlyjs="cdn")
-            temp_path = f.name
-
-        webbrowser.open(f"file:///{os.path.abspath(temp_path).replace(chr(92), '/')}")
 
     # ── GUI helpers ───────────────────────────────────────────────────────────
 
@@ -860,14 +682,11 @@ class JVMeasurementApp:
             "HI": HI,
             "color": color,
         })
-        self.plot_btn.config(state=NORMAL)
-
         pb = (f"Pre-bias: {self.prebias_voltage_var.get():.2f} V "
               f"for {self.prebias_duration_var.get():.1f} s\n"
               if self.prebias_enabled_var.get() else "")
         ls = (f"Light soaking: {self.light_soaking_duration_var.get():.0f} s\n"
               if self.light_soaking_var.get() else "")
-        n = len(self.session_data)
         self.add_to_log(
             f"Sample: {self.sample_name_var.get()}\n"
             f"Instrument: {self.instrument_idn or 'unknown'}\n"
@@ -885,8 +704,6 @@ class JVMeasurementApp:
             f"  FF:   {FF_r:.2f} %\n  PCE:  {PCE_r:.2f} %\n"
             f"  Rs:   {Rs_r:.2f} \u03a9\u00b7cm\u00b2\n  Rsh:  {Rsh_r:.2f} \u03a9\u00b7cm\u00b2\n\n"
             f"Hysteresis Index (HI): {HI:.2f} %\n"
-            f"Session total: {n} measurement(s) \u2014 "
-            f"click \"\U0001f4ca Open Interactive Plot\" to view all\n"
         )
 
     # ── Measurement thread ────────────────────────────────────────────────────
@@ -1089,6 +906,8 @@ class JVMeasurementApp:
             self.ax.set_ylim(0, 30)
             self.ax2.set_ylim(0, 30)
 
+        self.ax.set_xlim(left=0)   # X axis always starts at 0 V
+
         all_lines   = []   # every line object (for mplcursors + legend map)
         jv_lines    = []   # J-V lines only (hover attached here)
         legend_lines = []  # lines that go into the legend
@@ -1206,17 +1025,23 @@ class JVMeasurementApp:
             leg_line.set_pickradius(6)
             legend_line_map[leg_line] = orig_line
 
+        # Capture legend_line_map in the closure explicitly to avoid stale refs
+        _map = legend_line_map
+
         def on_legend_pick(event):
             leg_line = event.artist
-            if leg_line not in legend_line_map:
+            if leg_line not in _map:
                 return
-            orig_line = legend_line_map[leg_line]
+            orig_line = _map[leg_line]
             visible = not orig_line.get_visible()
             orig_line.set_visible(visible)
             leg_line.set_alpha(1.0 if visible else 0.25)
             self.canvas.draw_idle()
 
-        self.fig.canvas.mpl_connect("pick_event", on_legend_pick)
+        # Disconnect previous handler before registering a new one
+        if self._pick_cid is not None:
+            self.fig.canvas.mpl_disconnect(self._pick_cid)
+        self._pick_cid = self.fig.canvas.mpl_connect("pick_event", on_legend_pick)
 
         # ── mplcursors: hover tooltip on J-V lines only ───────────────────────
         if self.cursor is not None:
