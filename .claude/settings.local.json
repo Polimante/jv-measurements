@@ -14,7 +14,9 @@
       "Bash(python -m py_compile app/measurement/analysis.py app/gui/main_window.py app/io/exporter.py)",
       "Bash(python -m py_compile app/gui/main_window.py)",
       "Bash(python -m py_compile app/gui/main_window.py app/io/exporter.py)",
-      "Bash(python -m py_compile app/measurement/analysis.py app/gui/main_window.py)"
+      "Bash(python -m py_compile app/measurement/analysis.py app/gui/main_window.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/gui/main_window.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c ':*)"
     ]
   }
 }
