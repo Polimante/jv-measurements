@@ -40,6 +40,7 @@ from app.instrument.keithley import (
     init_instrument, apply_prebias, apply_light_soaking, measure_scan,
 )
 from app.io.exporter import save_data, save_dark_jv_data
+from app.gui.data_viewer import DataViewerWindow
 
 
 class JVMeasurementApp:
@@ -323,6 +324,9 @@ class JVMeasurementApp:
         file_menu.add_command(label="Export Measurement Log\u2026",
                               command=self._export_log)
         file_menu.add_separator()
+        file_menu.add_command(label="Open Data File\u2026",
+                              command=self._open_data_viewer)
+        file_menu.add_separator()
         file_menu.add_command(label="Clear Session Data",
                               command=self._clear_session_data)
         file_menu.add_separator()
@@ -433,6 +437,14 @@ class JVMeasurementApp:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
             messagebox.showinfo("Export Log", f"Log saved to:\n{path}")
+
+    def _open_data_viewer(self):
+        path = filedialog.askopenfilename(
+            title="Open J-V Data File",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+        )
+        if path:
+            DataViewerWindow(self.root, path)
 
     def _on_exit(self):
         if messagebox.askokcancel("Exit", "Close the application?"):
