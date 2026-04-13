@@ -138,8 +138,13 @@ def load_jv_file(filepath):
     """
     Open an xlsx file and return a parsed metadata dict.
     Raises ValueError for unrecognised formats.
+
+    Note: read_only=True is intentionally NOT used here — mixing ws.cell()
+    (random access for the params row) with iter_rows() in read-only mode
+    causes openpyxl to return None values due to XML stream positioning.
+    Files are small (<100 KB) so full load is fine.
     """
-    wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(filepath, data_only=True)
     try:
         if _ILLUMINATED_SHEET in wb.sheetnames:
             return _read_illuminated(wb[_ILLUMINATED_SHEET])
@@ -417,8 +422,22 @@ class DataViewerWindow:
     def _draw_plot(self, data, filename):
         import mplcursors
 
-        self._ax.clear()
-        self._ax2.clear()
+        # Disconnect previous callbacks before destroying axes
+        if self._pick_cid is not None:
+            self._fig.canvas.mpl_disconnect(self._pick_cid)
+            self._pick_cid = None
+
+        if self._cursor is not None:
+            try:
+                self._cursor.remove()
+            except Exception:
+                pass
+            self._cursor = None
+
+        # clf() + recreate avoids broken twinx state after clear()
+        self._fig.clf()
+        self._ax  = self._fig.add_subplot(111)
+        self._ax2 = self._ax.twinx()
         self._ax2.yaxis.set_label_position("right")
 
         v_f = data["v_f"]
@@ -556,19 +575,11 @@ class DataViewerWindow:
                     self._fig_canvas.draw_idle()
                     return
 
-        if self._pick_cid is not None:
-            self._fig.canvas.mpl_disconnect(self._pick_cid)
         self._pick_cid = self._fig.canvas.mpl_connect(
             "button_press_event", on_legend_click
         )
 
         # ── mplcursors hover tooltips ─────────────────────────────────────
-        if self._cursor is not None:
-            try:
-                self._cursor.remove()
-            except Exception:
-                pass
-
         self._cursor = mplcursors.cursor(jv_lines, hover=True, highlight=True)
 
         @self._cursor.connect("add")
