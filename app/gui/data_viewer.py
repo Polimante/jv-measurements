@@ -542,6 +542,10 @@ class DataViewerWindow:
         self._ax.set_ylabel("Current Density (mA/cm\u00b2)", labelpad=8)
         title = os.path.splitext(filename)[0]
         self._ax.set_title(title, fontsize=12, fontweight="bold", pad=12)
+        self._ax.set_xlim(0, 1.2)
+        self._ax.set_ylim(-10, 30)
+        if data["type"] == "illuminated":
+            self._ax2.set_ylim(-10, 30)
         self._ax.grid(True)
 
         # Combined legend from both axes
