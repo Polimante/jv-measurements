@@ -9,7 +9,7 @@ from tkinter import (
     ttk, Menu, filedialog, Label, Entry, Button,
     StringVar, DoubleVar, Text, messagebox,
     Frame, LabelFrame, Checkbutton, BooleanVar,
-    LEFT, RIGHT, BOTH, X, W, END, DISABLED, NORMAL,
+    LEFT, RIGHT, BOTH, X, Y, W, END, DISABLED, NORMAL,
 )
 from datetime import datetime
 import pyvisa
@@ -84,21 +84,23 @@ class JVMeasurementApp:
               bg="#2c3e50", fg="#ecf0f1",
               font=("Arial", 9, "bold")).pack(side=LEFT, padx=12, pady=6)
 
-        # ── Body layout: fixed-width left panel + expanding plot ──────────────
-        body = Frame(self.root)
-        body.pack(fill=BOTH, expand=True)
+        # ── Body layout: resizable PanedWindow ───────────────────────────────
+        paned = ttk.PanedWindow(self.root, orient="horizontal")
+        paned.pack(fill=BOTH, expand=True)
 
-        # Left panel — fixed width so the plot always gets maximum space
-        left = Frame(body, width=400, bg="#ececec")
-        left.pack(side=LEFT, fill=Y, expand=False)
-        left.pack_propagate(False)
+        left = Frame(paned, bg="#ececec")
+        paned.add(left, weight=0)
 
-        # Plot panel — fills the rest
-        plot_frame = Frame(body, bg="#ffffff")
-        plot_frame.pack(side=RIGHT, fill=BOTH, expand=True)
+        plot_frame = Frame(paned, bg="#ffffff")
+        paned.add(plot_frame, weight=1)
 
-        # Thin separator line between panel and plot
-        Frame(body, width=1, bg="#cccccc").pack(side=LEFT, fill=Y)
+        # Set initial sash position once the paned window has real dimensions
+        _sash_set = [False]
+        def _on_paned_configure(event):
+            if not _sash_set[0] and paned.winfo_width() > 10:
+                paned.sashpos(0, 480)
+                _sash_set[0] = True
+        paned.bind("<Configure>", _on_paned_configure)
 
         # ── Settings notebook (3 tabs) ────────────────────────────────────────
         style = ttk.Style()
