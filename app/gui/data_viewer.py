@@ -72,6 +72,7 @@ def _read_illuminated(ws):
         "delay_ms":   p(21),  "nplc": p(22),  "four_wire": p(23),
         "prebias_v":  p(24),  "prebias_t": p(25),
         "instrument": p(26),
+        "scan_rate":  p(27),   # AA — absent in files saved before this feature
     }
 
     v_f, j_f, p_f = [], [], []
@@ -364,6 +365,7 @@ class DataViewerWindow:
         fw = data.get("four_wire")
         fw_str = ("ON" if int(fw) else "OFF") if fw is not None else "\u2014"
         row(si, "4-Wire:", fw_str)
+        row(si, "Scan rate:", _fmt(data.get("scan_rate"), "%.1f mV/s"))
         idn = str(data.get("instrument") or "\u2014")
         row(si, "Instrument:", (idn[:34] + "\u2026") if len(idn) > 34 else idn)
 

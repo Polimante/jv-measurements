@@ -13,6 +13,7 @@ def save_data(
     cell_area, delay_ms, nplc, four_wire,
     prebias_enabled, prebias_voltage, prebias_duration,
     instrument_idn,
+    scan_rate=None,
 ):
     p_f = v_f * j_f
     p_r = v_r * j_r
@@ -43,13 +44,20 @@ def save_data(
         "Hysteresis Index HI (%)",
         "Delay per point (ms)", "NPLC", "4-Wire Sensing",
         "Pre-bias Voltage (V)", "Pre-bias Duration (s)",
-        "Instrument IDN",
+        "Instrument IDN", "Scan Rate (mV/s)",
     ]
     for c, h in enumerate(headers):
         ws.write(0, c, h, hf)
 
     pb_v = prebias_voltage if prebias_enabled else 0.0
     pb_t = prebias_duration if prebias_enabled else 0.0
+
+    # Calculate scan rate if not provided explicitly
+    if scan_rate is None:
+        _nplc_ms        = nplc * (1000.0 / 60.0)
+        _time_per_point = (delay_ms + _nplc_ms + 20.0) / 1000.0
+        _step_mv        = abs(v_f[-1] - v_f[0]) / max(len(v_f) - 1, 1) * 1000.0
+        scan_rate = _step_mv / _time_per_point if _time_per_point > 0 else 0.0
 
     for col, val in enumerate([
         None, None, None, None, None, None,          # A-F: data columns
@@ -62,6 +70,7 @@ def save_data(
         1 if four_wire else 0,                       # W
         pb_v, pb_t,                                  # X, Y
         instrument_idn,                              # Z
+        scan_rate,                                   # AA
     ]):
         if val is not None:
             ws.write(1, col, val, pf)

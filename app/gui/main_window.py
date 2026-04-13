@@ -60,6 +60,10 @@ class JVMeasurementApp:
         self.setup_gui()
         self.detector_power_var.trace("w", self.update_illumination)
         self.detector_area_var.trace("w",  self.update_illumination)
+        self.step_voltage_var.trace("w",   self.update_scan_rate)
+        self.delay_ms_var.trace("w",       self.update_scan_rate)
+        self.nplc_var.trace("w",           self.update_scan_rate)
+        self.update_scan_rate()
 
     # ── GUI construction ──────────────────────────────────────────────────────
 
@@ -163,6 +167,21 @@ class JVMeasurementApp:
         ToolTip(cb4w,
                 "Enables :SYST:RSEN ON \u2014 eliminates cable resistance from the\n"
                 "measurement. Requires Force HI/LO + Sense HI/LO connections.")
+
+        Label(inst_frame, text="Scan rate (mV/s):").grid(
+            row=3, column=0, sticky=W, padx=5, pady=2)
+        self.scan_rate_var = StringVar(value="\u2014")
+        scan_rate_lbl = Label(inst_frame, textvariable=self.scan_rate_var)
+        scan_rate_lbl.grid(row=3, column=1, sticky=W, padx=5, pady=2)
+        ToolTip(scan_rate_lbl,
+                "Effective voltage sweep rate, calculated automatically from:\n"
+                "  Scan rate (mV/s) = Step Voltage (mV) \u00f7 Time per point (s)\n\n"
+                "Time per point = Delay + NPLC \u00d7 16.7 ms + 20 ms (fixed margin)\n\n"
+                "For perovskite solar cells, typical values in the literature:\n"
+                "  Fast scan:   50\u2013200 mV/s  (maximises hysteresis)\n"
+                "  Standard:    10\u2013100 mV/s  (good balance of speed and accuracy)\n"
+                "  Slow scan:   1\u201310 mV/s    (approaches quasi-steady-state)\n\n"
+                "Always report this value alongside Step Voltage and Delay when publishing.")
 
         # ── Pre-bias Conditioning ─────────────────────────────────────────────
         prebias_frame = LabelFrame(control_frame, text="Pre-bias Conditioning",
@@ -519,6 +538,19 @@ class JVMeasurementApp:
         except Exception:
             self.illumination_var.set("Error")
 
+    def update_scan_rate(self, *args):
+        try:
+            step_mv        = self.step_voltage_var.get() * 1000.0
+            delay_ms       = self.delay_ms_var.get()
+            nplc_ms        = self.nplc_var.get() * (1000.0 / 60.0)
+            time_per_point = (delay_ms + nplc_ms + 20.0) / 1000.0
+            if time_per_point <= 0 or step_mv <= 0:
+                self.scan_rate_var.set("\u2014")
+                return
+            self.scan_rate_var.set(f"{step_mv / time_per_point:.1f}")
+        except Exception:
+            self.scan_rate_var.set("\u2014")
+
     def validate_inputs(self):
         try:
             if not self.sample_name_var.get():
@@ -868,6 +900,7 @@ class JVMeasurementApp:
                 self.prebias_voltage_var.get(),
                 self.prebias_duration_var.get(),
                 self.instrument_idn or "",
+                scan_rate=float(self.scan_rate_var.get()) if self.scan_rate_var.get() != "\u2014" else None,
             )
 
             self.status_var.set("Measurement complete.")
