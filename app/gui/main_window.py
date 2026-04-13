@@ -69,111 +69,164 @@ class JVMeasurementApp:
 
     def setup_gui(self):
         self.root.title(APP_NAME)
-        self.root.geometry("1200x880")
+        self.root.state("zoomed")          # maximised on launch (Windows)
+        self.root.minsize(1100, 640)
 
         self._build_menubar()
 
-        banner = Frame(self.root, bg="#2c3e50", height=28)
+        # ── Instrument status banner ──────────────────────────────────────────
+        banner = Frame(self.root, bg="#2c3e50", height=30)
         banner.pack(fill=X, side="top")
+        banner.pack_propagate(False)
         self.instrument_label_var = StringVar(
             value="\u26a0  No instrument connected \u2014 use Instrument \u2192 Connect")
         Label(banner, textvariable=self.instrument_label_var,
               bg="#2c3e50", fg="#ecf0f1",
-              font=("Arial", 9, "bold")).pack(side=LEFT, padx=10, pady=4)
+              font=("Arial", 9, "bold")).pack(side=LEFT, padx=12, pady=6)
 
+        # ── Body layout: fixed-width left panel + expanding plot ──────────────
         body = Frame(self.root)
         body.pack(fill=BOTH, expand=True)
 
-        control_frame = LabelFrame(body, text="Control Panel", padx=10, pady=10)
-        control_frame.pack(side=LEFT, fill=BOTH, expand=True)
+        # Left panel — fixed width so the plot always gets maximum space
+        left = Frame(body, width=400, bg="#ececec")
+        left.pack(side=LEFT, fill=Y, expand=False)
+        left.pack_propagate(False)
 
-        plot_frame = LabelFrame(body, text="J-V Curve")
+        # Plot panel — fills the rest
+        plot_frame = Frame(body, bg="#ffffff")
         plot_frame.pack(side=RIGHT, fill=BOTH, expand=True)
 
-        # ── Sample Information ────────────────────────────────────────────────
-        sample_frame = LabelFrame(control_frame, text="Sample Information",
-                                  padx=5, pady=5)
-        sample_frame.pack(fill=X, padx=5, pady=5)
+        # Thin separator line between panel and plot
+        Frame(body, width=1, bg="#cccccc").pack(side=LEFT, fill=Y)
 
-        Label(sample_frame, text="Sample Name:").grid(
-            row=0, column=0, sticky=W, padx=5, pady=2)
+        # ── Settings notebook (3 tabs) ────────────────────────────────────────
+        style = ttk.Style()
+        style.configure("TNotebook.Tab", padding=[10, 4], font=("Arial", 9))
+
+        nb = ttk.Notebook(left)
+        nb.pack(fill=X, padx=6, pady=(6, 4))
+
+        # ─── Tab 1: Scan ──────────────────────────────────────────────────────
+        tab_scan = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_scan, text="  Scan  ")
+
+        # Sample Information
+        sf = LabelFrame(tab_scan, text="Sample Information", padx=6, pady=4)
+        sf.pack(fill=X, pady=(0, 6))
+
+        Label(sf, text="Sample Name:").grid(
+            row=0, column=0, sticky=W, padx=4, pady=3)
         self.sample_name_var = StringVar()
-        sample_entry = Entry(sample_frame, textvariable=self.sample_name_var,
-                             width=25)
-        sample_entry.grid(row=0, column=1, padx=5, pady=2)
+        sample_entry = Entry(sf, textvariable=self.sample_name_var, width=22)
+        sample_entry.grid(row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
         self.input_widgets.append(sample_entry)
         ToolTip(sample_entry, "Enter sample identifier (e.g., D1C1)")
 
-        Label(sample_frame, text="Export Folder:").grid(
-            row=1, column=0, sticky=W, padx=10, pady=2)
+        Label(sf, text="Export Folder:").grid(
+            row=1, column=0, sticky=W, padx=4, pady=3)
         self.export_folder_var = StringVar()
-        self.export_entry = Entry(sample_frame,
-                                  textvariable=self.export_folder_var, width=25)
-        self.export_entry.grid(row=1, column=1, padx=5, pady=2)
-        Button(sample_frame, text="Browse",
-               command=self.browse_folder).grid(row=1, column=2, padx=5)
+        self.export_entry = Entry(sf, textvariable=self.export_folder_var, width=18)
+        self.export_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Button(sf, text="Browse\u2026", command=self.browse_folder,
+               font=("Arial", 8), pady=1
+               ).grid(row=1, column=2, padx=(2, 4), pady=3)
         self.input_widgets.append(self.export_entry)
         ToolTip(self.export_entry, "Select output directory for measurement data")
 
-        # ── Measurement Parameters ────────────────────────────────────────────
-        params_frame = LabelFrame(control_frame, text="Measurement Parameters",
-                                  padx=5, pady=5)
-        params_frame.pack(fill=X, padx=5, pady=5)
+        # Scan Parameters
+        pf = LabelFrame(tab_scan, text="Scan Parameters", padx=6, pady=4)
+        pf.pack(fill=X, pady=(0, 6))
 
-        for row, (label, name, default) in enumerate([
-            ("Start Voltage (V):", "start_voltage", -0.1),
-            ("End Voltage (V):",   "end_voltage",    1.05),
-            ("Step Voltage (V):",  "step_voltage",   0.025),
-            ("Cell Area (cm\u00b2):",  "cell_area",  0.07),
+        for row, (label, name, default, unit) in enumerate([
+            ("Start Voltage:", "start_voltage", -0.1,  "V"),
+            ("End Voltage:",   "end_voltage",    1.05,  "V"),
+            ("Step Voltage:",  "step_voltage",   0.025, "V"),
+            ("Cell Area:",     "cell_area",      0.07,  "cm\u00b2"),
         ]):
-            Label(params_frame, text=label).grid(
-                row=row, column=0, sticky=W, padx=5, pady=2)
+            Label(pf, text=label).grid(row=row, column=0, sticky=W, padx=4, pady=3)
             var   = DoubleVar(value=default)
-            entry = Entry(params_frame, textvariable=var, width=25)
-            entry.grid(row=row, column=1, padx=5, pady=2)
+            entry = Entry(pf, textvariable=var, width=10)
+            entry.grid(row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
             setattr(self, f"{name}_var", var)
             self.input_widgets.append(entry)
             ToolTip(entry, self._tooltip(name))
 
-        # ── Instrument Settings ───────────────────────────────────────────────
-        inst_frame = LabelFrame(control_frame, text="Instrument Settings",
-                                padx=5, pady=5)
-        inst_frame.pack(fill=X, padx=5, pady=5)
+        # Illumination Settings
+        ilf = LabelFrame(tab_scan, text="Illumination", padx=6, pady=4)
+        ilf.pack(fill=X, pady=(0, 4))
 
-        Label(inst_frame, text="Delay per point (ms):").grid(
-            row=0, column=0, sticky=W, padx=5, pady=2)
+        Label(ilf, text="Detector Power:").grid(
+            row=0, column=0, sticky=W, padx=4, pady=3)
+        self.detector_power_var = DoubleVar(value=0)
+        pe = Entry(ilf, textvariable=self.detector_power_var, width=10)
+        pe.grid(row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW", fg="#666666").grid(row=0, column=2, sticky=W)
+        self.input_widgets.append(pe)
+
+        Label(ilf, text="Detector Area:").grid(
+            row=1, column=0, sticky=W, padx=4, pady=3)
+        self.detector_area_var = DoubleVar(value=1.13)
+        ae = Entry(ilf, textvariable=self.detector_area_var, width=10)
+        ae.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="cm\u00b2", fg="#666666").grid(row=1, column=2, sticky=W)
+        self.input_widgets.append(ae)
+
+        Label(ilf, text="Illumination:").grid(
+            row=2, column=0, sticky=W, padx=4, pady=3)
+        self.illumination_var = StringVar(value="0.00")
+        Label(ilf, textvariable=self.illumination_var,
+              font=("Arial", 9, "bold"), fg="#1565C0").grid(
+            row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW/cm\u00b2", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        # ─── Tab 2: Instrument ────────────────────────────────────────────────
+        tab_inst = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_inst, text="  Instrument  ")
+
+        inf = LabelFrame(tab_inst, text="Keithley 2400 Settings", padx=6, pady=4)
+        inf.pack(fill=X, pady=(0, 6))
+
+        Label(inf, text="Delay per point:").grid(
+            row=0, column=0, sticky=W, padx=4, pady=4)
         self.delay_ms_var = DoubleVar(value=100.0)
-        delay_entry = Entry(inst_frame, textvariable=self.delay_ms_var, width=10)
-        delay_entry.grid(row=0, column=1, sticky=W, padx=5, pady=2)
+        delay_entry = Entry(inf, textvariable=self.delay_ms_var, width=10)
+        delay_entry.grid(row=0, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="ms", fg="#666666").grid(row=0, column=2, sticky=W)
         self.input_widgets.append(delay_entry)
         ToolTip(delay_entry,
                 "Wait time (ms) between applying each voltage step and reading current.\n"
                 "Perovskites typically need 100\u2013500 ms. Corresponds to :SOUR:DEL.")
 
-        Label(inst_frame, text="NPLC:").grid(
-            row=1, column=0, sticky=W, padx=5, pady=2)
+        Label(inf, text="NPLC:").grid(
+            row=1, column=0, sticky=W, padx=4, pady=4)
         self.nplc_var = DoubleVar(value=1.0)
-        nplc_entry = Entry(inst_frame, textvariable=self.nplc_var, width=10)
-        nplc_entry.grid(row=1, column=1, sticky=W, padx=5, pady=2)
+        nplc_entry = Entry(inf, textvariable=self.nplc_var, width=10)
+        nplc_entry.grid(row=1, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="(0.01\u201325)", fg="#666666").grid(row=1, column=2, sticky=W)
         self.input_widgets.append(nplc_entry)
         ToolTip(nplc_entry,
                 "Number of Power Line Cycles per reading (Brazil: 60 Hz \u2192 1 NPLC \u2248 16.7 ms).\n"
                 "Higher = less noise, slower. Range: 0.01 \u2013 25.")
 
         self.four_wire_var = BooleanVar(value=False)
-        cb4w = Checkbutton(inst_frame, text="4-Wire (Kelvin) sensing",
+        cb4w = Checkbutton(inf, text="4-Wire (Kelvin) sensing",
                            variable=self.four_wire_var)
-        cb4w.grid(row=2, column=0, columnspan=2, sticky=W, padx=5, pady=2)
+        cb4w.grid(row=2, column=0, columnspan=3, sticky=W, padx=4, pady=4)
         ToolTip(cb4w,
                 "Enables :SYST:RSEN ON \u2014 eliminates cable resistance from the\n"
                 "measurement. Requires Force HI/LO + Sense HI/LO connections.")
 
-        Label(inst_frame, text="Scan rate (mV/s):").grid(
-            row=3, column=0, sticky=W, padx=5, pady=2)
+        srf = LabelFrame(tab_inst, text="Calculated Scan Rate", padx=6, pady=4)
+        srf.pack(fill=X, pady=(0, 4))
+
         self.scan_rate_var = StringVar(value="\u2014")
-        scan_rate_lbl = Label(inst_frame, textvariable=self.scan_rate_var)
-        scan_rate_lbl.grid(row=3, column=1, sticky=W, padx=5, pady=2)
-        ToolTip(scan_rate_lbl,
+        sr_lbl = Label(srf, textvariable=self.scan_rate_var,
+                       font=("Arial", 11, "bold"), fg="#1565C0")
+        sr_lbl.grid(row=0, column=0, sticky=W, padx=4, pady=4)
+        Label(srf, text="mV/s", fg="#666666").grid(row=0, column=1, sticky=W)
+        ToolTip(sr_lbl,
                 "Effective voltage sweep rate, calculated automatically from:\n"
                 "  Scan rate (mV/s) = Step Voltage (mV) \u00f7 Time per point (s)\n\n"
                 "Time per point = Delay + NPLC \u00d7 16.7 ms + 20 ms (fixed margin)\n\n"
@@ -183,140 +236,128 @@ class JVMeasurementApp:
                 "  Slow scan:   1\u201310 mV/s    (approaches quasi-steady-state)\n\n"
                 "Always report this value alongside Step Voltage and Delay when publishing.")
 
-        # ── Pre-bias Conditioning ─────────────────────────────────────────────
-        prebias_frame = LabelFrame(control_frame, text="Pre-bias Conditioning",
-                                   padx=5, pady=5)
-        prebias_frame.pack(fill=X, padx=5, pady=5)
+        # ─── Tab 3: Conditioning ──────────────────────────────────────────────
+        tab_cond = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_cond, text="  Conditioning  ")
+
+        # Pre-bias
+        pbf = LabelFrame(tab_cond, text="Pre-bias Conditioning", padx=6, pady=4)
+        pbf.pack(fill=X, pady=(0, 6))
 
         self.prebias_enabled_var = BooleanVar(value=True)
-        Checkbutton(prebias_frame,
-                    text="Enable pre-bias before reverse scan",
+        Checkbutton(pbf, text="Enable pre-bias before reverse scan",
                     variable=self.prebias_enabled_var,
                     command=self._toggle_prebias_entries
-                    ).grid(row=0, column=0, columnspan=2, sticky=W, padx=5, pady=2)
+                    ).grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=2)
 
-        Label(prebias_frame, text="Pre-bias Voltage (V):").grid(
-            row=1, column=0, sticky=W, padx=5, pady=2)
+        Label(pbf, text="Voltage:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
         self.prebias_voltage_var = DoubleVar(value=1.2)
         self.prebias_voltage_entry = Entry(
-            prebias_frame, textvariable=self.prebias_voltage_var, width=10)
-        self.prebias_voltage_entry.grid(row=1, column=1, sticky=W, padx=5, pady=2)
+            pbf, textvariable=self.prebias_voltage_var, width=10)
+        self.prebias_voltage_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="V", fg="#666666").grid(row=1, column=2, sticky=W)
         self.input_widgets.append(self.prebias_voltage_entry)
 
-        Label(prebias_frame, text="Pre-bias Duration (s):").grid(
-            row=2, column=0, sticky=W, padx=5, pady=2)
+        Label(pbf, text="Duration:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
         self.prebias_duration_var = DoubleVar(value=2.0)
         self.prebias_duration_entry = Entry(
-            prebias_frame, textvariable=self.prebias_duration_var, width=10)
-        self.prebias_duration_entry.grid(row=2, column=1, sticky=W, padx=5, pady=2)
+            pbf, textvariable=self.prebias_duration_var, width=10)
+        self.prebias_duration_entry.grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="s", fg="#666666").grid(row=2, column=2, sticky=W)
         self.input_widgets.append(self.prebias_duration_entry)
 
-        # ── Illumination Settings ─────────────────────────────────────────────
-        illum_frame = LabelFrame(control_frame, text="Illumination Settings",
-                                 padx=5, pady=5)
-        illum_frame.pack(fill=X, padx=5, pady=5)
-
-        Label(illum_frame, text="Detector Power (mW):").grid(
-            row=0, column=0, sticky=W, padx=5, pady=2)
-        self.detector_power_var = DoubleVar(value=0)
-        pe = Entry(illum_frame, textvariable=self.detector_power_var, width=25)
-        pe.grid(row=0, column=1, padx=5, pady=2)
-        self.input_widgets.append(pe)
-
-        Label(illum_frame, text="Detector Area (cm\u00b2):").grid(
-            row=1, column=0, sticky=W, padx=5, pady=2)
-        self.detector_area_var = DoubleVar(value=1.13)
-        ae = Entry(illum_frame, textvariable=self.detector_area_var, width=25)
-        ae.grid(row=1, column=1, padx=5, pady=2)
-        self.input_widgets.append(ae)
-
-        Label(illum_frame, text="Illumination (mW/cm\u00b2):").grid(
-            row=2, column=0, sticky=W, padx=5, pady=2)
-        self.illumination_var = StringVar(value="0.00")
-        Label(illum_frame, textvariable=self.illumination_var).grid(
-            row=2, column=1, sticky=W, padx=5, pady=2)
-
-        # ── Dark J-V Measurement ──────────────────────────────────────────────
-        dark_frame = LabelFrame(control_frame, text="Dark J-V Measurement",
-                                padx=5, pady=5)
-        dark_frame.pack(fill=X, padx=5, pady=5)
+        # Dark J-V
+        dkf = LabelFrame(tab_cond, text="Dark J-V Measurement", padx=6, pady=4)
+        dkf.pack(fill=X, pady=(0, 6))
 
         self.dark_jv_var = BooleanVar(value=False)
-        dark_cb = Checkbutton(dark_frame,
+        dark_cb = Checkbutton(dkf,
                               text="Include Dark J-V before illuminated scan",
                               variable=self.dark_jv_var)
-        dark_cb.pack(anchor=W, padx=5, pady=2)
+        dark_cb.pack(anchor=W, padx=4, pady=4)
         ToolTip(dark_cb,
                 "If checked: measures forward + reverse J-V with the shutter CLOSED first,\n"
                 "saves [SAMPLE]_Dark_JV_[timestamp].xlsx, then prompts you to open the\n"
                 "shutter before the normal illuminated measurement.")
 
-        # ── Light Soaking ─────────────────────────────────────────────────────
-        ls_frame = LabelFrame(control_frame, text="Light Soaking",
-                              padx=5, pady=5)
-        ls_frame.pack(fill=X, padx=5, pady=5)
+        # Light Soaking
+        lsf = LabelFrame(tab_cond, text="Light Soaking", padx=6, pady=4)
+        lsf.pack(fill=X, pady=(0, 4))
 
         self.light_soaking_var = BooleanVar(value=False)
-        ls_cb = Checkbutton(ls_frame,
+        ls_cb = Checkbutton(lsf,
                             text="Enable light soaking before illuminated scan",
                             variable=self.light_soaking_var,
                             command=self._toggle_light_soaking_entry)
-        ls_cb.grid(row=0, column=0, columnspan=2, sticky=W, padx=5, pady=2)
+        ls_cb.grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=2)
         ToolTip(ls_cb,
                 "Holds the cell at open circuit under illumination for the set duration\n"
                 "before the J-V scan. Allows mobile ions to reach a stabilised state.\n"
                 "Recommended: 60 s (n-i-p) to 300 s (p-i-n). Default: 120 s.")
 
-        Label(ls_frame, text="Duration (s):").grid(
-            row=1, column=0, sticky=W, padx=5, pady=2)
+        Label(lsf, text="Duration:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
         self.light_soaking_duration_var = DoubleVar(value=120.0)
         self.light_soaking_entry = Entry(
-            ls_frame, textvariable=self.light_soaking_duration_var, width=10,
+            lsf, textvariable=self.light_soaking_duration_var, width=10,
             state=DISABLED)
-        self.light_soaking_entry.grid(row=1, column=1, sticky=W, padx=5, pady=2)
+        self.light_soaking_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(lsf, text="s", fg="#666666").grid(row=1, column=2, sticky=W)
         ToolTip(self.light_soaking_entry,
                 "Soaking time in seconds.\n"
                 "Literature: ~60 s for n-i-p TiO\u2082; 120\u2013300 s for p-i-n PEDOT:PSS.")
 
         # ── Control Buttons ───────────────────────────────────────────────────
-        btn_frame = Frame(control_frame)
-        btn_frame.pack(pady=10)
+        btn_frame = Frame(left, bg="#ececec")
+        btn_frame.pack(fill=X, padx=8, pady=6)
 
         self.start_btn = Button(btn_frame, text="Start Measurement",
                                 command=self.start_measurement,
-                                bg="#4CAF50", fg="white", width=15,
-                                state=DISABLED)
-        self.start_btn.pack(side=LEFT, padx=5)
+                                bg="#388E3C", fg="white",
+                                font=("Arial", 9, "bold"),
+                                width=16, pady=4, state=DISABLED)
+        self.start_btn.pack(side=LEFT, padx=(0, 6))
 
         self.stop_btn = Button(btn_frame, text="Stop Measurement",
                                command=self.stop_measurement,
-                               bg="#f44336", fg="white", width=15,
-                               state=DISABLED)
-        self.stop_btn.pack(side=LEFT, padx=5)
+                               bg="#C62828", fg="white",
+                               font=("Arial", 9, "bold"),
+                               width=16, pady=4, state=DISABLED)
+        self.stop_btn.pack(side=LEFT)
 
         # ── Measurement Log ───────────────────────────────────────────────────
-        log_frame = LabelFrame(control_frame, text="Measurement Log",
-                               padx=5, pady=5)
-        log_frame.pack(fill=BOTH, expand=True, padx=5, pady=5)
+        log_frame = LabelFrame(left, text="Measurement Log", padx=4, pady=4)
+        log_frame.pack(fill=BOTH, expand=True, padx=6, pady=(0, 0))
 
-        self.log_text = Text(log_frame, wrap="none", height=10, state=DISABLED)
-        vsb = ttk.Scrollbar(log_frame, orient="vertical",
-                            command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=vsb.set)
-        self.log_text.grid(row=0, column=0, sticky="nsew")
+        hsb = ttk.Scrollbar(log_frame, orient="horizontal")
+        vsb = ttk.Scrollbar(log_frame, orient="vertical")
+        self.log_text = Text(log_frame, wrap="none", state=DISABLED,
+                             font=("Consolas", 9),
+                             yscrollcommand=vsb.set,
+                             xscrollcommand=hsb.set)
+        vsb.config(command=self.log_text.yview)
+        hsb.config(command=self.log_text.xview)
         vsb.grid(row=0, column=1, sticky="ns")
-        self.log_text.tag_configure("header",     foreground="blue",
-                                    font=("Arial", 10, "bold"))
-        self.log_text.tag_configure("dark_label", foreground="#5d4e75",
-                                    font=("Arial", 10, "bold"))
-        self.log_text.tag_configure("separator",  foreground="gray")
+        hsb.grid(row=1, column=0, sticky="ew")
+        self.log_text.grid(row=0, column=0, sticky="nsew")
+        self.log_text.tag_configure("header",
+                                    foreground="#1565C0",
+                                    font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("dark_label",
+                                    foreground="#5d4e75",
+                                    font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("separator", foreground="#aaaaaa")
         log_frame.grid_rowconfigure(0, weight=1)
         log_frame.grid_columnconfigure(0, weight=1)
 
         # ── Status Bar ────────────────────────────────────────────────────────
+        status_bar = Frame(left, bg="#37474F", height=24)
+        status_bar.pack(fill=X, side="bottom")
+        status_bar.pack_propagate(False)
         self.status_var = StringVar(value="Ready \u2014 connect an instrument to begin.")
-        Label(control_frame, textvariable=self.status_var,
-              bd=1, relief="sunken", anchor=W).pack(side="bottom", fill=X)
+        Label(status_bar, textvariable=self.status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W,
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
 
         # ── Plot ──────────────────────────────────────────────────────────────
         self.fig, self.ax = plt.subplots(figsize=(8, 5))
