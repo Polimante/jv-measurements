@@ -35,12 +35,14 @@ class MPPTracker:
         self.callbacks  = callbacks
         self.stop_event = stop_event
 
-        self.cycles         = []
-        self.spo_time       = []
-        self.spo_j          = []
-        self.spo_pce        = []
-        self.spo_cycle_idx  = []
-        self.t_start        = None
+        self.cycles           = []
+        self.spo_time         = []
+        self.spo_j            = []
+        self.spo_pce          = []
+        self.spo_cycle_idx    = []
+        self.jv_scan_intervals = []   # list of (t_start_s, t_end_s) per cycle
+        self._in_spo_phase    = False
+        self.t_start          = None
 
     def run(self):
         """Main tracking loop — runs in a worker thread."""
@@ -59,6 +61,9 @@ class MPPTracker:
             self.callbacks["on_status"](f"Cycle {cycle_n} — J-V scan…")
             self.callbacks["on_log"](f"\n── Cycle {cycle_n} ──────────────────")
 
+            # ── Record J-V scan interval start ────────────────────────────
+            t_jv_start = time.time() - self.t_start
+
             # ── Optional forward scan ──────────────────────────────────────
             v_fwd, j_fwd = None, None
             if self.params["include_forward"]:
@@ -69,7 +74,7 @@ class MPPTracker:
                 if self.stop_event.is_set():
                     break
 
-            # ── Pre-bias ───────────────────────────────────────────────────
+            # ── Pre-bias (output stays ON throughout) ──────────────────────
             if self.params["prebias_enabled"]:
                 self.callbacks["on_status"](
                     f"Cycle {cycle_n} — Pre-bias "
@@ -87,6 +92,10 @@ class MPPTracker:
             if self.stop_event.is_set():
                 break
 
+            # ── Record J-V scan interval end ───────────────────────────────
+            t_jv_end = time.time() - self.t_start
+            self.jv_scan_intervals.append((t_jv_start, t_jv_end))
+
             # ── Extract parameters ─────────────────────────────────────────
             Voc, Jsc, FF, PCE = self._calc_jv_params(v_rev, j_rev)
             Vmpp, Jmpp        = self._find_mpp(v_rev, j_rev)
@@ -97,14 +106,15 @@ class MPPTracker:
                 HI = (PCE - PCE_fwd) / PCE * 100.0 if PCE else None
 
             cycle_data = {
-                "cycle":  cycle_n,
-                "time_s": time.time() - self.t_start,
-                "Vmpp":   Vmpp,  "Jmpp": Jmpp,
-                "Voc":    Voc,   "Jsc":  Jsc,
-                "FF":     FF,    "PCE":  PCE,
-                "HI":     HI,
-                "v_rev":  v_rev, "j_rev": j_rev,
-                "v_fwd":  v_fwd, "j_fwd": j_fwd,
+                "cycle":       cycle_n,
+                "time_s":      time.time() - self.t_start,
+                "Vmpp":        Vmpp,  "Jmpp": Jmpp,
+                "Voc":         Voc,   "Jsc":  Jsc,
+                "FF":          FF,    "PCE":  PCE,
+                "HI":          HI,
+                "v_rev":       v_rev, "j_rev": j_rev,
+                "v_fwd":       v_fwd, "j_fwd": j_fwd,
+                "jv_interval": (t_jv_start, t_jv_end),
             }
             self.cycles.append(cycle_data)
 
@@ -118,7 +128,7 @@ class MPPTracker:
             self.callbacks["on_log"](log_msg)
             self.callbacks["on_jv_update"](cycle_data)
 
-            # ── SPO phase ──────────────────────────────────────────────────
+            # ── SPO phase — output stays ON, voltage set to Vmpp ──────────
             self.callbacks["on_status"](
                 f"Cycle {cycle_n} — SPO at {Vmpp:.3f} V "
                 f"for {self.params['spo_duration_s']:.0f} s…")
@@ -207,6 +217,7 @@ class MPPTracker:
         j_window    = []
         t_window    = []
 
+        self._in_spo_phase = True
         while not self.stop_event.is_set():
             elapsed_spo = time.time() - t_spo_start
             if elapsed_spo >= spo_dur_s:
@@ -214,7 +225,7 @@ class MPPTracker:
 
             raw = self.inst.query(":READ?").split(",")
             j   = -(float(raw[1]) * 1000.0) / self.params["cell_area"]
-            pce = (Vmpp * j) / pin if pin > 0 else 0.0
+            pce = (Vmpp * j) / pin * 100.0 if pin > 0 else 0.0
 
             t_abs = time.time() - self.t_start
             self.spo_time.append(t_abs)
@@ -241,5 +252,8 @@ class MPPTracker:
                 )
                 stabilized = rate < threshold
 
-            self.callbacks["on_spo_update"](t_abs, j, pce, cycle_n, stabilized)
+            if self._in_spo_phase:
+                self.callbacks["on_spo_update"](t_abs, j, pce, cycle_n, stabilized)
             time.sleep(interval_s)
+
+        self._in_spo_phase = False

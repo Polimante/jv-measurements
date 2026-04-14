@@ -1800,11 +1800,12 @@ class JVMeasurementApp:
         self.mpp_fig.tight_layout()
         self.mpp_canvas.draw_idle()
 
-        self._mpp_pce_times  = []
-        self._mpp_pce_values = []
-        self._mpp_j_times    = []
-        self._mpp_j_values   = []
-        self._mpp_jv_cycles  = []
+        self._mpp_pce_times    = []
+        self._mpp_pce_values   = []
+        self._mpp_j_times      = []
+        self._mpp_j_values     = []
+        self._mpp_jv_cycles    = []
+        self._mpp_jv_intervals = []
 
     def _mpp_update_spo_plot(self, t_abs, j, pce, cycle_n, stabilized):
         t_min = t_abs / 60.0
@@ -1841,6 +1842,14 @@ class JVMeasurementApp:
     def _mpp_update_jv_plot(self, cycle_data):
         self._mpp_jv_cycles.append(cycle_data)
 
+        # Store J-V interval (in minutes) for shaded-band overlay
+        if "jv_interval" in cycle_data:
+            if not hasattr(self, "_mpp_jv_intervals"):
+                self._mpp_jv_intervals = []
+            t0, t1 = cycle_data["jv_interval"]
+            self._mpp_jv_intervals.append((t0 / 60.0, t1 / 60.0))
+
+        # ── J-V curves subplot ────────────────────────────────────────────────
         self.mpp_ax_jv.clear()
         for i, cyc in enumerate(self._mpp_jv_cycles):
             color = PLOT_COLORS[i % len(PLOT_COLORS)]
@@ -1862,6 +1871,19 @@ class JVMeasurementApp:
         self.mpp_ax_jv.set_title("J-V Curves (reverse scan, per cycle)")
         self.mpp_ax_jv.legend(fontsize=7, loc="upper right")
         self.mpp_ax_jv.grid(True)
+
+        # ── Add gray shaded bands to PCE and J plots ──────────────────────────
+        # Each band marks the time window where a J-V scan occurred.
+        # This replaces the confusing spikes with a clean visual gap marker.
+        if hasattr(self, "_mpp_jv_intervals") and self._mpp_jv_intervals:
+            for ax in [self.mpp_ax_pce, self.mpp_ax_j]:
+                # Remove previous axvspan patches before re-adding
+                ax.patches.clear()
+                for (t0_min, t1_min) in self._mpp_jv_intervals:
+                    ax.axvspan(t0_min, t1_min,
+                               color="#BDBDBD", alpha=0.35,
+                               label="_nolegend_")
+
         self.mpp_fig.tight_layout()
         self.mpp_canvas.draw_idle()
 
@@ -2020,7 +2042,7 @@ class JVMeasurementApp:
 
                 raw = inst.query(":READ?").split(",")
                 j   = -(float(raw[1]) * 1000.0) / area
-                pce = (v_applied * j) / pin if pin > 0 else 0.0
+                pce = (v_applied * j) / pin * 100.0 if pin > 0 else 0.0
 
                 times.append(elapsed)
                 j_vals.append(j)
