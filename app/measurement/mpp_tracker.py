@@ -46,7 +46,6 @@ class MPPTracker:
         self.spo_pce          = []   # continuous PCE (%)
         self.spo_cycle_idx    = []
         self.jv_scan_intervals = []  # list of (t_start_s, t_end_s) per cycle
-        self._in_spo_phase    = False
         self.t_start          = None
 
     def run(self):
@@ -140,11 +139,10 @@ class MPPTracker:
                 self.callbacks["on_log"](log_msg)
                 self.callbacks["on_jv_update"](cycle_data)
 
-                # ── SPO phase — output stays ON, voltage set to Vmpp ──────
+                # ── SPO phase — output stays ON, voltage transition inside _run_spo
                 self.callbacks["on_status"](
                     f"Cycle {cycle_n} — SPO at {Vmpp:.3f} V "
                     f"for {self.params['spo_duration_s']:.0f} s…")
-                self.inst.write(f":SOUR:VOLT {Vmpp:.4f}")
                 self._run_spo(cycle_n, Vmpp)
 
                 if self.stop_event.is_set():
@@ -226,7 +224,16 @@ class MPPTracker:
     # ── SPO phase ─────────────────────────────────────────────────────────────
 
     def _run_spo(self, cycle_n, Vmpp):
-        """Hold at Vmpp and record J(t) and PCE(t). Check stabilization."""
+        """Hold at Vmpp and record J(t) and PCE(t). Check stabilization.
+
+        Sets the voltage to Vmpp here (not in the caller) so the settling
+        sleep is always applied before the first reading.
+        """
+        # Apply Vmpp and let the cell settle — prevents the first reading
+        # from catching the instrument mid-transition from the scan voltage.
+        self.inst.write(f":SOUR:VOLT {Vmpp:.4f}")
+        time.sleep(0.1)
+
         pin         = self.params["pin"]
         interval_s  = self.params["spo_interval_ms"] / 1000.0
         spo_dur_s   = self.params["spo_duration_s"]
@@ -235,7 +242,6 @@ class MPPTracker:
         j_window    = []
         t_window    = []
 
-        self._in_spo_phase = True
         while not self.stop_event.is_set():
             elapsed_spo = time.time() - t_spo_start
             if elapsed_spo >= spo_dur_s:
@@ -272,5 +278,3 @@ class MPPTracker:
 
             self.callbacks["on_spo_update"](t_abs, j, pce, cycle_n, stabilized)
             time.sleep(interval_s)
-
-        self._in_spo_phase = False
