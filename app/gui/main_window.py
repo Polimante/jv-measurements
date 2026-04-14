@@ -1800,15 +1800,27 @@ class JVMeasurementApp:
         self.mpp_fig.tight_layout()
         self.mpp_canvas.draw_idle()
 
-        self._mpp_pce_times    = []
-        self._mpp_pce_values   = []
-        self._mpp_j_times      = []
-        self._mpp_j_values     = []
-        self._mpp_jv_cycles    = []
-        self._mpp_cycle_times  = []  # minutes — one entry per cycle, for axvline
+        self._mpp_pce_times     = []
+        self._mpp_pce_values    = []
+        self._mpp_j_times       = []
+        self._mpp_j_values      = []
+        self._mpp_jv_cycles     = []
+        self._mpp_cycle_times   = []  # minutes — one entry per cycle, for axvline
+        self._mpp_last_cycle_n  = None
 
     def _mpp_update_spo_plot(self, t_abs, j, pce, cycle_n, stabilized):
         t_min = t_abs / 60.0
+
+        # When a new cycle begins (after a J-V scan), insert None to break the
+        # matplotlib line. Without this, matplotlib draws a diagonal from the
+        # last SPO point of cycle N to the first SPO point of cycle N+1,
+        # creating a false "falling" segment that looks like scan data.
+        if self._mpp_last_cycle_n is not None and cycle_n != self._mpp_last_cycle_n:
+            self._mpp_pce_times.append(None)
+            self._mpp_pce_values.append(None)
+            self._mpp_j_times.append(None)
+            self._mpp_j_values.append(None)
+        self._mpp_last_cycle_n = cycle_n
 
         self._mpp_pce_times.append(t_min)
         self._mpp_pce_values.append(pce)
