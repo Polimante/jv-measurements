@@ -77,6 +77,9 @@ class JVMeasurementApp:
         # Stab traces
         self.stab_detector_power_var.trace("w", self.update_stab_illumination)
         self.stab_detector_area_var.trace("w",  self.update_stab_illumination)
+        # Pure MPP traces
+        self.pmpp_detector_power_var.trace("w", self.update_pmpp_illumination)
+        self.pmpp_detector_area_var.trace("w",  self.update_pmpp_illumination)
 
     # ── GUI construction ──────────────────────────────────────────────────────
 
@@ -397,11 +400,13 @@ class JVMeasurementApp:
         # ── Build additional mode panels (hidden until mode is switched) ──────
         self._build_mpp_panel(left, plot_frame)
         self._build_stab_panel(left, plot_frame)
+        self._build_pure_mpp_panel(left, plot_frame)
 
         # ── Keyboard shortcuts for mode switching ─────────────────────────────
         self.root.bind("<Alt-F2>", lambda e: self.switch_mode("jv"))
         self.root.bind("<Alt-F3>", lambda e: self.switch_mode("mpp"))
         self.root.bind("<Alt-F5>", lambda e: self.switch_mode("stab"))
+        self.root.bind("<Alt-F6>", lambda e: self.switch_mode("pure_mpp"))
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -451,6 +456,10 @@ class JVMeasurementApp:
             label="  Stabilized Current",
             accelerator="Alt+F5",
             command=lambda: self.switch_mode("stab"))
+        self.window_menu.add_command(
+            label="  Pure MPP Tracking",
+            accelerator="Alt+F6",
+            command=lambda: self.switch_mode("pure_mpp"))
         menubar.add_cascade(label="Window", menu=self.window_menu)
 
         help_menu = Menu(menubar, tearoff=0)
@@ -477,9 +486,11 @@ class JVMeasurementApp:
         self.jv_panel.pack_forget()
         self.mpp_panel.pack_forget()
         self.stab_panel.pack_forget()
+        self.pmpp_panel.pack_forget()
         self.jv_plot_frame.pack_forget()
         self.mpp_plot_frame.pack_forget()
         self.stab_plot_frame.pack_forget()
+        self.pmpp_plot_frame.pack_forget()
 
         if mode == "jv":
             self.jv_panel.pack(fill=BOTH, expand=True)
@@ -490,18 +501,30 @@ class JVMeasurementApp:
         elif mode == "stab":
             self.stab_panel.pack(fill=BOTH, expand=True)
             self.stab_plot_frame.pack(fill=BOTH, expand=True)
+        elif mode == "pure_mpp":
+            self.pmpp_panel.pack(fill=BOTH, expand=True)
+            self.pmpp_plot_frame.pack(fill=BOTH, expand=True)
 
         self.current_mode = mode
         self._update_window_menu_checkmark(mode)
 
     def _update_window_menu_checkmark(self, active_mode):
-        labels = {
-            "jv":   ("\u2713 J-V Measurement", "  MPP Tracking",      "  Stabilized Current"),
-            "mpp":  ("  J-V Measurement",      "\u2713 MPP Tracking",  "  Stabilized Current"),
-            "stab": ("  J-V Measurement",      "  MPP Tracking",      "\u2713 Stabilized Current"),
+        all_labels = [
+            "  J-V Measurement",
+            "  MPP Tracking",
+            "  Stabilized Current",
+            "  Pure MPP Tracking",
+        ]
+        checks = {
+            "jv":       0,
+            "mpp":      1,
+            "stab":     2,
+            "pure_mpp": 3,
         }
-        for i, label in enumerate(labels[active_mode]):
-            self.window_menu.entryconfig(i, label=label)
+        active_idx = checks.get(active_mode, -1)
+        for i, label in enumerate(all_labels):
+            display = ("\u2713" + label[1:]) if i == active_idx else label
+            self.window_menu.entryconfig(i, label=display)
 
     # ── Instrument connection management ──────────────────────────────────────
 
@@ -536,6 +559,7 @@ class JVMeasurementApp:
         self.start_btn.config(state=NORMAL)
         self.mpp_start_btn.config(state=NORMAL)
         self.stab_start_btn.config(state=NORMAL)
+        self.pmpp_start_btn.config(state=NORMAL)
 
         self.instrument_menu.entryconfig("Connect\u2026",        state=NORMAL)
         self.instrument_menu.entryconfig("Disconnect",            state=NORMAL)
@@ -1689,6 +1713,349 @@ class JVMeasurementApp:
         folder = filedialog.askdirectory()
         if folder:
             var.set(folder)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PURE MPP TRACKING — panel builder
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_pure_mpp_panel(self, left_container, right_container):
+        """Build Pure MPP Tracking (P&O) left panel and right plot area."""
+        from matplotlib.gridspec import GridSpec
+
+        # ── Left panel ────────────────────────────────────────────────────────
+        self.pmpp_panel = Frame(left_container, bg="#ececec")
+
+        nb = ttk.Notebook(self.pmpp_panel)
+        nb.pack(fill=X, padx=6, pady=(6, 4))
+
+        # ─── Tab 1: Setup ─────────────────────────────────────────────────────
+        tab_setup = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_setup, text="  Setup  ")
+
+        # Sample Information
+        sf = LabelFrame(tab_setup, text="Sample Information", padx=6, pady=4)
+        sf.pack(fill=X, pady=(0, 6))
+
+        Label(sf, text="Sample Name:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.pmpp_sample_name_var = StringVar()
+        Entry(sf, textvariable=self.pmpp_sample_name_var, width=22).grid(
+            row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
+
+        Label(sf, text="Export Folder:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.pmpp_export_folder_var = StringVar()
+        exp_entry = Entry(sf, textvariable=self.pmpp_export_folder_var, width=18)
+        exp_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Button(sf, text="Browse\u2026",
+               command=lambda: self._browse_folder_for(self.pmpp_export_folder_var),
+               font=("Arial", 8), pady=1
+               ).grid(row=1, column=2, padx=(2, 4), pady=3)
+
+        # Cell & Illumination
+        cf = LabelFrame(tab_setup, text="Cell & Illumination", padx=6, pady=4)
+        cf.pack(fill=X, pady=(0, 6))
+
+        Label(cf, text="Cell Area:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.pmpp_cell_area_var = DoubleVar(value=0.07)
+        Entry(cf, textvariable=self.pmpp_cell_area_var, width=10).grid(
+            row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(cf, text="cm\u00b2", fg="#666666").grid(row=0, column=2, sticky=W)
+
+        Label(cf, text="Detector Power:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.pmpp_detector_power_var = DoubleVar(value=0)
+        Entry(cf, textvariable=self.pmpp_detector_power_var, width=10).grid(
+            row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(cf, text="mW", fg="#666666").grid(row=1, column=2, sticky=W)
+
+        Label(cf, text="Detector Area:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.pmpp_detector_area_var = DoubleVar(value=1.13)
+        Entry(cf, textvariable=self.pmpp_detector_area_var, width=10).grid(
+            row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(cf, text="cm\u00b2", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        Label(cf, text="Illumination:").grid(row=3, column=0, sticky=W, padx=4, pady=3)
+        self.pmpp_illumination_var = StringVar(value="0.00")
+        Label(cf, textvariable=self.pmpp_illumination_var,
+              font=("Arial", 9, "bold"), fg="#1565C0").grid(
+            row=3, column=1, sticky=W, padx=4, pady=3)
+        Label(cf, text="mW/cm\u00b2", fg="#666666").grid(row=3, column=2, sticky=W)
+
+        # ─── Tab 2: P&O Settings ──────────────────────────────────────────────
+        tab_po = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_po, text="  P&O Settings  ")
+
+        pf = LabelFrame(tab_po, text="Tracking Parameters", padx=6, pady=4)
+        pf.pack(fill=X, pady=(0, 6))
+
+        for row, (lbl, attr, default, unit, tip) in enumerate([
+            ("Total duration:", "pmpp_total_min_var",   60.0,  "min",
+             "Total duration of the Pure MPP tracking experiment.\n"
+             "Recommended: 60\u2013600 min for stability studies."),
+            ("Initial voltage:", "pmpp_initial_v_var",  0.70,  "V",
+             "Starting voltage for the P&O algorithm.\n"
+             "Set this close to the expected Vmpp (typically 0.6\u20130.8 V).\n"
+             "The algorithm will converge to the real Vmpp within a few seconds."),
+            ("Perturb step:",   "pmpp_step_mv_var",     10.0,  "mV",
+             "Voltage perturbation step for the P&O algorithm.\n"
+             "Smaller step = more accurate tracking, slower convergence.\n"
+             "Larger step = faster convergence, more oscillation around MPP.\n"
+             "Recommended: 5\u201320 mV."),
+            ("Interval:",       "pmpp_interval_ms_var", 500.0, "ms",
+             "Time between consecutive P&O measurements.\n"
+             "500 ms gives good time resolution without excessive noise."),
+            ("V min:",          "pmpp_v_min_var",        0.0,  "V",
+             "Minimum allowed tracking voltage (safety clamp)."),
+            ("V max:",          "pmpp_v_max_var",        1.20, "V",
+             "Maximum allowed tracking voltage (safety clamp)."),
+            ("NPLC:",           "pmpp_nplc_var",         1.0,  "(0.01\u201325)",
+             "Number of power line cycles for each current reading.\n"
+             "Higher = less noise, slower measurement."),
+            ("Delay/point:",    "pmpp_delay_ms_var",    20.0,  "ms",
+             "Source delay after voltage change before reading current."),
+        ]):
+            Label(pf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var = DoubleVar(value=default)
+            setattr(self, attr, var)
+            e = Entry(pf, textvariable=var, width=10)
+            e.grid(row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+            ToolTip(e, tip)
+
+        # ── Control Buttons ───────────────────────────────────────────────────
+        btn_frame = Frame(self.pmpp_panel, bg="#ececec")
+        btn_frame.pack(fill=X, padx=8, pady=6)
+
+        self.pmpp_start_btn = Button(
+            btn_frame, text="Start Pure MPP",
+            command=self.start_pure_mpp,
+            bg="#00695C", fg="white",
+            font=("Arial", 9, "bold"),
+            width=16, pady=4, state=DISABLED)
+        self.pmpp_start_btn.pack(side=LEFT, padx=(0, 6))
+
+        self.pmpp_stop_btn = Button(
+            btn_frame, text="Stop",
+            command=self.stop_pure_mpp,
+            bg="#C62828", fg="white",
+            font=("Arial", 9, "bold"),
+            width=10, pady=4, state=DISABLED)
+        self.pmpp_stop_btn.pack(side=LEFT)
+
+        # ── Status Bar ────────────────────────────────────────────────────────
+        sb = Frame(self.pmpp_panel, bg="#37474F", height=24)
+        sb.pack(fill=X, side="bottom")
+        sb.pack_propagate(False)
+        self.pmpp_status_var = StringVar(
+            value="Ready \u2014 connect an instrument to begin.")
+        Label(sb, textvariable=self.pmpp_status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
+
+        # ── Right plot area ───────────────────────────────────────────────────
+        self.pmpp_plot_frame = Frame(right_container, bg="#ffffff")
+
+        self.pmpp_fig = plt.figure(figsize=(8, 8))
+        gs = GridSpec(3, 1, figure=self.pmpp_fig,
+                      height_ratios=[4, 3, 2], hspace=0.5)
+        self.pmpp_ax_pce = self.pmpp_fig.add_subplot(gs[0])
+        self.pmpp_ax_j   = self.pmpp_fig.add_subplot(gs[1])
+        self.pmpp_ax_v   = self.pmpp_fig.add_subplot(gs[2])
+
+        for ax, title, xl, yl in [
+            (self.pmpp_ax_pce,
+             "PCE(t) \u2014 Pure MPP Tracking (P&O)",
+             "Time (min)", "PCE (%)"),
+            (self.pmpp_ax_j,
+             "Current Density at Vmpp",
+             "Time (min)", "J (mA/cm\u00b2)"),
+            (self.pmpp_ax_v,
+             "Tracked Vmpp",
+             "Time (min)", "Vmpp (V)"),
+        ]:
+            ax.set_title(title, fontsize=10, fontweight="bold")
+            ax.set_xlabel(xl, fontsize=9)
+            ax.set_ylabel(yl, fontsize=9)
+            ax.grid(True)
+            ax.text(0.5, 0.5, "No data yet", transform=ax.transAxes,
+                    ha="center", va="center", color="gray", fontsize=10)
+
+        self.pmpp_fig.tight_layout()
+        self.pmpp_canvas = FigureCanvasTkAgg(
+            self.pmpp_fig, master=self.pmpp_plot_frame)
+        self.pmpp_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PURE MPP TRACKING — runner and plot-update methods
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def update_pmpp_illumination(self, *args):
+        try:
+            self.pmpp_illumination_var.set(
+                f"{self.pmpp_detector_power_var.get() / self.pmpp_detector_area_var.get():.2f}")
+        except Exception:
+            self.pmpp_illumination_var.set("Error")
+
+    def start_pure_mpp(self):
+        if not self.pmpp_sample_name_var.get().strip():
+            messagebox.showerror("Missing input", "Enter a sample name.")
+            return
+        if not self.pmpp_export_folder_var.get().strip():
+            messagebox.showerror("Missing input", "Select an export folder.")
+            return
+        if self.instrument is None:
+            messagebox.showerror("No instrument", "Connect an instrument first.")
+            return
+        try:
+            pin = float(self.pmpp_illumination_var.get())
+            if pin <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Missing input",
+                                 "Set Detector Power and Detector Area to calculate illumination.")
+            return
+        if not messagebox.askokcancel(
+            "Safety Check",
+            "1. Verify all connections to the Keithley SourceMeter\n"
+            "2. Confirm solar simulator shutter is open\n"
+            "3. Confirm only ONE cell is connected\n\n"
+            "Click OK to start Pure MPP Tracking (P&O).",
+            icon="warning"
+        ):
+            return
+
+        self._measurement_running = True
+        stop_event.clear()
+        self.pmpp_start_btn.config(state=DISABLED)
+        self.pmpp_stop_btn.config(state=NORMAL)
+        self._init_pmpp_plots()
+
+        params = {
+            "cell_area":          self.pmpp_cell_area_var.get(),
+            "pin":                pin,
+            "total_duration_min": self.pmpp_total_min_var.get(),
+            "initial_v":          self.pmpp_initial_v_var.get(),
+            "perturb_step_mv":    self.pmpp_step_mv_var.get(),
+            "interval_ms":        self.pmpp_interval_ms_var.get(),
+            "v_min":              self.pmpp_v_min_var.get(),
+            "v_max":              self.pmpp_v_max_var.get(),
+            "nplc":               self.pmpp_nplc_var.get(),
+            "delay_ms":           self.pmpp_delay_ms_var.get(),
+        }
+        callbacks = {
+            "on_status":  lambda msg: self.root.after(0, self.pmpp_status_var.set, msg),
+            "on_update":  lambda t, v, j, pce: self.root.after(
+                              0, self._pmpp_update, t, v, j, pce),
+            "on_complete": lambda *a: self.root.after(0, self._pmpp_on_complete, *a),
+        }
+
+        from app.measurement.pure_mpp_tracker import PureMPPTracker
+        tracker = PureMPPTracker(self.instrument, params, callbacks, stop_event)
+        threading.Thread(target=tracker.run, daemon=True).start()
+
+    def stop_pure_mpp(self):
+        stop_event.set()
+        self.pmpp_status_var.set("Stopping\u2026")
+        self._measurement_running = False
+        self.pmpp_start_btn.config(state=NORMAL)
+        self.pmpp_stop_btn.config(state=DISABLED)
+
+    def _init_pmpp_plots(self):
+        for ax in [self.pmpp_ax_pce, self.pmpp_ax_j, self.pmpp_ax_v]:
+            ax.clear()
+        self.pmpp_ax_pce.set_xlabel("Time (min)")
+        self.pmpp_ax_pce.set_ylabel("PCE (%)")
+        self.pmpp_ax_pce.set_title("PCE(t) \u2014 Pure MPP Tracking (P&O)",
+                                    fontweight="bold")
+        self.pmpp_ax_pce.grid(True)
+        self.pmpp_ax_j.set_xlabel("Time (min)")
+        self.pmpp_ax_j.set_ylabel("J (mA/cm\u00b2)")
+        self.pmpp_ax_j.set_title("Current Density at Vmpp")
+        self.pmpp_ax_j.grid(True)
+        self.pmpp_ax_v.set_xlabel("Time (min)")
+        self.pmpp_ax_v.set_ylabel("Vmpp (V)")
+        self.pmpp_ax_v.set_title("Tracked Vmpp")
+        self.pmpp_ax_v.grid(True)
+        self.pmpp_fig.tight_layout()
+        self.pmpp_canvas.draw_idle()
+
+        self._pmpp_t  = []
+        self._pmpp_v  = []
+        self._pmpp_j  = []
+        self._pmpp_pce = []
+
+    def _pmpp_update(self, t_abs, v, j, pce):
+        t_min = t_abs / 60.0
+        self._pmpp_t.append(t_min)
+        self._pmpp_v.append(v)
+        self._pmpp_j.append(j)
+        self._pmpp_pce.append(pce)
+
+        self.pmpp_ax_pce.clear()
+        self.pmpp_ax_pce.plot(self._pmpp_t, self._pmpp_pce,
+                              color="#1565C0", linewidth=1.2)
+        self.pmpp_ax_pce.set_xlabel("Time (min)")
+        self.pmpp_ax_pce.set_ylabel("PCE (%)")
+        self.pmpp_ax_pce.set_title("PCE(t) \u2014 Pure MPP Tracking (P&O)",
+                                    fontweight="bold")
+        self.pmpp_ax_pce.grid(True)
+
+        self.pmpp_ax_j.clear()
+        self.pmpp_ax_j.plot(self._pmpp_t, self._pmpp_j,
+                            color="#E65100", linewidth=1.2)
+        self.pmpp_ax_j.set_xlabel("Time (min)")
+        self.pmpp_ax_j.set_ylabel("J (mA/cm\u00b2)")
+        self.pmpp_ax_j.set_title("Current Density at Vmpp")
+        self.pmpp_ax_j.grid(True)
+
+        self.pmpp_ax_v.clear()
+        self.pmpp_ax_v.plot(self._pmpp_t, self._pmpp_v,
+                            color="#4A148C", linewidth=1.0)
+        self.pmpp_ax_v.set_xlabel("Time (min)")
+        self.pmpp_ax_v.set_ylabel("Vmpp (V)")
+        self.pmpp_ax_v.set_title("Tracked Vmpp")
+        self.pmpp_ax_v.grid(True)
+
+        self.pmpp_fig.tight_layout()
+        self.pmpp_canvas.draw_idle()
+
+    def _pmpp_on_complete(self, time_s, v_track, j_track, pce_track):
+        self._measurement_running = False
+        self.pmpp_start_btn.config(state=NORMAL)
+        self.pmpp_stop_btn.config(state=DISABLED)
+        self.pmpp_status_var.set("Pure MPP Tracking complete.")
+        if not time_s:
+            return
+        try:
+            import openpyxl
+            from openpyxl import Workbook
+            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+            name = self.pmpp_sample_name_var.get() or "sample"
+            path = os.path.join(self.pmpp_export_folder_var.get(),
+                                f"{name}_PureMPP_{ts}.xlsx")
+            wb   = Workbook()
+            ws   = wb.active
+            ws.title = "PureMPP_Data"
+
+            # Metadata
+            pin  = float(self.pmpp_illumination_var.get())
+            area = self.pmpp_cell_area_var.get()
+            ws.append(["Sample",       name])
+            ws.append(["Cell Area",    area,  "cm²"])
+            ws.append(["Illumination", pin,   "mW/cm²"])
+            ws.append(["Date",         datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+            ws.append([])
+            ws.append(["Time (s)", "Time (min)", "Vmpp (V)",
+                        "J (mA/cm²)", "PCE (%)"])
+            for t, v, j, pce in zip(time_s, v_track, j_track, pce_track):
+                ws.append([round(t, 3), round(t / 60.0, 5),
+                            round(v, 5), round(j, 5), round(pce, 4)])
+
+            wb.save(path)
+            self.pmpp_status_var.set(
+                f"Saved \u2192 {os.path.basename(path)}")
+        except Exception as exc:
+            messagebox.showerror("Export Error",
+                                 f"Could not save data:\n{exc}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # MPP TRACKING — runner and plot-update methods
