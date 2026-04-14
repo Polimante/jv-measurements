@@ -1805,39 +1805,52 @@ class JVMeasurementApp:
         self._mpp_j_times       = []
         self._mpp_j_values      = []
         self._mpp_jv_cycles     = []
-        self._mpp_cycle_times   = []  # minutes — one entry per cycle, for axvline
+        self._mpp_cycle_bounds  = []   # accumulated SPO-time (min) at each cycle boundary
         self._mpp_last_cycle_n  = None
+        self._mpp_last_t_abs    = None  # last t_abs seen, for computing dt
+        self._mpp_spo_t_acc     = 0.0   # accumulated SPO seconds (J-V gaps excluded)
 
     def _mpp_update_spo_plot(self, t_abs, j, pce, cycle_n, stabilized):
-        t_min = t_abs / 60.0
-
-        # When a new cycle begins (after a J-V scan), insert None to break the
-        # matplotlib line. Without this, matplotlib draws a diagonal from the
-        # last SPO point of cycle N to the first SPO point of cycle N+1,
-        # creating a false "falling" segment that looks like scan data.
-        if self._mpp_last_cycle_n is not None and cycle_n != self._mpp_last_cycle_n:
+        # ── Accumulate SPO-only time (J-V scan gaps are skipped) ──────────────
+        if self._mpp_last_cycle_n is None:
+            # Very first SPO point — start at t=0, no dt to add
+            dt = 0.0
+        elif cycle_n != self._mpp_last_cycle_n:
+            # First point of a new cycle after a J-V scan.
+            # Record the boundary position and insert a None break so
+            # matplotlib does not draw a connecting line across the gap.
+            self._mpp_cycle_bounds.append(self._mpp_spo_t_acc / 60.0)
             self._mpp_pce_times.append(None)
             self._mpp_pce_values.append(None)
             self._mpp_j_times.append(None)
             self._mpp_j_values.append(None)
-        self._mpp_last_cycle_n = cycle_n
+            dt = 0.0  # do not add J-V scan time to the SPO clock
+        else:
+            # Normal SPO reading — accumulate real elapsed time
+            dt = t_abs - self._mpp_last_t_abs
 
-        self._mpp_pce_times.append(t_min)
+        self._mpp_spo_t_acc    += dt
+        self._mpp_last_cycle_n  = cycle_n
+        self._mpp_last_t_abs    = t_abs
+
+        x_min = self._mpp_spo_t_acc / 60.0  # SPO-accumulated minutes
+
+        self._mpp_pce_times.append(x_min)
         self._mpp_pce_values.append(pce)
-        self._mpp_j_times.append(t_min)
+        self._mpp_j_times.append(x_min)
         self._mpp_j_values.append(j)
 
         self.mpp_ax_pce.clear()
         self.mpp_ax_pce.plot(self._mpp_pce_times, self._mpp_pce_values,
                              "b-", linewidth=1.2)
-        # Thin dashed vertical line at each cycle boundary (when new Vmpp applied)
-        for t_cyc in self._mpp_cycle_times:
-            self.mpp_ax_pce.axvline(x=t_cyc, color="#9E9E9E", linewidth=0.8,
+        # Thin dashed line at each cycle boundary (= where next J-V scan ran)
+        for t_bound in self._mpp_cycle_bounds:
+            self.mpp_ax_pce.axvline(x=t_bound, color="#9E9E9E", linewidth=0.8,
                                     linestyle="--", alpha=0.7,
                                     label="_nolegend_")
         if stabilized:
-            self.mpp_ax_pce.plot(t_min, pce, "go", markersize=5, alpha=0.7)
-        self.mpp_ax_pce.set_xlabel("Time (min)")
+            self.mpp_ax_pce.plot(x_min, pce, "go", markersize=5, alpha=0.7)
+        self.mpp_ax_pce.set_xlabel("SPO Time (min)")
         self.mpp_ax_pce.set_ylabel("PCE (%)")
         self.mpp_ax_pce.set_title("Power Conversion Efficiency \u2014 MPP Tracking",
                                    fontweight="bold")
@@ -1846,11 +1859,11 @@ class JVMeasurementApp:
         self.mpp_ax_j.clear()
         self.mpp_ax_j.plot(self._mpp_j_times, self._mpp_j_values,
                            color="#E65100", linewidth=1.2)
-        for t_cyc in self._mpp_cycle_times:
-            self.mpp_ax_j.axvline(x=t_cyc, color="#9E9E9E", linewidth=0.8,
+        for t_bound in self._mpp_cycle_bounds:
+            self.mpp_ax_j.axvline(x=t_bound, color="#9E9E9E", linewidth=0.8,
                                   linestyle="--", alpha=0.7,
                                   label="_nolegend_")
-        self.mpp_ax_j.set_xlabel("Time (min)")
+        self.mpp_ax_j.set_xlabel("SPO Time (min)")
         self.mpp_ax_j.set_ylabel("Current Density (mA/cm\u00b2)")
         self.mpp_ax_j.set_title("Current Density at Vmpp (SPO phase)")
         self.mpp_ax_j.grid(True)
@@ -1860,10 +1873,6 @@ class JVMeasurementApp:
 
     def _mpp_update_jv_plot(self, cycle_data):
         self._mpp_jv_cycles.append(cycle_data)
-
-        # Record the time (min) when this cycle's Vmpp was applied so
-        # _mpp_update_spo_plot can draw a thin dashed vertical line there.
-        self._mpp_cycle_times.append(cycle_data["time_s"] / 60.0)
 
         # ── J-V curves subplot ────────────────────────────────────────────────
         self.mpp_ax_jv.clear()
