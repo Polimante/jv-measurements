@@ -56,14 +56,27 @@ class JVMeasurementApp:
         self.instrument      = None
         self.instrument_addr = None
         self.instrument_idn  = None
+        self.current_mode         = "jv"
+        self._measurement_running = False
 
         self.setup_gui()
+        # J-V traces
         self.detector_power_var.trace("w", self.update_illumination)
         self.detector_area_var.trace("w",  self.update_illumination)
         self.step_voltage_var.trace("w",   self.update_scan_rate)
         self.delay_ms_var.trace("w",       self.update_scan_rate)
         self.nplc_var.trace("w",           self.update_scan_rate)
         self.update_scan_rate()
+        # MPP traces
+        self.mpp_detector_power_var.trace("w", self.update_mpp_illumination)
+        self.mpp_detector_area_var.trace("w",  self.update_mpp_illumination)
+        self.mpp_step_v_var.trace("w",  self.update_mpp_scan_rate)
+        self.mpp_delay_var.trace("w",   self.update_mpp_scan_rate)
+        self.mpp_nplc_var.trace("w",    self.update_mpp_scan_rate)
+        self.update_mpp_scan_rate()
+        # Stab traces
+        self.stab_detector_power_var.trace("w", self.update_stab_illumination)
+        self.stab_detector_area_var.trace("w",  self.update_stab_illumination)
 
     # ── GUI construction ──────────────────────────────────────────────────────
 
@@ -102,11 +115,17 @@ class JVMeasurementApp:
                 _sash_set[0] = True
         paned.bind("<Configure>", _on_paned_configure)
 
+        # ── Mode panel wrappers (one per mode, packed/forgotten on switch) ────
+        self.jv_panel      = Frame(left,       bg="#ececec")
+        self.jv_plot_frame = Frame(plot_frame, bg="#ffffff")
+        self.jv_panel.pack(fill=BOTH, expand=True)
+        self.jv_plot_frame.pack(fill=BOTH, expand=True)
+
         # ── Settings notebook (3 tabs) ────────────────────────────────────────
         style = ttk.Style()
         style.configure("TNotebook.Tab", padding=[10, 4], font=("Arial", 9))
 
-        nb = ttk.Notebook(left)
+        nb = ttk.Notebook(self.jv_panel)
         nb.pack(fill=X, padx=6, pady=(6, 4))
 
         # ─── Tab 1: Scan ──────────────────────────────────────────────────────
@@ -309,7 +328,7 @@ class JVMeasurementApp:
                 "Literature: ~60 s for n-i-p TiO\u2082; 120\u2013300 s for p-i-n PEDOT:PSS.")
 
         # ── Control Buttons ───────────────────────────────────────────────────
-        btn_frame = Frame(left, bg="#ececec")
+        btn_frame = Frame(self.jv_panel, bg="#ececec")
         btn_frame.pack(fill=X, padx=8, pady=6)
 
         self.start_btn = Button(btn_frame, text="Start Measurement",
@@ -327,7 +346,7 @@ class JVMeasurementApp:
         self.stop_btn.pack(side=LEFT)
 
         # ── Measurement Log ───────────────────────────────────────────────────
-        log_frame = LabelFrame(left, text="Measurement Log", padx=4, pady=4)
+        log_frame = LabelFrame(self.jv_panel, text="Measurement Log", padx=4, pady=4)
         log_frame.pack(fill=BOTH, expand=True, padx=6, pady=(0, 0))
 
         hsb = ttk.Scrollbar(log_frame, orient="horizontal")
@@ -352,7 +371,7 @@ class JVMeasurementApp:
         log_frame.grid_columnconfigure(0, weight=1)
 
         # ── Status Bar ────────────────────────────────────────────────────────
-        status_bar = Frame(left, bg="#37474F", height=24)
+        status_bar = Frame(self.jv_panel, bg="#37474F", height=24)
         status_bar.pack(fill=X, side="bottom")
         status_bar.pack_propagate(False)
         self.status_var = StringVar(value="Ready \u2014 connect an instrument to begin.")
@@ -370,10 +389,19 @@ class JVMeasurementApp:
                            fontsize=12, labelpad=10, position=(0, 0.5))
         self.ax2.set_ylabel("Power Density (mW/cm\u00b2)",
                             fontsize=12, labelpad=10, position=(1, 0.5))
-        self.canvas = FigureCanvasTkAgg(self.fig, plot_frame)
+        self.canvas = FigureCanvasTkAgg(self.fig, self.jv_plot_frame)
         self.canvas.get_tk_widget().pack(fill=BOTH, expand=True)
         self.cursor = None   # mplcursors handle — kept to avoid garbage collection
         self.draw_placeholder_plot()
+
+        # ── Build additional mode panels (hidden until mode is switched) ──────
+        self._build_mpp_panel(left, plot_frame)
+        self._build_stab_panel(left, plot_frame)
+
+        # ── Keyboard shortcuts for mode switching ─────────────────────────────
+        self.root.bind("<Alt-F2>", lambda e: self.switch_mode("jv"))
+        self.root.bind("<Alt-F3>", lambda e: self.switch_mode("mpp"))
+        self.root.bind("<Alt-F5>", lambda e: self.switch_mode("stab"))
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -410,6 +438,21 @@ class JVMeasurementApp:
             state=DISABLED)
         menubar.add_cascade(label="Instrument", menu=self.instrument_menu)
 
+        self.window_menu = Menu(menubar, tearoff=0)
+        self.window_menu.add_command(
+            label="\u2713 J-V Measurement",
+            accelerator="Alt+F2",
+            command=lambda: self.switch_mode("jv"))
+        self.window_menu.add_command(
+            label="  MPP Tracking",
+            accelerator="Alt+F3",
+            command=lambda: self.switch_mode("mpp"))
+        self.window_menu.add_command(
+            label="  Stabilized Current",
+            accelerator="Alt+F5",
+            command=lambda: self.switch_mode("stab"))
+        menubar.add_cascade(label="Window", menu=self.window_menu)
+
         help_menu = Menu(menubar, tearoff=0)
         help_menu.add_command(label="Documentation", command=self._show_help)
         help_menu.add_separator()
@@ -417,6 +460,48 @@ class JVMeasurementApp:
         menubar.add_cascade(label="Help", menu=help_menu)
 
         self.root.config(menu=menubar)
+
+    # ── Mode switching ────────────────────────────────────────────────────────
+
+    def switch_mode(self, mode):
+        if self.current_mode == mode:
+            return
+        if self._measurement_running:
+            messagebox.showwarning(
+                "Measurement in progress",
+                "Cannot switch modes while a measurement is running.\n"
+                "Stop the current measurement first."
+            )
+            return
+
+        self.jv_panel.pack_forget()
+        self.mpp_panel.pack_forget()
+        self.stab_panel.pack_forget()
+        self.jv_plot_frame.pack_forget()
+        self.mpp_plot_frame.pack_forget()
+        self.stab_plot_frame.pack_forget()
+
+        if mode == "jv":
+            self.jv_panel.pack(fill=BOTH, expand=True)
+            self.jv_plot_frame.pack(fill=BOTH, expand=True)
+        elif mode == "mpp":
+            self.mpp_panel.pack(fill=BOTH, expand=True)
+            self.mpp_plot_frame.pack(fill=BOTH, expand=True)
+        elif mode == "stab":
+            self.stab_panel.pack(fill=BOTH, expand=True)
+            self.stab_plot_frame.pack(fill=BOTH, expand=True)
+
+        self.current_mode = mode
+        self._update_window_menu_checkmark(mode)
+
+    def _update_window_menu_checkmark(self, active_mode):
+        labels = {
+            "jv":   ("\u2713 J-V Measurement", "  MPP Tracking",      "  Stabilized Current"),
+            "mpp":  ("  J-V Measurement",      "\u2713 MPP Tracking",  "  Stabilized Current"),
+            "stab": ("  J-V Measurement",      "  MPP Tracking",      "\u2713 Stabilized Current"),
+        }
+        for i, label in enumerate(labels[active_mode]):
+            self.window_menu.entryconfig(i, label=label)
 
     # ── Instrument connection management ──────────────────────────────────────
 
@@ -449,6 +534,8 @@ class JVMeasurementApp:
         self.instrument_label_var.set(f"\u2714  Connected: {short_idn}  [{addr}]")
         self.status_var.set(f"Instrument connected: {addr}")
         self.start_btn.config(state=NORMAL)
+        self.mpp_start_btn.config(state=NORMAL)
+        self.stab_start_btn.config(state=NORMAL)
 
         self.instrument_menu.entryconfig("Connect\u2026",        state=NORMAL)
         self.instrument_menu.entryconfig("Disconnect",            state=NORMAL)
@@ -460,6 +547,8 @@ class JVMeasurementApp:
             "\u26a0  No instrument connected \u2014 use Instrument \u2192 Connect")
         self.status_var.set("Instrument disconnected.")
         self.start_btn.config(state=DISABLED)
+        self.mpp_start_btn.config(state=DISABLED)
+        self.stab_start_btn.config(state=DISABLED)
         self.instrument_menu.entryconfig("Disconnect",        state=DISABLED)
         self.instrument_menu.entryconfig("Send *IDN? query",  state=DISABLED)
 
@@ -691,6 +780,7 @@ class JVMeasurementApp:
         if not messagebox.askokcancel("Safety Check", safety_msg, icon="warning"):
             return
 
+        self._measurement_running = True
         self.toggle_controls(False)
         self.status_var.set("Initializing instrument\u2026")
         threading.Thread(target=self.run_measurement, daemon=True).start()
@@ -958,6 +1048,7 @@ class JVMeasurementApp:
                 self.instrument.write(":OUTP OFF")
             except Exception:
                 pass
+            self._measurement_running = False
             self.toggle_controls(True)
             stop_event.clear()
 
@@ -1170,3 +1261,878 @@ class JVMeasurementApp:
         self.fig.subplots_adjust(left=0.15, right=0.85, top=0.85)
         self.ax.grid(True)
         self.canvas.draw_idle()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # MPP TRACKING — panel builder
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_mpp_panel(self, left_container, right_container):
+        """Build MPP Tracking left panel and right plot area (both hidden initially)."""
+        import numpy as np
+        from matplotlib.gridspec import GridSpec
+
+        # ── Left panel ────────────────────────────────────────────────────────
+        self.mpp_panel = Frame(left_container, bg="#ececec")
+
+        style = ttk.Style()
+        style.configure("TNotebook.Tab", padding=[10, 4], font=("Arial", 9))
+        nb = ttk.Notebook(self.mpp_panel)
+        nb.pack(fill=X, padx=6, pady=(6, 4))
+
+        # ─── Tab 1: Scan ──────────────────────────────────────────────────────
+        tab_scan = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_scan, text="  Scan  ")
+
+        # Sample Information
+        sf = LabelFrame(tab_scan, text="Sample Information", padx=6, pady=4)
+        sf.pack(fill=X, pady=(0, 6))
+
+        Label(sf, text="Sample Name:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.mpp_sample_name_var = StringVar()
+        Entry(sf, textvariable=self.mpp_sample_name_var, width=22).grid(
+            row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
+
+        Label(sf, text="Export Folder:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.mpp_export_folder_var = StringVar()
+        mpp_exp_entry = Entry(sf, textvariable=self.mpp_export_folder_var, width=18)
+        mpp_exp_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Button(sf, text="Browse\u2026",
+               command=lambda: self._browse_folder_for(self.mpp_export_folder_var),
+               font=("Arial", 8), pady=1
+               ).grid(row=1, column=2, padx=(2, 4), pady=3)
+
+        # J-V Scan Settings
+        pf = LabelFrame(tab_scan, text="J-V Scan Settings", padx=6, pady=4)
+        pf.pack(fill=X, pady=(0, 6))
+
+        for row, (lbl, attr, default, unit) in enumerate([
+            ("Start Voltage:", "mpp_start_v_var",  -0.1,  "V"),
+            ("End Voltage:",   "mpp_end_v_var",     1.05, "V"),
+            ("Step Voltage:",  "mpp_step_v_var",    0.025, "V"),
+            ("Cell Area:",     "mpp_cell_area_var", 0.07, "cm\u00b2"),
+            ("Delay/point:",   "mpp_delay_var",     200.0, "ms"),
+            ("NPLC:",          "mpp_nplc_var",      1.0,  "(0.01\u201325)"),
+        ]):
+            Label(pf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var = DoubleVar(value=default)
+            setattr(self, attr, var)
+            Entry(pf, textvariable=var, width=10).grid(
+                row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+
+        srf = LabelFrame(tab_scan, text="Calculated Scan Rate", padx=6, pady=4)
+        srf.pack(fill=X, pady=(0, 6))
+        self.mpp_scan_rate_var = StringVar(value="\u2014")
+        Label(srf, textvariable=self.mpp_scan_rate_var,
+              font=("Arial", 11, "bold"), fg="#1565C0").grid(
+            row=0, column=0, sticky=W, padx=4, pady=4)
+        Label(srf, text="mV/s", fg="#666666").grid(row=0, column=1, sticky=W)
+
+        self.mpp_include_fwd_var = BooleanVar(value=False)
+        cb = Checkbutton(tab_scan, text="Include forward scan",
+                         variable=self.mpp_include_fwd_var)
+        cb.pack(anchor=W, padx=4, pady=2)
+        ToolTip(cb,
+                "By default, only the reverse scan is used to determine Vmpp.\n"
+                "Enable to also measure the forward scan and calculate HI\n"
+                "at each cycle. Adds ~1 min per cycle.")
+
+        # Illumination
+        ilf = LabelFrame(tab_scan, text="Illumination", padx=6, pady=4)
+        ilf.pack(fill=X, pady=(0, 4))
+        Label(ilf, text="Detector Power:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.mpp_detector_power_var = DoubleVar(value=0)
+        Entry(ilf, textvariable=self.mpp_detector_power_var, width=10).grid(
+            row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW", fg="#666666").grid(row=0, column=2, sticky=W)
+        Label(ilf, text="Detector Area:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.mpp_detector_area_var = DoubleVar(value=1.13)
+        Entry(ilf, textvariable=self.mpp_detector_area_var, width=10).grid(
+            row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="cm\u00b2", fg="#666666").grid(row=1, column=2, sticky=W)
+        Label(ilf, text="Illumination:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.mpp_illumination_var = StringVar(value="0.00")
+        Label(ilf, textvariable=self.mpp_illumination_var,
+              font=("Arial", 9, "bold"), fg="#1565C0").grid(
+            row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW/cm\u00b2", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        # ─── Tab 2: MPP Settings ──────────────────────────────────────────────
+        tab_mpp = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_mpp, text="  MPP Settings  ")
+
+        # Pre-bias
+        pbf = LabelFrame(tab_mpp, text="Pre-bias Conditioning", padx=6, pady=4)
+        pbf.pack(fill=X, pady=(0, 6))
+        self.mpp_prebias_enabled_var = BooleanVar(value=True)
+        self.mpp_prebias_v_entry = None
+        self.mpp_prebias_t_entry = None
+
+        def _toggle_mpp_prebias():
+            s = NORMAL if self.mpp_prebias_enabled_var.get() else DISABLED
+            self.mpp_prebias_v_entry.config(state=s)
+            self.mpp_prebias_t_entry.config(state=s)
+
+        Checkbutton(pbf, text="Enable pre-bias",
+                    variable=self.mpp_prebias_enabled_var,
+                    command=_toggle_mpp_prebias
+                    ).grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=2)
+        Label(pbf, text="Voltage:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.mpp_prebias_v_var = DoubleVar(value=1.2)
+        self.mpp_prebias_v_entry = Entry(pbf, textvariable=self.mpp_prebias_v_var, width=10)
+        self.mpp_prebias_v_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="V", fg="#666666").grid(row=1, column=2, sticky=W)
+        Label(pbf, text="Duration:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.mpp_prebias_t_var = DoubleVar(value=2.0)
+        self.mpp_prebias_t_entry = Entry(pbf, textvariable=self.mpp_prebias_t_var, width=10)
+        self.mpp_prebias_t_entry.grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="s", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        # MPP Tracking Settings
+        mf = LabelFrame(tab_mpp, text="MPP Tracking Settings", padx=6, pady=4)
+        mf.pack(fill=X, pady=(0, 4))
+
+        for row, (lbl, attr, default, unit, tip) in enumerate([
+            ("Total duration:", "mpp_total_min_var",      60.0,  "min",
+             "Total duration of the MPP tracking experiment in minutes.\n"
+             "Minimum recommended: 5 min for stabilized PCE.\n"
+             "For stability studies: 60\u20131000 min."),
+            ("SPO duration:",   "mpp_spo_duration_var",  120.0,  "s",
+             "Time spent at Vmpp between J-V scans (Stabilized Power Output phase).\n"
+             "Literature recommendation: 60\u2013300 s.\n"
+             "Longer SPO gives more stable readings but fewer J-V cycles."),
+            ("SPO interval:",   "mpp_spo_interval_var",  500.0,  "ms",
+             "How often current is read during the SPO phase.\n"
+             "500 ms is a good balance of time resolution and noise."),
+            ("Stab. threshold:", "mpp_stab_threshold_var", 0.1, "%/min",
+             "Current change rate below which the device is considered stabilized.\n"
+             "Criterion: |\u0394J/\u0394t| < threshold over a 60 s window.\n"
+             "Literature standard: 0.05\u20130.1 %/min (NREL protocol)."),
+        ]):
+            Label(mf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var = DoubleVar(value=default)
+            setattr(self, attr, var)
+            e = Entry(mf, textvariable=var, width=10)
+            e.grid(row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(mf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+            ToolTip(e, tip)
+
+        # ── Control Buttons ───────────────────────────────────────────────────
+        btn_frame = Frame(self.mpp_panel, bg="#ececec")
+        btn_frame.pack(fill=X, padx=8, pady=6)
+
+        self.mpp_start_btn = Button(btn_frame, text="Start MPP Tracking",
+                                    command=self.start_mpp_tracking,
+                                    bg="#388E3C", fg="white",
+                                    font=("Arial", 9, "bold"),
+                                    width=16, pady=4, state=DISABLED)
+        self.mpp_start_btn.pack(side=LEFT, padx=(0, 6))
+
+        self.mpp_stop_btn = Button(btn_frame, text="Stop",
+                                   command=self.stop_mpp_tracking,
+                                   bg="#C62828", fg="white",
+                                   font=("Arial", 9, "bold"),
+                                   width=10, pady=4, state=DISABLED)
+        self.mpp_stop_btn.pack(side=LEFT)
+
+        # ── Log ───────────────────────────────────────────────────────────────
+        log_frame = LabelFrame(self.mpp_panel, text="MPP Log", padx=4, pady=4)
+        log_frame.pack(fill=BOTH, expand=True, padx=6, pady=(0, 0))
+        hsb = ttk.Scrollbar(log_frame, orient="horizontal")
+        vsb = ttk.Scrollbar(log_frame, orient="vertical")
+        self.mpp_log_text = Text(log_frame, wrap="none", state=DISABLED,
+                                 font=("Consolas", 9),
+                                 yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb.config(command=self.mpp_log_text.yview)
+        hsb.config(command=self.mpp_log_text.xview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        self.mpp_log_text.grid(row=0, column=0, sticky="nsew")
+        log_frame.grid_rowconfigure(0, weight=1)
+        log_frame.grid_columnconfigure(0, weight=1)
+
+        # ── Status Bar ────────────────────────────────────────────────────────
+        sb = Frame(self.mpp_panel, bg="#37474F", height=24)
+        sb.pack(fill=X, side="bottom")
+        sb.pack_propagate(False)
+        self.mpp_status_var = StringVar(value="Ready \u2014 connect an instrument to begin.")
+        Label(sb, textvariable=self.mpp_status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
+
+        # ── Right plot area ───────────────────────────────────────────────────
+        self.mpp_plot_frame = Frame(right_container, bg="#ffffff")
+
+        self.mpp_fig = plt.figure(figsize=(8, 9))
+        gs = GridSpec(3, 1, figure=self.mpp_fig,
+                      height_ratios=[4, 3, 3], hspace=0.45)
+        self.mpp_ax_pce = self.mpp_fig.add_subplot(gs[0])
+        self.mpp_ax_j   = self.mpp_fig.add_subplot(gs[1])
+        self.mpp_ax_jv  = self.mpp_fig.add_subplot(gs[2])
+
+        for ax, title, xl, yl in [
+            (self.mpp_ax_pce, "Power Conversion Efficiency — MPP Tracking",
+             "Time (min)", "PCE (%)"),
+            (self.mpp_ax_j,   "Current Density at Vmpp (SPO phase)",
+             "Time (min)", "Current Density (mA/cm\u00b2)"),
+            (self.mpp_ax_jv,  "J-V Curves (reverse scan per cycle)",
+             "Voltage (V)", "Current Density (mA/cm\u00b2)"),
+        ]:
+            ax.set_title(title, fontsize=10, fontweight="bold")
+            ax.set_xlabel(xl, fontsize=9)
+            ax.set_ylabel(yl, fontsize=9)
+            ax.grid(True)
+            ax.text(0.5, 0.5, "No data yet", transform=ax.transAxes,
+                    ha="center", va="center", color="gray", fontsize=10)
+
+        self.mpp_fig.tight_layout()
+        self.mpp_canvas = FigureCanvasTkAgg(self.mpp_fig, master=self.mpp_plot_frame)
+        self.mpp_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+
+        # Storage for live plot data (initialized in _init_mpp_plots)
+        self._mpp_pce_times  = []
+        self._mpp_pce_values = []
+        self._mpp_j_times    = []
+        self._mpp_j_values   = []
+        self._mpp_jv_cycles  = []
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # STABILIZED CURRENT — panel builder
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_stab_panel(self, left_container, right_container):
+        """Build Stabilized Current left panel and right plot area (hidden initially)."""
+        # ── Left panel ────────────────────────────────────────────────────────
+        self.stab_panel = Frame(left_container, bg="#ececec")
+
+        nb = ttk.Notebook(self.stab_panel)
+        nb.pack(fill=X, padx=6, pady=(6, 4))
+
+        tab = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab, text="  Settings  ")
+
+        # Sample Information
+        sf = LabelFrame(tab, text="Sample Information", padx=6, pady=4)
+        sf.pack(fill=X, pady=(0, 6))
+        Label(sf, text="Sample Name:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.stab_sample_name_var = StringVar()
+        Entry(sf, textvariable=self.stab_sample_name_var, width=22).grid(
+            row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
+        Label(sf, text="Export Folder:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.stab_export_folder_var = StringVar()
+        stab_exp_entry = Entry(sf, textvariable=self.stab_export_folder_var, width=18)
+        stab_exp_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Button(sf, text="Browse\u2026",
+               command=lambda: self._browse_folder_for(self.stab_export_folder_var),
+               font=("Arial", 8), pady=1
+               ).grid(row=1, column=2, padx=(2, 4), pady=3)
+
+        # Measurement Settings
+        mf = LabelFrame(tab, text="Measurement Settings", padx=6, pady=4)
+        mf.pack(fill=X, pady=(0, 6))
+        for row, (lbl, attr, default, unit, tip) in enumerate([
+            ("Cell Area:",      "stab_area_var",     0.07, "cm\u00b2",
+             "Active area of solar cell (cm\u00b2)"),
+            ("Applied Voltage:", "stab_voltage_var", 0.8,  "V",
+             "Voltage held constant during the measurement.\n"
+             "Typically set to Vmpp from a previous J-V scan.\n"
+             "Christians et al. 2015: hold at 0.75\u20130.80 V for 60\u2013120 s."),
+            ("Duration:",        "stab_duration_var", 120.0, "s",
+             "Total measurement duration in seconds.\n"
+             "Minimum recommended: 60 s (NREL protocol).\n"
+             "Standard for reporting stabilized PCE: 120\u2013300 s."),
+            ("Reading interval:", "stab_interval_var", 500.0, "ms",
+             "Time between consecutive current readings."),
+            ("NPLC:",             "stab_nplc_var",     1.0,  "(0.01\u201325)",
+             "Number of Power Line Cycles per reading."),
+        ]):
+            Label(mf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var = DoubleVar(value=default)
+            setattr(self, attr, var)
+            e = Entry(mf, textvariable=var, width=10)
+            e.grid(row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(mf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+            ToolTip(e, tip)
+
+        # Illumination
+        ilf = LabelFrame(tab, text="Illumination", padx=6, pady=4)
+        ilf.pack(fill=X, pady=(0, 6))
+        Label(ilf, text="Detector Power:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.stab_detector_power_var = DoubleVar(value=0)
+        Entry(ilf, textvariable=self.stab_detector_power_var, width=10).grid(
+            row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW", fg="#666666").grid(row=0, column=2, sticky=W)
+        Label(ilf, text="Detector Area:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.stab_detector_area_var = DoubleVar(value=1.13)
+        Entry(ilf, textvariable=self.stab_detector_area_var, width=10).grid(
+            row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="cm\u00b2", fg="#666666").grid(row=1, column=2, sticky=W)
+        Label(ilf, text="Illumination:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.stab_illumination_var = StringVar(value="0.00")
+        Label(ilf, textvariable=self.stab_illumination_var,
+              font=("Arial", 9, "bold"), fg="#1565C0").grid(
+            row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW/cm\u00b2", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        # Stabilization criterion
+        cf = LabelFrame(tab, text="Stabilization Criterion", padx=6, pady=4)
+        cf.pack(fill=X, pady=(0, 4))
+        Label(cf, text="Threshold:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.stab_threshold_var = DoubleVar(value=0.1)
+        e = Entry(cf, textvariable=self.stab_threshold_var, width=10)
+        e.grid(row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(cf, text="%/min", fg="#666666").grid(row=0, column=2, sticky=W)
+        ToolTip(e,
+                "Current change rate below which the device is considered stabilized.\n"
+                "Criterion: |\u0394J/\u0394t| < threshold over a 60 s window.\n"
+                "Literature standard: 0.05\u20130.1 %/min (NREL protocol).")
+
+        # ── Control Buttons ───────────────────────────────────────────────────
+        btn_frame = Frame(self.stab_panel, bg="#ececec")
+        btn_frame.pack(fill=X, padx=8, pady=6)
+        self.stab_start_btn = Button(btn_frame, text="Start",
+                                     command=self.start_stabilized_current,
+                                     bg="#388E3C", fg="white",
+                                     font=("Arial", 9, "bold"),
+                                     width=16, pady=4, state=DISABLED)
+        self.stab_start_btn.pack(side=LEFT, padx=(0, 6))
+        self.stab_stop_btn = Button(btn_frame, text="Stop",
+                                    command=self.stop_stabilized_current,
+                                    bg="#C62828", fg="white",
+                                    font=("Arial", 9, "bold"),
+                                    width=10, pady=4, state=DISABLED)
+        self.stab_stop_btn.pack(side=LEFT)
+
+        # ── Log ───────────────────────────────────────────────────────────────
+        log_frame = LabelFrame(self.stab_panel, text="Log", padx=4, pady=4)
+        log_frame.pack(fill=BOTH, expand=True, padx=6, pady=(0, 0))
+        hsb = ttk.Scrollbar(log_frame, orient="horizontal")
+        vsb = ttk.Scrollbar(log_frame, orient="vertical")
+        self.stab_log_text = Text(log_frame, wrap="none", state=DISABLED,
+                                  font=("Consolas", 9),
+                                  yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb.config(command=self.stab_log_text.yview)
+        hsb.config(command=self.stab_log_text.xview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        self.stab_log_text.grid(row=0, column=0, sticky="nsew")
+        log_frame.grid_rowconfigure(0, weight=1)
+        log_frame.grid_columnconfigure(0, weight=1)
+
+        # ── Status bar ────────────────────────────────────────────────────────
+        sb = Frame(self.stab_panel, bg="#37474F", height=24)
+        sb.pack(fill=X, side="bottom")
+        sb.pack_propagate(False)
+        self.stab_status_var = StringVar(value="Ready \u2014 connect an instrument to begin.")
+        Label(sb, textvariable=self.stab_status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
+
+        # ── Right plot area ───────────────────────────────────────────────────
+        self.stab_plot_frame = Frame(right_container, bg="#ffffff")
+
+        self.stab_fig, self.stab_ax_j = plt.subplots(figsize=(8, 5))
+        self.stab_ax_pce = self.stab_ax_j.twinx()
+        self.stab_ax_j.set_xlabel("Time (s)", fontsize=11)
+        self.stab_ax_j.set_ylabel("Current Density (mA/cm\u00b2)",
+                                   fontsize=11, color="#1565C0")
+        self.stab_ax_pce.set_ylabel("PCE (%)", fontsize=11, color="#E65100")
+        self.stab_ax_j.set_title("Stabilized Current Measurement",
+                                  fontsize=13, fontweight="bold")
+        self.stab_ax_j.grid(True)
+        self.stab_ax_j.text(0.5, 0.5, "No data yet",
+                            transform=self.stab_ax_j.transAxes,
+                            ha="center", va="center", color="gray", fontsize=12)
+        self.stab_fig.tight_layout()
+        self.stab_canvas = FigureCanvasTkAgg(self.stab_fig, master=self.stab_plot_frame)
+        self.stab_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # MPP TRACKING — illumination / scan-rate helpers
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def update_mpp_illumination(self, *args):
+        try:
+            self.mpp_illumination_var.set(
+                f"{self.mpp_detector_power_var.get() / self.mpp_detector_area_var.get():.2f}")
+        except Exception:
+            self.mpp_illumination_var.set("Error")
+
+    def update_mpp_scan_rate(self, *args):
+        try:
+            step_mv = self.mpp_step_v_var.get() * 1000.0
+            delay_ms = self.mpp_delay_var.get()
+            nplc_ms  = self.mpp_nplc_var.get() * (1000.0 / 60.0)
+            t        = (delay_ms + nplc_ms + 20.0) / 1000.0
+            self.mpp_scan_rate_var.set(f"{step_mv / t:.1f}" if t > 0 else "\u2014")
+        except Exception:
+            self.mpp_scan_rate_var.set("\u2014")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # STABILIZED CURRENT — illumination helper
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def update_stab_illumination(self, *args):
+        try:
+            self.stab_illumination_var.set(
+                f"{self.stab_detector_power_var.get() / self.stab_detector_area_var.get():.2f}")
+        except Exception:
+            self.stab_illumination_var.set("Error")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SHARED HELPER
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _browse_folder_for(self, var):
+        folder = filedialog.askdirectory()
+        if folder:
+            var.set(folder)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # MPP TRACKING — runner and plot-update methods
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def validate_mpp_inputs(self):
+        try:
+            if not self.mpp_sample_name_var.get():
+                raise ValueError("Sample name is required")
+            if not self.mpp_export_folder_var.get():
+                raise ValueError("Select an export folder")
+            if self.mpp_total_min_var.get() <= 0:
+                raise ValueError("Total duration must be positive")
+            if self.mpp_spo_duration_var.get() <= 0:
+                raise ValueError("SPO duration must be positive")
+            pin = float(self.mpp_illumination_var.get())
+            if pin <= 0:
+                raise ValueError("Illumination must be > 0 mW/cm\u00b2")
+            return True
+        except Exception as exc:
+            messagebox.showerror("Input Error", str(exc))
+            return False
+
+    def start_mpp_tracking(self):
+        if not self.validate_mpp_inputs():
+            return
+        if self.instrument is None:
+            messagebox.showerror("No instrument", "Connect an instrument first.")
+            return
+        if not messagebox.askokcancel(
+            "Safety Check",
+            "1. Verify all connections to the Keithley SourceMeter\n"
+            "2. Confirm solar simulator shutter is open\n"
+            "3. Confirm only ONE cell is connected\n\n"
+            "Click OK to start MPP Tracking.",
+            icon="warning"
+        ):
+            return
+
+        self._measurement_running = True
+        stop_event.clear()
+        self.mpp_start_btn.config(state=DISABLED)
+        self.mpp_stop_btn.config(state=NORMAL)
+        self._init_mpp_plots()
+
+        params = {
+            "cell_area":          self.mpp_cell_area_var.get(),
+            "start_v":            self.mpp_start_v_var.get(),
+            "end_v":              self.mpp_end_v_var.get(),
+            "step_v":             self.mpp_step_v_var.get(),
+            "delay_ms":           self.mpp_delay_var.get(),
+            "nplc":               self.mpp_nplc_var.get(),
+            "include_forward":    self.mpp_include_fwd_var.get(),
+            "prebias_enabled":    self.mpp_prebias_enabled_var.get(),
+            "prebias_v":          self.mpp_prebias_v_var.get(),
+            "prebias_t":          self.mpp_prebias_t_var.get(),
+            "pin":                float(self.mpp_illumination_var.get()),
+            "total_duration_min": self.mpp_total_min_var.get(),
+            "spo_duration_s":     self.mpp_spo_duration_var.get(),
+            "spo_interval_ms":    self.mpp_spo_interval_var.get(),
+            "stab_threshold":     self.mpp_stab_threshold_var.get(),
+        }
+        callbacks = {
+            "on_status":     lambda msg: self.root.after(0, self.mpp_status_var.set, msg),
+            "on_log":        lambda msg: self.root.after(0, self._mpp_log, msg),
+            "on_jv_update":  lambda data: self.root.after(0, self._mpp_update_jv_plot, data),
+            "on_spo_update": lambda t, j, pce, cyc, stab: self.root.after(
+                                 0, self._mpp_update_spo_plot, t, j, pce, cyc, stab),
+            "on_complete":   lambda *a: self.root.after(0, self._mpp_on_complete, *a),
+        }
+
+        from app.measurement.mpp_tracker import MPPTracker
+        tracker = MPPTracker(self.instrument, params, callbacks, stop_event)
+        threading.Thread(target=tracker.run, daemon=True).start()
+
+    def stop_mpp_tracking(self):
+        stop_event.set()
+        self.mpp_status_var.set("Stopping\u2026")
+        self._measurement_running = False
+        self.mpp_start_btn.config(state=NORMAL)
+        self.mpp_stop_btn.config(state=DISABLED)
+
+    def _mpp_log(self, msg):
+        self.mpp_log_text.config(state=NORMAL)
+        self.mpp_log_text.insert(END, msg + "\n")
+        self.mpp_log_text.see(END)
+        self.mpp_log_text.config(state=DISABLED)
+
+    def _init_mpp_plots(self):
+        for ax in [self.mpp_ax_pce, self.mpp_ax_j, self.mpp_ax_jv]:
+            ax.clear()
+
+        self.mpp_ax_pce.set_xlabel("Time (min)")
+        self.mpp_ax_pce.set_ylabel("PCE (%)")
+        self.mpp_ax_pce.set_title("Power Conversion Efficiency \u2014 MPP Tracking",
+                                   fontweight="bold")
+        self.mpp_ax_pce.grid(True)
+
+        self.mpp_ax_j.set_xlabel("Time (min)")
+        self.mpp_ax_j.set_ylabel("Current Density (mA/cm\u00b2)")
+        self.mpp_ax_j.set_title("Current Density at Vmpp (SPO phase)")
+        self.mpp_ax_j.grid(True)
+
+        self.mpp_ax_jv.set_xlabel("Voltage (V)")
+        self.mpp_ax_jv.set_ylabel("Current Density (mA/cm\u00b2)")
+        self.mpp_ax_jv.set_title("J-V Curves (reverse scan, per cycle)")
+        self.mpp_ax_jv.grid(True)
+
+        self.mpp_fig.tight_layout()
+        self.mpp_canvas.draw_idle()
+
+        self._mpp_pce_times  = []
+        self._mpp_pce_values = []
+        self._mpp_j_times    = []
+        self._mpp_j_values   = []
+        self._mpp_jv_cycles  = []
+
+    def _mpp_update_spo_plot(self, t_abs, j, pce, cycle_n, stabilized):
+        t_min = t_abs / 60.0
+        self._mpp_pce_times.append(t_min)
+        self._mpp_pce_values.append(pce)
+        self._mpp_j_times.append(t_min)
+        self._mpp_j_values.append(j)
+
+        self.mpp_ax_pce.clear()
+        self.mpp_ax_pce.plot(self._mpp_pce_times, self._mpp_pce_values,
+                             "b-", linewidth=1.2)
+        for cyc in self._mpp_jv_cycles:
+            self.mpp_ax_pce.axvline(x=cyc["time_s"] / 60.0, color="gray",
+                                    linestyle="--", linewidth=0.8, alpha=0.6)
+        if stabilized:
+            self.mpp_ax_pce.plot(t_min, pce, "go", markersize=5, alpha=0.7)
+        self.mpp_ax_pce.set_xlabel("Time (min)")
+        self.mpp_ax_pce.set_ylabel("PCE (%)")
+        self.mpp_ax_pce.set_title("Power Conversion Efficiency \u2014 MPP Tracking",
+                                   fontweight="bold")
+        self.mpp_ax_pce.grid(True)
+
+        self.mpp_ax_j.clear()
+        self.mpp_ax_j.plot(self._mpp_j_times, self._mpp_j_values,
+                           color="#E65100", linewidth=1.2)
+        self.mpp_ax_j.set_xlabel("Time (min)")
+        self.mpp_ax_j.set_ylabel("Current Density (mA/cm\u00b2)")
+        self.mpp_ax_j.set_title("Current Density at Vmpp (SPO phase)")
+        self.mpp_ax_j.grid(True)
+
+        self.mpp_fig.tight_layout()
+        self.mpp_canvas.draw_idle()
+
+    def _mpp_update_jv_plot(self, cycle_data):
+        self._mpp_jv_cycles.append(cycle_data)
+
+        self.mpp_ax_jv.clear()
+        for i, cyc in enumerate(self._mpp_jv_cycles):
+            color = PLOT_COLORS[i % len(PLOT_COLORS)]
+            label = f"Cycle {cyc['cycle']} \u2014 PCE {cyc['PCE']:.1f}%"
+            self.mpp_ax_jv.plot(cyc["v_rev"], cyc["j_rev"],
+                                color=color, linewidth=1.5,
+                                marker="o", markersize=3,
+                                markerfacecolor=color, label=label)
+            if cyc.get("v_fwd") is not None:
+                self.mpp_ax_jv.plot(cyc["v_fwd"], cyc["j_fwd"],
+                                    color=color, linewidth=1.2,
+                                    linestyle="--",
+                                    marker="o", markersize=3,
+                                    markerfacecolor="white",
+                                    markeredgecolor=color)
+
+        self.mpp_ax_jv.set_xlabel("Voltage (V)")
+        self.mpp_ax_jv.set_ylabel("Current Density (mA/cm\u00b2)")
+        self.mpp_ax_jv.set_title("J-V Curves (reverse scan, per cycle)")
+        self.mpp_ax_jv.legend(fontsize=7, loc="upper right")
+        self.mpp_ax_jv.grid(True)
+        self.mpp_fig.tight_layout()
+        self.mpp_canvas.draw_idle()
+
+    def _mpp_on_complete(self, cycles, spo_time, spo_j, spo_pce):
+        self._measurement_running = False
+        self.mpp_start_btn.config(state=NORMAL)
+        self.mpp_stop_btn.config(state=DISABLED)
+        self.mpp_status_var.set("MPP Tracking complete.")
+        if not cycles:
+            return
+        try:
+            import openpyxl
+            from openpyxl import Workbook
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            name = self.mpp_sample_name_var.get() or "sample"
+            path = os.path.join(self.mpp_export_folder_var.get(),
+                                f"{name}_MPP_{ts}.xlsx")
+            wb = Workbook()
+
+            # ── Sheet 1: JV_Parameters ────────────────────────────────────
+            ws_params = wb.active
+            ws_params.title = "JV_Parameters"
+            headers = ["Cycle", "Time (min)", "Vmpp (V)", "Jmpp (mA/cm²)",
+                       "Voc (V)", "Jsc (mA/cm²)", "FF (%)", "PCE (%)", "HI (%)"]
+            ws_params.append(headers)
+            for cyc in cycles:
+                row = [
+                    cyc["cycle"],
+                    round(cyc["time_s"] / 60.0, 4),
+                    round(cyc["Vmpp"], 4),
+                    round(cyc["Jmpp"], 4),
+                    round(cyc["Voc"],  4),
+                    round(cyc["Jsc"],  4),
+                    round(cyc["FF"],   3),
+                    round(cyc["PCE"],  3),
+                    round(cyc["HI"],   3) if cyc["HI"] is not None else "",
+                ]
+                ws_params.append(row)
+
+            # ── Sheet 2: SPO_Data ─────────────────────────────────────────
+            ws_spo = wb.create_sheet("SPO_Data")
+            ws_spo.append(["Time (min)", "J (mA/cm²)", "PCE (%)", "Cycle"])
+            for t, j, pce, cyc in zip(
+                [x / 60.0 for x in spo_time], spo_j, spo_pce,
+                [c for c in (getattr(self, '_mpp_spo_cycle_idx', []) or [])]
+            ):
+                ws_spo.append([round(t, 4), round(j, 4), round(pce, 4), cyc])
+
+            # ── Sheets: JV raw data per cycle ─────────────────────────────
+            for cyc in cycles:
+                ws = wb.create_sheet(f"JV_Cycle_{cyc['cycle']}")
+                if cyc.get("v_fwd") is not None:
+                    ws.append(["Voltage (V)", "J_reverse (mA/cm²)", "J_forward (mA/cm²)"])
+                    for v, jr, jf in zip(cyc["v_rev"], cyc["j_rev"], cyc["j_fwd"]):
+                        ws.append([round(float(v), 5), round(float(jr), 5), round(float(jf), 5)])
+                else:
+                    ws.append(["Voltage (V)", "J_reverse (mA/cm²)"])
+                    for v, jr in zip(cyc["v_rev"], cyc["j_rev"]):
+                        ws.append([round(float(v), 5), round(float(jr), 5)])
+
+            wb.save(path)
+            self._mpp_log(f"\nSaved: {os.path.basename(path)}")
+            messagebox.showinfo("MPP Tracking Complete",
+                                f"Data saved to:\n{path}")
+        except Exception as exc:
+            messagebox.showerror("Export Error", str(exc))
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # STABILIZED CURRENT — runner and plot-update methods
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def validate_stab_inputs(self):
+        try:
+            if not self.stab_sample_name_var.get():
+                raise ValueError("Sample name is required")
+            if not self.stab_export_folder_var.get():
+                raise ValueError("Select an export folder")
+            if self.stab_duration_var.get() <= 0:
+                raise ValueError("Duration must be positive")
+            pin = float(self.stab_illumination_var.get())
+            if pin <= 0:
+                raise ValueError("Illumination must be > 0 mW/cm\u00b2")
+            return True
+        except Exception as exc:
+            messagebox.showerror("Input Error", str(exc))
+            return False
+
+    def start_stabilized_current(self):
+        if not self.validate_stab_inputs():
+            return
+        if self.instrument is None:
+            messagebox.showerror("No instrument", "Connect an instrument first.")
+            return
+        if not messagebox.askokcancel(
+            "Safety Check",
+            "1. Verify all connections to the Keithley SourceMeter\n"
+            "2. Confirm solar simulator shutter is open\n\n"
+            "Click OK to start.",
+            icon="warning"
+        ):
+            return
+
+        self._measurement_running = True
+        stop_event.clear()
+        self.stab_start_btn.config(state=DISABLED)
+        self.stab_stop_btn.config(state=NORMAL)
+
+        # Clear plot
+        self.stab_ax_j.clear()
+        self.stab_ax_pce.clear()
+        self.stab_ax_j.set_xlabel("Time (s)", fontsize=11)
+        self.stab_ax_j.set_ylabel("Current Density (mA/cm\u00b2)",
+                                   fontsize=11, color="#1565C0")
+        self.stab_ax_pce.set_ylabel("PCE (%)", fontsize=11, color="#E65100")
+        self.stab_ax_j.set_title("Stabilized Current Measurement",
+                                  fontsize=13, fontweight="bold")
+        self.stab_ax_j.grid(True)
+        self.stab_fig.tight_layout()
+        self.stab_canvas.draw_idle()
+
+        threading.Thread(target=self.run_stabilized_current, daemon=True).start()
+
+    def stop_stabilized_current(self):
+        stop_event.set()
+        self.stab_status_var.set("Stopping\u2026")
+
+    def run_stabilized_current(self):
+        import numpy as np, time as _time
+        try:
+            inst = self.instrument
+            inst.write("*RST")
+            _time.sleep(0.3)
+            inst.write(":SOUR:FUNC VOLT")
+            inst.write(":SENS:FUNC 'CURR:DC'")
+            inst.write(":SENS:CURR:PROT 0.1")
+            inst.write(f":SENS:CURR:NPLC {self.stab_nplc_var.get():.3f}")
+            inst.write(f":SOUR:VOLT {self.stab_voltage_var.get():.4f}")
+            inst.write(":OUTP ON")
+
+            area       = self.stab_area_var.get()
+            pin        = float(self.stab_illumination_var.get())
+            v_applied  = self.stab_voltage_var.get()
+            duration   = self.stab_duration_var.get()
+            interval   = self.stab_interval_var.get() / 1000.0
+            threshold  = self.stab_threshold_var.get()
+
+            times, j_vals, pce_vals = [], [], []
+            j_window, t_window = [], []
+            t_start = _time.time()
+            stabilized_at = None
+
+            while not stop_event.is_set():
+                elapsed = _time.time() - t_start
+                if elapsed >= duration:
+                    break
+
+                raw = inst.query(":READ?").split(",")
+                j   = -(float(raw[1]) * 1000.0) / area
+                pce = (v_applied * j) / pin if pin > 0 else 0.0
+
+                times.append(elapsed)
+                j_vals.append(j)
+                pce_vals.append(pce)
+
+                j_window.append(j)
+                t_window.append(elapsed)
+                cutoff = elapsed - 60.0
+                while t_window and t_window[0] < cutoff:
+                    t_window.pop(0)
+                    j_window.pop(0)
+
+                stabilized = False
+                if stabilized_at is None and len(j_window) >= 2 and \
+                        (t_window[-1] - t_window[0]) >= 55.0:
+                    j_mean = np.mean(j_window) if np.mean(j_window) != 0 else 1e-9
+                    rate   = abs((j_window[-1] - j_window[0]) / j_mean * 100.0
+                                 / ((t_window[-1] - t_window[0]) / 60.0))
+                    if rate < threshold:
+                        stabilized    = True
+                        stabilized_at = elapsed
+
+                self.root.after(0, self._stab_update_plot,
+                                list(times), list(j_vals), list(pce_vals),
+                                stabilized_at)
+                self.root.after(0, self.stab_status_var.set,
+                                f"t = {elapsed:.0f} s  |  J = {j:.3f} mA/cm\u00b2"
+                                f"  |  PCE = {pce:.2f}%")
+                _time.sleep(interval)
+
+            self.root.after(0, self._stab_save_data,
+                            times, j_vals, pce_vals, v_applied, pin, stabilized_at)
+            self.root.after(0, self.stab_status_var.set, "Measurement complete.")
+
+        except Exception as exc:
+            self.root.after(0, messagebox.showerror, "Error", str(exc))
+        finally:
+            try:
+                self.instrument.write(":OUTP OFF")
+            except Exception:
+                pass
+            self._measurement_running = False
+            stop_event.clear()
+            self.root.after(0, self.stab_start_btn.config, {"state": NORMAL})
+            self.root.after(0, self.stab_stop_btn.config, {"state": DISABLED})
+
+    def _stab_update_plot(self, times, j_vals, pce_vals, stabilized_at):
+        self.stab_ax_j.clear()
+        self.stab_ax_pce.clear()
+
+        self.stab_ax_j.plot(times, j_vals, color="#1565C0", linewidth=1.4,
+                             label="J (mA/cm\u00b2)")
+        self.stab_ax_pce.plot(times, pce_vals, color="#E65100", linewidth=1.4,
+                               linestyle="--", label="PCE (%)")
+
+        if stabilized_at is not None:
+            self.stab_ax_j.axvline(x=stabilized_at, color="#2E7D32",
+                                    linestyle=":", linewidth=1.2)
+            self.stab_ax_j.text(
+                stabilized_at, max(j_vals) if j_vals else 0,
+                f" \u2713 Stabilized\n   t = {stabilized_at:.0f} s",
+                color="#2E7D32", fontsize=8, va="top"
+            )
+
+        self.stab_ax_j.set_xlabel("Time (s)", fontsize=11)
+        self.stab_ax_j.set_ylabel("Current Density (mA/cm\u00b2)",
+                                   fontsize=11, color="#1565C0")
+        self.stab_ax_pce.set_ylabel("PCE (%)", fontsize=11, color="#E65100")
+        self.stab_ax_j.set_title("Stabilized Current Measurement",
+                                  fontsize=13, fontweight="bold")
+        self.stab_ax_j.grid(True)
+        self.stab_fig.tight_layout()
+        self.stab_canvas.draw_idle()
+
+    def _stab_save_data(self, times, j_vals, pce_vals, v_applied, pin, stabilized_at):
+        try:
+            import openpyxl
+            from openpyxl import Workbook
+            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+            name = self.stab_sample_name_var.get() or "sample"
+            path = os.path.join(self.stab_export_folder_var.get(),
+                                f"{name}_StabCurrent_{ts}.xlsx")
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "StabilizedCurrent"
+
+            # Parameters row
+            ws.append(["Parameter", "Value"])
+            ws.append(["Sample",          name])
+            ws.append(["Applied Voltage (V)", v_applied])
+            ws.append(["Illumination (mW/cm²)", pin])
+            ws.append(["Duration (s)",    self.stab_duration_var.get()])
+            ws.append(["Interval (ms)",   self.stab_interval_var.get()])
+            ws.append(["Threshold (%/min)", self.stab_threshold_var.get()])
+            ws.append(["Stabilized at (s)",
+                       round(stabilized_at, 1) if stabilized_at is not None else "N/A"])
+            ws.append([])
+
+            # Data
+            ws.append(["Time (s)", "J (mA/cm²)", "PCE (%)"])
+            for t, j, pce in zip(times, j_vals, pce_vals):
+                ws.append([round(t, 3), round(j, 4), round(pce, 4)])
+
+            wb.save(path)
+            self._stab_log(f"Saved: {os.path.basename(path)}")
+            messagebox.showinfo("Measurement Complete",
+                                f"Data saved to:\n{path}")
+        except Exception as exc:
+            messagebox.showerror("Export Error", str(exc))
+
+    def _stab_log(self, msg):
+        self.stab_log_text.config(state=NORMAL)
+        self.stab_log_text.insert(END, msg + "\n")
+        self.stab_log_text.see(END)
+        self.stab_log_text.config(state=DISABLED)
