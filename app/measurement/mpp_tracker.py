@@ -6,9 +6,14 @@ Protocol (per cycle):
   2. Pre-bias conditioning (if enabled)
   3. Reverse J-V scan → extract Vmpp, Voc, Jsc, FF, PCE
   4. SPO phase: hold at Vmpp, read J every interval_ms
-     → calculate PCE(t) = Vmpp × J / Pin
+     → calculate PCE(t) = Vmpp × J / Pin × 100
      → check stabilization criterion
   5. Repeat from step 1 until total_duration_min elapsed
+
+The instrument output is turned ON once at the start and stays ON for the
+entire experiment. It is turned OFF only in the finally block at the end.
+This preserves the cell's ionic distribution between phases and produces a
+continuous PCE(t) trace without disconnected segments.
 
 References:
   [1] Christians et al., J. Phys. Chem. Lett. 2015, 6, 3808.
@@ -36,112 +41,125 @@ class MPPTracker:
         self.stop_event = stop_event
 
         self.cycles           = []
-        self.spo_time         = []
-        self.spo_j            = []
-        self.spo_pce          = []
+        self.spo_time         = []   # continuous absolute elapsed seconds
+        self.spo_j            = []   # continuous J (mA/cm²)
+        self.spo_pce          = []   # continuous PCE (%)
         self.spo_cycle_idx    = []
-        self.jv_scan_intervals = []   # list of (t_start_s, t_end_s) per cycle
+        self.jv_scan_intervals = []  # list of (t_start_s, t_end_s) per cycle
         self._in_spo_phase    = False
         self.t_start          = None
 
     def run(self):
         """Main tracking loop — runs in a worker thread."""
-        self.t_start = time.time()
         total_s  = self.params["total_duration_min"] * 60.0
         cycle_n  = 0
 
         self._configure_instrument()
+        # t=0 is defined AFTER the output turns ON so the first SPO reading
+        # appears at approximately t=0 on the plot.
+        self.t_start = time.time()
 
-        while not self.stop_event.is_set():
-            elapsed = time.time() - self.t_start
-            if elapsed >= total_s:
-                break
+        try:
+            while not self.stop_event.is_set():
+                elapsed = time.time() - self.t_start
+                if elapsed >= total_s:
+                    break
 
-            cycle_n += 1
-            self.callbacks["on_status"](f"Cycle {cycle_n} — J-V scan…")
-            self.callbacks["on_log"](f"\n── Cycle {cycle_n} ──────────────────")
+                cycle_n += 1
+                self.callbacks["on_status"](f"Cycle {cycle_n} — J-V scan…")
+                self.callbacks["on_log"](f"\n── Cycle {cycle_n} ──────────────────")
 
-            # ── Record J-V scan interval start ────────────────────────────
-            t_jv_start = time.time() - self.t_start
+                # ── Record J-V scan interval start ────────────────────────
+                t_jv_start = time.time() - self.t_start
 
-            # ── Optional forward scan ──────────────────────────────────────
-            v_fwd, j_fwd = None, None
-            if self.params["include_forward"]:
-                self.callbacks["on_status"](f"Cycle {cycle_n} — Forward scan…")
-                v_fwd, j_fwd = self._measure_scan(
-                    self.params["start_v"], self.params["end_v"],
-                    self.params["step_v"])
+                # ── Optional forward scan ──────────────────────────────────
+                v_fwd, j_fwd = None, None
+                if self.params["include_forward"]:
+                    self.callbacks["on_status"](f"Cycle {cycle_n} — Forward scan…")
+                    v_fwd, j_fwd = self._measure_scan(
+                        self.params["start_v"], self.params["end_v"],
+                        self.params["step_v"])
+                    if self.stop_event.is_set():
+                        break
+
+                # ── Pre-bias (output stays ON throughout) ──────────────────
+                if self.params["prebias_enabled"]:
+                    self.callbacks["on_status"](
+                        f"Cycle {cycle_n} — Pre-bias "
+                        f"{self.params['prebias_v']:.2f} V "
+                        f"for {self.params['prebias_t']:.1f} s…")
+                    self._apply_prebias()
+                    if self.stop_event.is_set():
+                        break
+
+                # ── Reverse scan ───────────────────────────────────────────
+                self.callbacks["on_status"](f"Cycle {cycle_n} — Reverse scan…")
+                v_rev, j_rev = self._measure_scan(
+                    self.params["end_v"], self.params["start_v"],
+                    -self.params["step_v"])
                 if self.stop_event.is_set():
                     break
 
-            # ── Pre-bias (output stays ON throughout) ──────────────────────
-            if self.params["prebias_enabled"]:
+                # ── Record J-V scan interval end ───────────────────────────
+                t_jv_end = time.time() - self.t_start
+                self.jv_scan_intervals.append((t_jv_start, t_jv_end))
+
+                # ── Extract parameters ─────────────────────────────────────
+                Voc, Jsc, FF, PCE = self._calc_jv_params(v_rev, j_rev)
+                Vmpp, Jmpp        = self._find_mpp(v_rev, j_rev)
+
+                HI = None
+                if v_fwd is not None:
+                    _, _, _, PCE_fwd = self._calc_jv_params(v_fwd, j_fwd)
+                    HI = (PCE - PCE_fwd) / PCE * 100.0 if PCE else None
+
+                # Time when this cycle's Vmpp is about to be applied — used
+                # by the GUI to draw a thin dashed vertical line on PCE(t).
+                t_vmpp = time.time() - self.t_start
+
+                cycle_data = {
+                    "cycle":       cycle_n,
+                    "time_s":      t_vmpp,
+                    "Vmpp":        Vmpp,  "Jmpp": Jmpp,
+                    "Voc":         Voc,   "Jsc":  Jsc,
+                    "FF":          FF,    "PCE":  PCE,
+                    "HI":          HI,
+                    "v_rev":       v_rev, "j_rev": j_rev,
+                    "v_fwd":       v_fwd, "j_fwd": j_fwd,
+                    "jv_interval": (t_jv_start, t_jv_end),
+                }
+                self.cycles.append(cycle_data)
+
+                log_msg = (
+                    f"  Vmpp = {Vmpp:.3f} V | Jmpp = {Jmpp:.3f} mA/cm²\n"
+                    f"  Voc = {Voc:.3f} V  | Jsc = {Jsc:.3f} mA/cm²\n"
+                    f"  FF = {FF:.1f}%     | PCE = {PCE:.2f}%"
+                )
+                if HI is not None:
+                    log_msg += f" | HI = {HI:+.1f}%"
+                self.callbacks["on_log"](log_msg)
+                self.callbacks["on_jv_update"](cycle_data)
+
+                # ── SPO phase — output stays ON, voltage set to Vmpp ──────
                 self.callbacks["on_status"](
-                    f"Cycle {cycle_n} — Pre-bias "
-                    f"{self.params['prebias_v']:.2f} V "
-                    f"for {self.params['prebias_t']:.1f} s…")
-                self._apply_prebias()
+                    f"Cycle {cycle_n} — SPO at {Vmpp:.3f} V "
+                    f"for {self.params['spo_duration_s']:.0f} s…")
+                self.inst.write(f":SOUR:VOLT {Vmpp:.4f}")
+                self._run_spo(cycle_n, Vmpp)
+
                 if self.stop_event.is_set():
                     break
 
-            # ── Reverse scan ───────────────────────────────────────────────
-            self.callbacks["on_status"](f"Cycle {cycle_n} — Reverse scan…")
-            v_rev, j_rev = self._measure_scan(
-                self.params["end_v"], self.params["start_v"],
-                -self.params["step_v"])
-            if self.stop_event.is_set():
-                break
-
-            # ── Record J-V scan interval end ───────────────────────────────
-            t_jv_end = time.time() - self.t_start
-            self.jv_scan_intervals.append((t_jv_start, t_jv_end))
-
-            # ── Extract parameters ─────────────────────────────────────────
-            Voc, Jsc, FF, PCE = self._calc_jv_params(v_rev, j_rev)
-            Vmpp, Jmpp        = self._find_mpp(v_rev, j_rev)
-
-            HI = None
-            if v_fwd is not None:
-                _, _, _, PCE_fwd = self._calc_jv_params(v_fwd, j_fwd)
-                HI = (PCE - PCE_fwd) / PCE * 100.0 if PCE else None
-
-            cycle_data = {
-                "cycle":       cycle_n,
-                "time_s":      time.time() - self.t_start,
-                "Vmpp":        Vmpp,  "Jmpp": Jmpp,
-                "Voc":         Voc,   "Jsc":  Jsc,
-                "FF":          FF,    "PCE":  PCE,
-                "HI":          HI,
-                "v_rev":       v_rev, "j_rev": j_rev,
-                "v_fwd":       v_fwd, "j_fwd": j_fwd,
-                "jv_interval": (t_jv_start, t_jv_end),
-            }
-            self.cycles.append(cycle_data)
-
-            log_msg = (
-                f"  Vmpp = {Vmpp:.3f} V | Jmpp = {Jmpp:.3f} mA/cm²\n"
-                f"  Voc = {Voc:.3f} V  | Jsc = {Jsc:.3f} mA/cm²\n"
-                f"  FF = {FF:.1f}%     | PCE = {PCE:.2f}%"
-            )
-            if HI is not None:
-                log_msg += f" | HI = {HI:+.1f}%"
-            self.callbacks["on_log"](log_msg)
-            self.callbacks["on_jv_update"](cycle_data)
-
-            # ── SPO phase — output stays ON, voltage set to Vmpp ──────────
-            self.callbacks["on_status"](
-                f"Cycle {cycle_n} — SPO at {Vmpp:.3f} V "
-                f"for {self.params['spo_duration_s']:.0f} s…")
-            self.inst.write(f":SOUR:VOLT {Vmpp:.4f}")
-            self._run_spo(cycle_n, Vmpp)
-
-            if self.stop_event.is_set():
-                break
-
-        self.inst.write(":OUTP OFF")
-        self.callbacks["on_status"]("MPP Tracking complete.")
-        self.callbacks["on_complete"](
-            self.cycles, self.spo_time, self.spo_j, self.spo_pce)
+        finally:
+            # Output turns OFF exactly once, here, regardless of how the loop
+            # ended (normal completion, stop button, or exception).
+            try:
+                self.inst.write(":OUTP OFF")
+            except Exception:
+                pass
+            self.callbacks["on_status"]("MPP Tracking complete.")
+            self.callbacks["on_complete"](
+                self.cycles, self.spo_time, self.spo_j, self.spo_pce)
 
     # ── Instrument helpers ────────────────────────────────────────────────────
 
@@ -252,8 +270,7 @@ class MPPTracker:
                 )
                 stabilized = rate < threshold
 
-            if self._in_spo_phase:
-                self.callbacks["on_spo_update"](t_abs, j, pce, cycle_n, stabilized)
+            self.callbacks["on_spo_update"](t_abs, j, pce, cycle_n, stabilized)
             time.sleep(interval_s)
 
         self._in_spo_phase = False

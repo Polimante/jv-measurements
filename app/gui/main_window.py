@@ -1800,26 +1800,15 @@ class JVMeasurementApp:
         self.mpp_fig.tight_layout()
         self.mpp_canvas.draw_idle()
 
-        self._mpp_pce_times      = []
-        self._mpp_pce_values     = []
-        self._mpp_j_times        = []
-        self._mpp_j_values       = []
-        self._mpp_jv_cycles      = []
-        self._mpp_jv_intervals   = []
-        self._mpp_last_spo_cycle = None
+        self._mpp_pce_times    = []
+        self._mpp_pce_values   = []
+        self._mpp_j_times      = []
+        self._mpp_j_values     = []
+        self._mpp_jv_cycles    = []
+        self._mpp_cycle_times  = []  # minutes — one entry per cycle, for axvline
 
     def _mpp_update_spo_plot(self, t_abs, j, pce, cycle_n, stabilized):
         t_min = t_abs / 60.0
-
-        # Insert a None break when a new cycle starts so matplotlib does not
-        # draw a connecting line across the J-V scan gap (which looks like a spike).
-        last_cycle = getattr(self, "_mpp_last_spo_cycle", cycle_n)
-        if self._mpp_pce_times and cycle_n != last_cycle:
-            self._mpp_pce_times.append(None)
-            self._mpp_pce_values.append(None)
-            self._mpp_j_times.append(None)
-            self._mpp_j_values.append(None)
-        self._mpp_last_spo_cycle = cycle_n
 
         self._mpp_pce_times.append(t_min)
         self._mpp_pce_values.append(pce)
@@ -1829,10 +1818,10 @@ class JVMeasurementApp:
         self.mpp_ax_pce.clear()
         self.mpp_ax_pce.plot(self._mpp_pce_times, self._mpp_pce_values,
                              "b-", linewidth=1.2)
-        # Shade J-V scan windows so the gaps are clearly visible
-        for (t0_min, t1_min) in self._mpp_jv_intervals:
-            self.mpp_ax_pce.axvspan(t0_min, t1_min,
-                                    color="#BDBDBD", alpha=0.35,
+        # Thin dashed vertical line at each cycle boundary (when new Vmpp applied)
+        for t_cyc in self._mpp_cycle_times:
+            self.mpp_ax_pce.axvline(x=t_cyc, color="#9E9E9E", linewidth=0.8,
+                                    linestyle="--", alpha=0.7,
                                     label="_nolegend_")
         if stabilized:
             self.mpp_ax_pce.plot(t_min, pce, "go", markersize=5, alpha=0.7)
@@ -1845,10 +1834,9 @@ class JVMeasurementApp:
         self.mpp_ax_j.clear()
         self.mpp_ax_j.plot(self._mpp_j_times, self._mpp_j_values,
                            color="#E65100", linewidth=1.2)
-        # Shade J-V scan windows on current density plot too
-        for (t0_min, t1_min) in self._mpp_jv_intervals:
-            self.mpp_ax_j.axvspan(t0_min, t1_min,
-                                  color="#BDBDBD", alpha=0.35,
+        for t_cyc in self._mpp_cycle_times:
+            self.mpp_ax_j.axvline(x=t_cyc, color="#9E9E9E", linewidth=0.8,
+                                  linestyle="--", alpha=0.7,
                                   label="_nolegend_")
         self.mpp_ax_j.set_xlabel("Time (min)")
         self.mpp_ax_j.set_ylabel("Current Density (mA/cm\u00b2)")
@@ -1861,12 +1849,9 @@ class JVMeasurementApp:
     def _mpp_update_jv_plot(self, cycle_data):
         self._mpp_jv_cycles.append(cycle_data)
 
-        # Store J-V interval (in minutes) for shaded-band overlay
-        if "jv_interval" in cycle_data:
-            if not hasattr(self, "_mpp_jv_intervals"):
-                self._mpp_jv_intervals = []
-            t0, t1 = cycle_data["jv_interval"]
-            self._mpp_jv_intervals.append((t0 / 60.0, t1 / 60.0))
+        # Record the time (min) when this cycle's Vmpp was applied so
+        # _mpp_update_spo_plot can draw a thin dashed vertical line there.
+        self._mpp_cycle_times.append(cycle_data["time_s"] / 60.0)
 
         # ── J-V curves subplot ────────────────────────────────────────────────
         self.mpp_ax_jv.clear()
