@@ -44,12 +44,28 @@ class PureMPPTracker:
     def run(self):
         """Main tracking loop — runs in a worker thread."""
         self._configure_instrument()
-        # t=0 is defined after output turns ON
+
+        # ── Initial J-V scan to find Vmpp ─────────────────────────────────────
+        self.callbacks["on_status"]("Initial J-V scan — finding Vmpp…")
+        v_arr, j_arr = self._measure_scan(
+            self.params["scan_end_v"],   # reverse scan: end → start
+            self.params["scan_start_v"],
+            -self.params["scan_step_v"],
+        )
+        v = self._find_vmpp(v_arr, j_arr)
+        self.callbacks["on_status"](
+            f"Vmpp found: {v:.3f} V — starting P&O tracking…")
+        self.callbacks["on_jv_done"](v_arr, j_arr, v)
+
+        # Apply Vmpp and let the cell settle before the first P&O reading
+        self.inst.write(f":SOUR:VOLT {v:.4f}")
+        time.sleep(0.2)
+
+        # t=0 is defined after the initial J-V scan, when P&O begins
         self.t_start = time.time()
 
         total_s    = self.params["total_duration_min"] * 60.0
         step_v     = self.params["perturb_step_mv"] / 1000.0
-        v          = self.params["initial_v"]
         v_min      = self.params["v_min"]
         v_max      = self.params["v_max"]
         interval_s = self.params["interval_ms"] / 1000.0
@@ -122,5 +138,31 @@ class PureMPPTracker:
         self.inst.write(f":SENS:CURR:NPLC {p['nplc']:.3f}")
         self.inst.write(f":SOUR:DEL {p['delay_ms'] / 1000:.4f}")
         self.inst.write(":SYST:RSEN OFF")
-        self.inst.write(f":SOUR:VOLT {p['initial_v']:.4f}")
+        self.inst.write(f":SOUR:VOLT {p['scan_start_v']:.4f}")
         self.inst.write(":OUTP ON")
+
+    def _measure_scan(self, start, end, step):
+        """Quick J-V sweep. Returns (voltages, currents) as numpy arrays."""
+        area = self.params["cell_area"]
+        voltages, currents = [], []
+        v = start
+        while (step > 0 and v <= end + 1e-9) or (step < 0 and v >= end - 1e-9):
+            if self.stop_event.is_set():
+                break
+            self.inst.write(f":SOUR:VOLT {v:.4f}")
+            time.sleep(0.02)
+            raw     = self.inst.query(":READ?").split(",")
+            current = -float(raw[1])
+            j       = (current * 1000.0) / area
+            voltages.append(v)
+            currents.append(j)
+            v = round(v + step, 6)
+        return np.array(voltages), np.array(currents)
+
+    def _find_vmpp(self, voltages, currents):
+        """Return voltage at maximum power point from a J-V array."""
+        if len(voltages) == 0:
+            return self.params.get("v_max", 1.0) * 0.7
+        power  = voltages * currents
+        idx_mp = int(np.argmax(power))
+        return float(voltages[idx_mp])

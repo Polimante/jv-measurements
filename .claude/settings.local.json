@@ -16,7 +16,11 @@
       "Bash(python -m py_compile app/gui/main_window.py app/io/exporter.py)",
       "Bash(python -m py_compile app/measurement/analysis.py app/gui/main_window.py)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/gui/main_window.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/gui/main_window.py', encoding='utf-8'\\).read\\(\\)\\); print\\('main_window OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/measurement/mpp_tracker.py', encoding='utf-8'\\).read\\(\\)\\); print\\('mpp_tracker OK'\\)\")",
+      "Bash(python -c \"from app.gui.main_window import JVMeasurementApp; print\\('import OK'\\)\")",
+      "Bash(python -c \"from app.measurement.pure_mpp_tracker import PureMPPTracker; print\\('import OK'\\)\")"
     ]
   }
 }

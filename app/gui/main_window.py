@@ -1779,6 +1779,26 @@ class JVMeasurementApp:
             row=3, column=1, sticky=W, padx=4, pady=3)
         Label(cf, text="mW/cm\u00b2", fg="#666666").grid(row=3, column=2, sticky=W)
 
+        # Initial J-V Scan settings (in Setup tab, below illumination)
+        jvsf = LabelFrame(tab_setup, text="Initial J-V Scan (finds Vmpp)", padx=6, pady=4)
+        jvsf.pack(fill=X, pady=(0, 4))
+        ToolTip(jvsf,
+                "A reverse J-V scan is performed once at the start to locate the\n"
+                "real Vmpp. The P&O algorithm then starts from that voltage.\n"
+                "Use the same voltage range as your regular J-V measurements.")
+
+        for row, (lbl, attr, default, unit) in enumerate([
+            ("Start Voltage:", "pmpp_scan_start_v_var", -0.1,  "V"),
+            ("End Voltage:",   "pmpp_scan_end_v_var",    1.05, "V"),
+            ("Step Voltage:",  "pmpp_scan_step_v_var",   0.025, "V"),
+        ]):
+            Label(jvsf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var = DoubleVar(value=default)
+            setattr(self, attr, var)
+            Entry(jvsf, textvariable=var, width=10).grid(
+                row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(jvsf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+
         # ─── Tab 2: P&O Settings ──────────────────────────────────────────────
         tab_po = Frame(nb, padx=6, pady=4, bg="#ececec")
         nb.add(tab_po, text="  P&O Settings  ")
@@ -1790,10 +1810,6 @@ class JVMeasurementApp:
             ("Total duration:", "pmpp_total_min_var",   60.0,  "min",
              "Total duration of the Pure MPP tracking experiment.\n"
              "Recommended: 60\u2013600 min for stability studies."),
-            ("Initial voltage:", "pmpp_initial_v_var",  0.70,  "V",
-             "Starting voltage for the P&O algorithm.\n"
-             "Set this close to the expected Vmpp (typically 0.6\u20130.8 V).\n"
-             "The algorithm will converge to the real Vmpp within a few seconds."),
             ("Perturb step:",   "pmpp_step_mv_var",     10.0,  "mV",
              "Voltage perturbation step for the P&O algorithm.\n"
              "Smaller step = more accurate tracking, slower convergence.\n"
@@ -1854,12 +1870,13 @@ class JVMeasurementApp:
         # ── Right plot area ───────────────────────────────────────────────────
         self.pmpp_plot_frame = Frame(right_container, bg="#ffffff")
 
-        self.pmpp_fig = plt.figure(figsize=(8, 8))
-        gs = GridSpec(3, 1, figure=self.pmpp_fig,
-                      height_ratios=[4, 3, 2], hspace=0.5)
-        self.pmpp_ax_pce = self.pmpp_fig.add_subplot(gs[0])
-        self.pmpp_ax_j   = self.pmpp_fig.add_subplot(gs[1])
-        self.pmpp_ax_v   = self.pmpp_fig.add_subplot(gs[2])
+        self.pmpp_fig = plt.figure(figsize=(8, 9))
+        gs = GridSpec(3, 2, figure=self.pmpp_fig,
+                      height_ratios=[4, 3, 3], hspace=0.55, wspace=0.35)
+        self.pmpp_ax_pce = self.pmpp_fig.add_subplot(gs[0, :])   # full width
+        self.pmpp_ax_j   = self.pmpp_fig.add_subplot(gs[1, :])   # full width
+        self.pmpp_ax_v   = self.pmpp_fig.add_subplot(gs[2, 0])   # bottom-left
+        self.pmpp_ax_jv  = self.pmpp_fig.add_subplot(gs[2, 1])   # bottom-right
 
         for ax, title, xl, yl in [
             (self.pmpp_ax_pce,
@@ -1871,6 +1888,9 @@ class JVMeasurementApp:
             (self.pmpp_ax_v,
              "Tracked Vmpp",
              "Time (min)", "Vmpp (V)"),
+            (self.pmpp_ax_jv,
+             "Initial J-V Scan",
+             "Voltage (V)", "J (mA/cm\u00b2)"),
         ]:
             ax.set_title(title, fontsize=10, fontweight="bold")
             ax.set_xlabel(xl, fontsize=9)
@@ -1933,7 +1953,9 @@ class JVMeasurementApp:
             "cell_area":          self.pmpp_cell_area_var.get(),
             "pin":                pin,
             "total_duration_min": self.pmpp_total_min_var.get(),
-            "initial_v":          self.pmpp_initial_v_var.get(),
+            "scan_start_v":       self.pmpp_scan_start_v_var.get(),
+            "scan_end_v":         self.pmpp_scan_end_v_var.get(),
+            "scan_step_v":        self.pmpp_scan_step_v_var.get(),
             "perturb_step_mv":    self.pmpp_step_mv_var.get(),
             "interval_ms":        self.pmpp_interval_ms_var.get(),
             "v_min":              self.pmpp_v_min_var.get(),
@@ -1945,6 +1967,8 @@ class JVMeasurementApp:
             "on_status":  lambda msg: self.root.after(0, self.pmpp_status_var.set, msg),
             "on_update":  lambda t, v, j, pce: self.root.after(
                               0, self._pmpp_update, t, v, j, pce),
+            "on_jv_done": lambda v_arr, j_arr, vmpp: self.root.after(
+                              0, self._pmpp_show_initial_jv, v_arr, j_arr, vmpp),
             "on_complete": lambda *a: self.root.after(0, self._pmpp_on_complete, *a),
         }
 
@@ -1960,7 +1984,8 @@ class JVMeasurementApp:
         self.pmpp_stop_btn.config(state=DISABLED)
 
     def _init_pmpp_plots(self):
-        for ax in [self.pmpp_ax_pce, self.pmpp_ax_j, self.pmpp_ax_v]:
+        for ax in [self.pmpp_ax_pce, self.pmpp_ax_j,
+                   self.pmpp_ax_v, self.pmpp_ax_jv]:
             ax.clear()
         self.pmpp_ax_pce.set_xlabel("Time (min)")
         self.pmpp_ax_pce.set_ylabel("PCE (%)")
@@ -1975,13 +2000,37 @@ class JVMeasurementApp:
         self.pmpp_ax_v.set_ylabel("Vmpp (V)")
         self.pmpp_ax_v.set_title("Tracked Vmpp")
         self.pmpp_ax_v.grid(True)
+        self.pmpp_ax_jv.set_xlabel("Voltage (V)")
+        self.pmpp_ax_jv.set_ylabel("J (mA/cm\u00b2)")
+        self.pmpp_ax_jv.set_title("Initial J-V Scan")
+        self.pmpp_ax_jv.text(0.5, 0.5, "Scanning\u2026",
+                              transform=self.pmpp_ax_jv.transAxes,
+                              ha="center", va="center",
+                              color="gray", fontsize=9)
+        self.pmpp_ax_jv.grid(True)
         self.pmpp_fig.tight_layout()
         self.pmpp_canvas.draw_idle()
 
-        self._pmpp_t  = []
-        self._pmpp_v  = []
-        self._pmpp_j  = []
+        self._pmpp_t   = []
+        self._pmpp_v   = []
+        self._pmpp_j   = []
         self._pmpp_pce = []
+
+    def _pmpp_show_initial_jv(self, v_arr, j_arr, vmpp):
+        """Plot the initial J-V scan and mark Vmpp. Called once before P&O starts."""
+        ax = self.pmpp_ax_jv
+        ax.clear()
+        ax.plot(v_arr, j_arr, color="#1B5E20", linewidth=1.5,
+                marker="o", markersize=2, markerfacecolor="#1B5E20")
+        ax.axvline(x=vmpp, color="#E65100", linewidth=1.0,
+                   linestyle="--", label=f"Vmpp = {vmpp:.3f} V")
+        ax.set_xlabel("Voltage (V)")
+        ax.set_ylabel("J (mA/cm\u00b2)")
+        ax.set_title("Initial J-V Scan")
+        ax.legend(fontsize=7)
+        ax.grid(True)
+        self.pmpp_fig.tight_layout()
+        self.pmpp_canvas.draw_idle()
 
     def _pmpp_update(self, t_abs, v, j, pce):
         t_min = t_abs / 60.0
