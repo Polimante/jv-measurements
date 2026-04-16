@@ -8,7 +8,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import (
     ttk, Menu, filedialog, Label, Entry, Button,
     StringVar, DoubleVar, Text, messagebox,
-    Frame, LabelFrame, Checkbutton, BooleanVar,
+    Frame, LabelFrame, Checkbutton, BooleanVar, Radiobutton,
     LEFT, RIGHT, BOTH, X, Y, W, END, DISABLED, NORMAL,
 )
 from datetime import datetime
@@ -63,9 +63,10 @@ class JVMeasurementApp:
         # J-V traces
         self.detector_power_var.trace("w", self.update_illumination)
         self.detector_area_var.trace("w",  self.update_illumination)
-        self.step_voltage_var.trace("w",   self.update_scan_rate)
-        self.delay_ms_var.trace("w",       self.update_scan_rate)
-        self.nplc_var.trace("w",           self.update_scan_rate)
+        self.step_voltage_var.trace("w",   self._on_measurement_params_change)
+        self.delay_ms_var.trace("w",       self._on_measurement_params_change)
+        self.nplc_var.trace("w",           self._on_measurement_params_change)
+        self.target_scan_rate_var.trace("w", self._recalculate_delay_from_scan_rate)
         self.update_scan_rate()
         # MPP traces
         self.mpp_detector_power_var.trace("w", self.update_mpp_illumination)
@@ -212,32 +213,71 @@ class JVMeasurementApp:
         inf = LabelFrame(tab_inst, text="Keithley 2400 Settings", padx=6, pady=4)
         inf.pack(fill=X, pady=(0, 6))
 
+        # ── Scan rate input mode toggle ───────────────────────────────────────
+        self.scan_rate_mode = StringVar(value="advanced")
+        mode_frame = Frame(inf)
+        mode_frame.grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=(4, 2))
+        Radiobutton(mode_frame, text="Advanced (manual delay)",
+                    variable=self.scan_rate_mode, value="advanced",
+                    command=self._on_scan_mode_change,
+                    ).pack(side=LEFT)
+        Radiobutton(mode_frame, text="Scan rate (mV/s)",
+                    variable=self.scan_rate_mode, value="scan_rate",
+                    command=self._on_scan_mode_change,
+                    ).pack(side=LEFT, padx=(12, 0))
+
         Label(inf, text="Delay per point:").grid(
-            row=0, column=0, sticky=W, padx=4, pady=4)
+            row=1, column=0, sticky=W, padx=4, pady=4)
         self.delay_ms_var = DoubleVar(value=100.0)
-        delay_entry = Entry(inf, textvariable=self.delay_ms_var, width=10)
-        delay_entry.grid(row=0, column=1, sticky=W, padx=4, pady=4)
-        Label(inf, text="ms", fg="#666666").grid(row=0, column=2, sticky=W)
-        self.input_widgets.append(delay_entry)
-        ToolTip(delay_entry,
+        self.delay_entry = Entry(inf, textvariable=self.delay_ms_var, width=10)
+        self.delay_entry.grid(row=1, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="ms", fg="#666666").grid(row=1, column=2, sticky=W)
+        self.input_widgets.append(self.delay_entry)
+        ToolTip(self.delay_entry,
                 "Wait time (ms) between applying each voltage step and reading current.\n"
                 "Perovskites typically need 100\u2013500 ms. Corresponds to :SOUR:DEL.")
 
         Label(inf, text="NPLC:").grid(
-            row=1, column=0, sticky=W, padx=4, pady=4)
+            row=2, column=0, sticky=W, padx=4, pady=4)
         self.nplc_var = DoubleVar(value=1.0)
         nplc_entry = Entry(inf, textvariable=self.nplc_var, width=10)
-        nplc_entry.grid(row=1, column=1, sticky=W, padx=4, pady=4)
-        Label(inf, text="(0.01\u201325)", fg="#666666").grid(row=1, column=2, sticky=W)
+        nplc_entry.grid(row=2, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="(0.01\u201325)", fg="#666666").grid(row=2, column=2, sticky=W)
         self.input_widgets.append(nplc_entry)
         ToolTip(nplc_entry,
                 "Number of Power Line Cycles per reading (Brazil: 60 Hz \u2192 1 NPLC \u2248 16.7 ms).\n"
                 "Higher = less noise, slower. Range: 0.01 \u2013 25.")
 
+        # ── Target scan rate row (visible only in "scan_rate" mode) ──────────
+        self.target_scan_rate_var = DoubleVar(value=100.0)
+        self._sr_input_label = Label(inf, text="Target scan rate:")
+        self._sr_input_entry = Entry(inf, textvariable=self.target_scan_rate_var,
+                                     width=10, state=DISABLED)
+        self._sr_input_unit  = Label(inf, text="mV/s", fg="#666666")
+        # Start hidden — only shown when mode == "scan_rate"
+        # (grid_remove preserves grid info so grid() restores position)
+        self._sr_input_label.grid(row=3, column=0, sticky=W, padx=4, pady=4)
+        self._sr_input_entry.grid(row=3, column=1, sticky=W, padx=4, pady=4)
+        self._sr_input_unit.grid( row=3, column=2, sticky=W)
+        self._sr_input_label.grid_remove()
+        self._sr_input_entry.grid_remove()
+        self._sr_input_unit.grid_remove()
+        ToolTip(self._sr_input_entry,
+                "Target voltage sweep rate in mV/s.\n\n"
+                "Delay per point is calculated automatically:\n"
+                "  delay = (step_mV / scan_rate \u00d7 1000) \u2212 NPLC \u00d7 16.7 \u2212 50 ms\n\n"
+                "The 50 ms accounts for GPIB + Python overhead.\n"
+                "If the result is negative (rate too fast for step/NPLC),\n"
+                "delay is clamped to 0 ms and the actual rate shown.\n\n"
+                "Typical values for perovskites:\n"
+                "  10\u201330 mV/s  \u2192 quasi-steady-state (publication standard)\n"
+                "  50\u2013100 mV/s \u2192 standard lab measurement\n"
+                "  500+ mV/s  \u2192 fast screening only")
+
         self.four_wire_var = BooleanVar(value=False)
         cb4w = Checkbutton(inf, text="4-Wire (Kelvin) sensing",
                            variable=self.four_wire_var)
-        cb4w.grid(row=2, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+        cb4w.grid(row=4, column=0, columnspan=3, sticky=W, padx=4, pady=4)
         ToolTip(cb4w,
                 "Enables :SYST:RSEN ON \u2014 eliminates cable resistance from the\n"
                 "measurement. Requires Force HI/LO + Sense HI/LO connections.")
@@ -706,6 +746,56 @@ class JVMeasurementApp:
             self.scan_rate_var.set(f"{step_mv / time_per_point:.1f}")
         except Exception:
             self.scan_rate_var.set("\u2014")
+
+    def _on_measurement_params_change(self, *args):
+        """Dispatcher: routes step/delay/NPLC changes to the correct handler."""
+        if self.scan_rate_mode.get() == "scan_rate":
+            self._recalculate_delay_from_scan_rate()
+        else:
+            self.update_scan_rate()
+
+    def _on_scan_mode_change(self):
+        """Called when the user toggles between Advanced and Scan Rate modes."""
+        mode = self.scan_rate_mode.get()
+        if mode == "advanced":
+            self.delay_entry.config(state=NORMAL)
+            self._sr_input_entry.config(state=DISABLED)
+            self._sr_input_label.grid_remove()
+            self._sr_input_entry.grid_remove()
+            self._sr_input_unit.grid_remove()
+            self.update_scan_rate()
+        else:  # "scan_rate"
+            self.delay_entry.config(state="readonly")
+            self._sr_input_entry.config(state=NORMAL)
+            self._sr_input_label.grid()
+            self._sr_input_entry.grid()
+            self._sr_input_unit.grid()
+            self._recalculate_delay_from_scan_rate()
+
+    def _recalculate_delay_from_scan_rate(self, *args):
+        """Calculate delay from target scan rate. Only acts in scan_rate mode."""
+        if self.scan_rate_mode.get() != "scan_rate":
+            return
+        try:
+            step_mv          = self.step_voltage_var.get() * 1000.0
+            target_rate      = self.target_scan_rate_var.get()
+            nplc_ms          = self.nplc_var.get() * (1000.0 / 60.0)
+            gpib_overhead_ms = 50.0
+
+            if step_mv <= 0 or target_rate <= 0:
+                return
+
+            time_per_point_ms = (step_mv / target_rate) * 1000.0
+            delay_ms          = max(0.0, time_per_point_ms - nplc_ms - gpib_overhead_ms)
+
+            self.delay_ms_var.set(round(delay_ms, 1))
+
+            actual_time_ms   = delay_ms + nplc_ms + gpib_overhead_ms
+            actual_rate      = step_mv / (actual_time_ms / 1000.0)
+            warning          = " \u26a0" if delay_ms == 0.0 else ""
+            self.scan_rate_var.set(f"{actual_rate:.1f}{warning}")
+        except Exception:
+            pass
 
     def validate_inputs(self):
         try:
