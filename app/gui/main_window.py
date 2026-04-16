@@ -293,7 +293,7 @@ class JVMeasurementApp:
         ToolTip(sr_lbl,
                 "Effective voltage sweep rate, calculated automatically from:\n"
                 "  Scan rate (mV/s) = Step Voltage (mV) \u00f7 Time per point (s)\n\n"
-                "Time per point = Delay + NPLC \u00d7 16.7 ms + 20 ms (fixed margin)\n\n"
+                "Time per point = Delay + NPLC \u00d7 16.7 ms + 50 ms (GPIB overhead)\n\n"
                 "For perovskite solar cells, typical values in the literature:\n"
                 "  Fast scan:   50\u2013200 mV/s  (maximises hysteresis)\n"
                 "  Standard:    10\u2013100 mV/s  (good balance of speed and accuracy)\n"
@@ -739,7 +739,7 @@ class JVMeasurementApp:
             step_mv        = self.step_voltage_var.get() * 1000.0
             delay_ms       = self.delay_ms_var.get()
             nplc_ms        = self.nplc_var.get() * (1000.0 / 60.0)
-            time_per_point = (delay_ms + nplc_ms + 20.0) / 1000.0
+            time_per_point = (delay_ms + nplc_ms + 50.0) / 1000.0
             if time_per_point <= 0 or step_mv <= 0:
                 self.scan_rate_var.set("\u2014")
                 return
