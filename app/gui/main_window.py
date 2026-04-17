@@ -1590,9 +1590,8 @@ class JVMeasurementApp:
         # ── Right plot area ───────────────────────────────────────────────────
         self.mpp_plot_frame = Frame(right_container, bg="#ffffff")
 
-        self.mpp_fig = plt.figure(figsize=(8, 9))
-        gs = GridSpec(3, 1, figure=self.mpp_fig,
-                      height_ratios=[4, 3, 3], hspace=0.45)
+        self.mpp_fig = plt.figure(figsize=(8, 9), constrained_layout=True)
+        gs = GridSpec(3, 1, figure=self.mpp_fig, height_ratios=[4, 3, 3])
         self.mpp_ax_pce = self.mpp_fig.add_subplot(gs[0])
         self.mpp_ax_j   = self.mpp_fig.add_subplot(gs[1])
         self.mpp_ax_jv  = self.mpp_fig.add_subplot(gs[2])
@@ -1612,7 +1611,6 @@ class JVMeasurementApp:
             ax.text(0.5, 0.5, "No data yet", transform=ax.transAxes,
                     ha="center", va="center", color="gray", fontsize=10)
 
-        self.mpp_fig.tight_layout()
         self.mpp_canvas = FigureCanvasTkAgg(self.mpp_fig, master=self.mpp_plot_frame)
         self.mpp_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
 
@@ -1972,9 +1970,8 @@ class JVMeasurementApp:
         # ── Right plot area ───────────────────────────────────────────────────
         self.pmpp_plot_frame = Frame(right_container, bg="#ffffff")
 
-        self.pmpp_fig = plt.figure(figsize=(8, 9))
-        gs = GridSpec(3, 2, figure=self.pmpp_fig,
-                      height_ratios=[4, 3, 3], hspace=0.55, wspace=0.35)
+        self.pmpp_fig = plt.figure(figsize=(8, 9), constrained_layout=True)
+        gs = GridSpec(3, 2, figure=self.pmpp_fig, height_ratios=[4, 3, 3])
         self.pmpp_ax_pce = self.pmpp_fig.add_subplot(gs[0, :])   # full width
         self.pmpp_ax_j   = self.pmpp_fig.add_subplot(gs[1, :])   # full width
         self.pmpp_ax_v   = self.pmpp_fig.add_subplot(gs[2, 0])   # bottom-left
@@ -2001,7 +1998,6 @@ class JVMeasurementApp:
             ax.text(0.5, 0.5, "No data yet", transform=ax.transAxes,
                     ha="center", va="center", color="gray", fontsize=10)
 
-        self.pmpp_fig.tight_layout()
         self.pmpp_canvas = FigureCanvasTkAgg(
             self.pmpp_fig, master=self.pmpp_plot_frame)
         self.pmpp_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
@@ -2110,7 +2106,6 @@ class JVMeasurementApp:
                               ha="center", va="center",
                               color="gray", fontsize=9)
         self.pmpp_ax_jv.grid(True)
-        self.pmpp_fig.tight_layout()
         self.pmpp_canvas.draw_idle()
 
         self._pmpp_t   = []
@@ -2131,7 +2126,6 @@ class JVMeasurementApp:
         ax.set_title("Initial J-V Scan")
         ax.legend(fontsize=7)
         ax.grid(True)
-        self.pmpp_fig.tight_layout()
         self.pmpp_canvas.draw_idle()
 
     def _pmpp_update(self, t_abs, v, j, pce):
@@ -2166,7 +2160,6 @@ class JVMeasurementApp:
         self.pmpp_ax_v.set_title("Tracked Vmpp")
         self.pmpp_ax_v.grid(True)
 
-        self.pmpp_fig.tight_layout()
         self.pmpp_canvas.draw_idle()
 
     def _pmpp_on_complete(self, time_s, v_track, j_track, pce_track):
@@ -2315,7 +2308,6 @@ class JVMeasurementApp:
         self.mpp_ax_jv.set_title("J-V Curves (reverse scan, per cycle)")
         self.mpp_ax_jv.grid(True)
 
-        self.mpp_fig.tight_layout()
         self.mpp_canvas.draw_idle()
 
         self._mpp_pce_times     = []
@@ -2386,7 +2378,6 @@ class JVMeasurementApp:
         self.mpp_ax_j.set_title("Current Density at Vmpp (SPO phase)")
         self.mpp_ax_j.grid(True)
 
-        self.mpp_fig.tight_layout()
         self.mpp_canvas.draw_idle()
 
     def _mpp_update_jv_plot(self, cycle_data):
@@ -2415,7 +2406,6 @@ class JVMeasurementApp:
         self.mpp_ax_jv.legend(fontsize=7, loc="upper right")
         self.mpp_ax_jv.grid(True)
 
-        self.mpp_fig.tight_layout()
         self.mpp_canvas.draw_idle()
 
     def _mpp_on_complete(self, cycles, spo_time, spo_j, spo_pce):
