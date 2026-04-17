@@ -1,0 +1,8 @@
+{
+    "version": "2.5.0",
+    "release_date": "2025-04-17",
+    "release_notes": "Initial public release. Features: J-V measurement with forward/reverse scan, MPP Tracking (JV-SPO cycling protocol), Pure MPP Tracking (Perturb-and-Observe), Stabilized Current measurement, interactive plot with session history, scan rate direct input mode.",
+    "minimum_python": "3.9",
+    "download_url": "https://github.com/Polimante/jv-measurements/releases/latest",
+    "changelog_url": "https://github.com/Polimante/jv-measurements/blob/main/CHANGELOG.md"
+}

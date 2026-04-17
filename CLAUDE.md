@@ -32,6 +32,8 @@ app/
     keithley.py                # Stateless SCPI helpers (init, prebias, light_soaking, scan)
   measurement/
     analysis.py                # Pure math: calculate_jv_parameters, calculate_resistances, HI
+    mpp_tracker.py             # MPPTracker — JV-SPO cycling protocol (Alt+F5)
+    pure_mpp_tracker.py        # PureMPPTracker — Perturb-and-Observe continuous tracking (Alt+F6)
   io/
     exporter.py                # save_data() and save_dark_jv_data() → xlsxwriter
   utils/
@@ -77,7 +79,28 @@ Column mapping is documented in `data_viewer.py::_read_illuminated()` and `_read
 - **Rsh**: `abs(1000 / slope)` near V=0 — always positive
 - **HI**: `(PCE_rev − PCE_fwd) / PCE_rev × 100` (Kim & Park 2014, positive = normal hysteresis)
 
-### Measurement sequence
+### Measurement modes and keyboard shortcuts
+
+| Mode | Shortcut | Class / entry point |
+|---|---|---|
+| J-V Measurement | Alt+F3 | `run_measurement()` in `main_window.py` |
+| MPP Tracking (JV-SPO) | Alt+F5 | `MPPTracker` in `mpp_tracker.py` |
+| Stabilized Current | Alt+F4 | inline in `main_window.py` |
+| Pure MPP Tracking (P&O) | Alt+F6 | `PureMPPTracker` in `pure_mpp_tracker.py` |
+
+Mode panels are shown/hidden by `switch_mode()` using `pack()`/`pack_forget()`. The active panel name is stored in `self._current_mode` (`"jv"`, `"mpp"`, `"stab"`, `"pure_mpp"`).
+
+### MPP Tracking (JV-SPO cycling) — `mpp_tracker.py`
+
+Each cycle: optional forward scan → optional pre-bias → reverse scan → SPO phase at Vmpp. The instrument output stays ON for the entire experiment (turned off only in the `finally` block). Voltage is set to Vmpp **inside** `_run_spo()` with a 100 ms settling sleep before the first reading.
+
+SPO plot uses **accumulated SPO-only time** on the X-axis (J-V scan time is excluded). When `cycle_n` changes, a `None` is inserted in the plot arrays to break the line, and a dashed vertical axvline marks the cycle boundary. This prevents false connecting lines across J-V scan gaps.
+
+### Pure MPP Tracking (P&O) — `pure_mpp_tracker.py`
+
+Runs one initial reverse J-V scan (using `scan_start_v`, `scan_end_v`, `scan_step_v`) to find the real Vmpp, then enters a continuous P&O loop. `t_start` is set after the initial scan so t=0 on the plot corresponds to the start of P&O. Direction reverses whenever power drops. The inter-step sleep is broken into 50 ms chunks so `stop_event` is checked frequently. Callbacks: `on_status`, `on_update(t, v, j, pce)`, `on_jv_done(v_arr, j_arr, vmpp)`, `on_complete`.
+
+### Measurement sequence (J-V mode)
 
 ```
 [Dark J-V fwd + rev]  →  [prompt: open shutter]  →  [light soaking timer]

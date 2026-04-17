@@ -29,6 +29,7 @@ PLOT_COLORS = [
 
 from app.utils.constants import APP_NAME, stop_event
 from app.utils.sound import play_completion_sound
+from app.utils.updater import check_for_updates, get_local_version
 from app.gui.tooltip import ToolTip
 from app.gui.instrument_dialog import InstrumentDialog
 from app.measurement.analysis import (
@@ -81,6 +82,9 @@ class JVMeasurementApp:
         # Pure MPP traces
         self.pmpp_detector_power_var.trace("w", self.update_pmpp_illumination)
         self.pmpp_detector_area_var.trace("w",  self.update_pmpp_illumination)
+
+        # Silent update check — runs 3 s after startup to avoid delaying launch
+        self.root.after(3000, lambda: check_for_updates(self.root, silent=True))
 
     # ── GUI construction ──────────────────────────────────────────────────────
 
@@ -505,6 +509,10 @@ class JVMeasurementApp:
         help_menu = Menu(menubar, tearoff=0)
         help_menu.add_command(label="Documentation", command=self._show_help)
         help_menu.add_separator()
+        help_menu.add_command(
+            label="Check for Updates",
+            command=lambda: check_for_updates(self.root, silent=False))
+        help_menu.add_separator()
         help_menu.add_command(label="About\u2026", command=self._show_about)
         menubar.add_cascade(label="Help", menu=help_menu)
 
@@ -676,14 +684,18 @@ class JVMeasurementApp:
         webbrowser.open(f"file:///{abs_path}")
 
     def _show_about(self):
-        from app.utils.constants import APP_NAME as _APP_NAME
+        version = get_local_version()
         messagebox.showinfo(
-            "About",
-            f"{_APP_NAME}\n\n"
-            "Open-source J-V measurement software for perovskite solar cells.\n\n"
-            "Designed for use with the Keithley 2400 SourceMeter.\n\n"
-            "Author: Lucas Polimante\n"
-            "License: MIT"
+            "About JV Measurements",
+            f"JV Measurements  v{version}\n\n"
+            "Solar cell J-V characterization software\n"
+            "for perovskite photovoltaics research.\n\n"
+            "Developed at UFABC \u2014 Universidade Federal\n"
+            "do ABC, Santo Andr\u00e9, SP, Brazil.\n\n"
+            "Repository:\n"
+            "github.com/Polimante/jv-measurements\n\n"
+            "License: MIT",
+            parent=self.root,
         )
 
     def _clear_session_data(self):
