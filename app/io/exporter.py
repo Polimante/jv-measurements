@@ -145,3 +145,194 @@ def save_dark_jv_data(
 
     wb.close()
     return fp
+
+
+def save_stab_current_data(
+    export_folder, sample_name,
+    times, j_vals, pce_vals,
+    cell_area, v_applied, illumination,
+    duration_s, interval_ms, threshold_pct_per_min,
+    stabilized_at,
+):
+    """Save Stabilized Current measurement to xlsx (standardised layout)."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fp = os.path.join(export_folder, f"{sample_name}_StabCurrent_{ts}.xlsx")
+
+    wb  = xlsxwriter.Workbook(fp)
+    ws  = wb.add_worksheet("StabCurrent_Data")
+    hf  = wb.add_format({"bold": True, "border": 1,
+                          "align": "center", "valign": "vcenter"})
+    nf  = wb.add_format({"num_format": "0.000000"})
+    mf  = wb.add_format({"num_format": "0.0000", "bold": True})
+
+    ws.set_column("A:C", 15)
+    ws.set_column("D:J", 18)
+
+    headers = [
+        "Time (s)", "J (mA/cm\u207b\u00b2)", "PCE (%)",
+        "Cell Area (cm\u00b2)", "Applied Voltage (V)",
+        "Illumination (mW/cm\u00b2)", "Duration (s)",
+        "Interval (ms)", "Threshold (%/min)", "Stabilized at (s)",
+    ]
+    for c, h in enumerate(headers):
+        ws.write(0, c, h, hf)
+
+    meta_vals = [
+        cell_area, v_applied, illumination,
+        duration_s, interval_ms, threshold_pct_per_min,
+        round(stabilized_at, 1) if stabilized_at is not None else None,
+    ]
+    for i, val in enumerate(meta_vals):
+        if val is not None:
+            ws.write(1, i + 3, val, mf)
+
+    for i, (t, j, pce) in enumerate(zip(times, j_vals, pce_vals)):
+        r = i + 2
+        ws.write(r, 0, t, nf)
+        ws.write(r, 1, j, nf)
+        ws.write(r, 2, pce, nf)
+
+    wb.close()
+    return fp
+
+
+def save_pure_mpp_data(
+    export_folder, sample_name,
+    time_s, v_track, j_track, pce_track,
+    cell_area, illumination, nplc, delay_ms,
+):
+    """Save Pure MPP Tracking measurement to xlsx (standardised layout)."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fp = os.path.join(export_folder, f"{sample_name}_PureMPP_{ts}.xlsx")
+
+    wb  = xlsxwriter.Workbook(fp)
+    ws  = wb.add_worksheet("PureMPP_Data")
+    hf  = wb.add_format({"bold": True, "border": 1,
+                          "align": "center", "valign": "vcenter"})
+    nf  = wb.add_format({"num_format": "0.000000"})
+    mf  = wb.add_format({"num_format": "0.0000", "bold": True})
+
+    ws.set_column("A:E", 14)
+    ws.set_column("F:I", 18)
+
+    headers = [
+        "Time (s)", "Time (min)", "Vmpp (V)",
+        "J (mA/cm\u207b\u00b2)", "PCE (%)",
+        "Cell Area (cm\u00b2)", "Illumination (mW/cm\u00b2)",
+        "NPLC", "Delay/point (ms)",
+    ]
+    for c, h in enumerate(headers):
+        ws.write(0, c, h, hf)
+
+    for col, val in enumerate([cell_area, illumination, nplc, delay_ms]):
+        ws.write(1, col + 5, val, mf)
+
+    for i, (t, v, j, pce) in enumerate(zip(time_s, v_track, j_track, pce_track)):
+        r = i + 2
+        ws.write(r, 0, t, nf)
+        ws.write(r, 1, t / 60.0, nf)
+        ws.write(r, 2, v, nf)
+        ws.write(r, 3, j, nf)
+        ws.write(r, 4, pce, nf)
+
+    wb.close()
+    return fp
+
+
+def save_mpp_data(
+    export_folder, sample_name,
+    cycles, spo_time, spo_j, spo_pce, spo_cycle_idx,
+    cell_area, illumination, nplc, delay_ms,
+    spo_duration_s, total_duration_min,
+):
+    """Save MPP Tracking (J-V + SPO cycling) measurement to xlsx (standardised layout)."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fp = os.path.join(export_folder, f"{sample_name}_MPP_{ts}.xlsx")
+
+    wb  = xlsxwriter.Workbook(fp)
+    hf  = wb.add_format({"bold": True, "border": 1,
+                          "align": "center", "valign": "vcenter"})
+    nf  = wb.add_format({"num_format": "0.000000"})
+    mf  = wb.add_format({"num_format": "0.0000", "bold": True})
+
+    # ── Sheet 1: SPO time-series data ─────────────────────────────────────────
+    ws_spo = wb.add_worksheet("MPP_SPO")
+    ws_spo.set_column("A:D", 14)
+    ws_spo.set_column("E:J", 18)
+
+    spo_headers = [
+        "Time (min)", "J (mA/cm\u207b\u00b2)", "PCE (%)", "Cycle",
+        "Cell Area (cm\u00b2)", "Illumination (mW/cm\u00b2)",
+        "NPLC", "Delay/point (ms)",
+        "SPO Duration (s)", "Total Duration (min)",
+    ]
+    for c, h in enumerate(spo_headers):
+        ws_spo.write(0, c, h, hf)
+
+    for col, val in enumerate([
+        cell_area, illumination, nplc, delay_ms,
+        spo_duration_s, total_duration_min,
+    ]):
+        ws_spo.write(1, col + 4, val, mf)
+
+    spo_cycle_idx = list(spo_cycle_idx) if spo_cycle_idx else []
+    for i, (t, j, pce, cyc) in enumerate(
+        zip([x / 60.0 for x in spo_time], spo_j, spo_pce, spo_cycle_idx)
+    ):
+        r = i + 2
+        ws_spo.write(r, 0, t, nf)
+        ws_spo.write(r, 1, j, nf)
+        ws_spo.write(r, 2, pce, nf)
+        ws_spo.write(r, 3, int(cyc), nf)
+
+    # ── Sheet 2: JV parameters per cycle ─────────────────────────────────────
+    ws_jv = wb.add_worksheet("MPP_JV")
+    ws_jv.set_column("A:I", 14)
+
+    jv_headers = [
+        "Cycle", "Time (min)", "Vmpp (V)", "Jmpp (mA/cm\u207b\u00b2)",
+        "Voc (V)", "Jsc (mA/cm\u207b\u00b2)", "FF (%)", "PCE (%)", "HI (%)",
+    ]
+    for c, h in enumerate(jv_headers):
+        ws_jv.write(0, c, h, hf)
+
+    for i, cyc in enumerate(cycles):
+        r = i + 1
+        ws_jv.write(r, 0, cyc["cycle"])
+        ws_jv.write(r, 1, cyc["time_s"] / 60.0, nf)
+        ws_jv.write(r, 2, cyc["Vmpp"], nf)
+        ws_jv.write(r, 3, cyc["Jmpp"], nf)
+        ws_jv.write(r, 4, cyc["Voc"],  nf)
+        ws_jv.write(r, 5, cyc["Jsc"],  nf)
+        ws_jv.write(r, 6, cyc["FF"],   nf)
+        ws_jv.write(r, 7, cyc["PCE"],  nf)
+        hi_val = cyc.get("HI")
+        if hi_val is not None:
+            ws_jv.write(r, 8, hi_val, nf)
+
+    # ── Sheets 3+: raw J-V data per cycle ─────────────────────────────────────
+    for cyc in cycles:
+        ws = wb.add_worksheet(f"JV_Cycle_{cyc['cycle']}")
+        if cyc.get("v_fwd") is not None:
+            for c, h in enumerate([
+                "Voltage (V)", "J reverse (mA/cm\u207b\u00b2)",
+                "J forward (mA/cm\u207b\u00b2)"
+            ]):
+                ws.write(0, c, h, hf)
+            for r, (v, jr, jf) in enumerate(
+                zip(cyc["v_rev"], cyc["j_rev"], cyc["j_fwd"])
+            ):
+                ws.write(r + 1, 0, float(v), nf)
+                ws.write(r + 1, 1, float(jr), nf)
+                ws.write(r + 1, 2, float(jf), nf)
+        else:
+            for c, h in enumerate([
+                "Voltage (V)", "J reverse (mA/cm\u207b\u00b2)"
+            ]):
+                ws.write(0, c, h, hf)
+            for r, (v, jr) in enumerate(zip(cyc["v_rev"], cyc["j_rev"])):
+                ws.write(r + 1, 0, float(v), nf)
+                ws.write(r + 1, 1, float(jr), nf)
+
+    wb.close()
+    return fp

@@ -40,7 +40,10 @@ from app.measurement.analysis import (
 from app.instrument.keithley import (
     init_instrument, apply_prebias, apply_light_soaking, measure_scan,
 )
-from app.io.exporter import save_data, save_dark_jv_data
+from app.io.exporter import (
+    save_data, save_dark_jv_data,
+    save_stab_current_data, save_pure_mpp_data, save_mpp_data,
+)
 from app.gui.data_viewer import DataViewerWindow
 
 
@@ -2170,31 +2173,15 @@ class JVMeasurementApp:
         if not time_s:
             return
         try:
-            import openpyxl
-            from openpyxl import Workbook
-            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            name = self.pmpp_sample_name_var.get() or "sample"
-            path = os.path.join(self.pmpp_export_folder_var.get(),
-                                f"{name}_PureMPP_{ts}.xlsx")
-            wb   = Workbook()
-            ws   = wb.active
-            ws.title = "PureMPP_Data"
-
-            # Metadata
-            pin  = float(self.pmpp_illumination_var.get())
-            area = self.pmpp_cell_area_var.get()
-            ws.append(["Sample",       name])
-            ws.append(["Cell Area",    area,  "cm²"])
-            ws.append(["Illumination", pin,   "mW/cm²"])
-            ws.append(["Date",         datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
-            ws.append([])
-            ws.append(["Time (s)", "Time (min)", "Vmpp (V)",
-                        "J (mA/cm²)", "PCE (%)"])
-            for t, v, j, pce in zip(time_s, v_track, j_track, pce_track):
-                ws.append([round(t, 3), round(t / 60.0, 5),
-                            round(v, 5), round(j, 5), round(pce, 4)])
-
-            wb.save(path)
+            path = save_pure_mpp_data(
+                self.pmpp_export_folder_var.get(),
+                self.pmpp_sample_name_var.get() or "sample",
+                time_s, v_track, j_track, pce_track,
+                cell_area=self.pmpp_cell_area_var.get(),
+                illumination=float(self.pmpp_illumination_var.get()),
+                nplc=self.pmpp_nplc_var.get(),
+                delay_ms=self.pmpp_delay_ms_var.get(),
+            )
             self.pmpp_status_var.set(
                 f"Saved \u2192 {os.path.basename(path)}")
         except Exception as exc:
@@ -2416,56 +2403,18 @@ class JVMeasurementApp:
         if not cycles:
             return
         try:
-            import openpyxl
-            from openpyxl import Workbook
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            name = self.mpp_sample_name_var.get() or "sample"
-            path = os.path.join(self.mpp_export_folder_var.get(),
-                                f"{name}_MPP_{ts}.xlsx")
-            wb = Workbook()
-
-            # ── Sheet 1: JV_Parameters ────────────────────────────────────
-            ws_params = wb.active
-            ws_params.title = "JV_Parameters"
-            headers = ["Cycle", "Time (min)", "Vmpp (V)", "Jmpp (mA/cm²)",
-                       "Voc (V)", "Jsc (mA/cm²)", "FF (%)", "PCE (%)", "HI (%)"]
-            ws_params.append(headers)
-            for cyc in cycles:
-                row = [
-                    cyc["cycle"],
-                    round(cyc["time_s"] / 60.0, 4),
-                    round(cyc["Vmpp"], 4),
-                    round(cyc["Jmpp"], 4),
-                    round(cyc["Voc"],  4),
-                    round(cyc["Jsc"],  4),
-                    round(cyc["FF"],   3),
-                    round(cyc["PCE"],  3),
-                    round(cyc["HI"],   3) if cyc["HI"] is not None else "",
-                ]
-                ws_params.append(row)
-
-            # ── Sheet 2: SPO_Data ─────────────────────────────────────────
-            ws_spo = wb.create_sheet("SPO_Data")
-            ws_spo.append(["Time (min)", "J (mA/cm²)", "PCE (%)", "Cycle"])
-            for t, j, pce, cyc in zip(
-                [x / 60.0 for x in spo_time], spo_j, spo_pce,
-                [c for c in (getattr(self, '_mpp_spo_cycle_idx', []) or [])]
-            ):
-                ws_spo.append([round(t, 4), round(j, 4), round(pce, 4), cyc])
-
-            # ── Sheets: JV raw data per cycle ─────────────────────────────
-            for cyc in cycles:
-                ws = wb.create_sheet(f"JV_Cycle_{cyc['cycle']}")
-                if cyc.get("v_fwd") is not None:
-                    ws.append(["Voltage (V)", "J_reverse (mA/cm²)", "J_forward (mA/cm²)"])
-                    for v, jr, jf in zip(cyc["v_rev"], cyc["j_rev"], cyc["j_fwd"]):
-                        ws.append([round(float(v), 5), round(float(jr), 5), round(float(jf), 5)])
-                else:
-                    ws.append(["Voltage (V)", "J_reverse (mA/cm²)"])
-                    for v, jr in zip(cyc["v_rev"], cyc["j_rev"]):
-                        ws.append([round(float(v), 5), round(float(jr), 5)])
-
-            wb.save(path)
+            path = save_mpp_data(
+                self.mpp_export_folder_var.get(),
+                self.mpp_sample_name_var.get() or "sample",
+                cycles, spo_time, spo_j, spo_pce,
+                spo_cycle_idx=getattr(self, "_mpp_spo_cycle_idx", []) or [],
+                cell_area=self.mpp_cell_area_var.get(),
+                illumination=float(self.mpp_illumination_var.get()),
+                nplc=self.mpp_nplc_var.get(),
+                delay_ms=self.mpp_delay_var.get(),
+                spo_duration_s=self.mpp_spo_duration_var.get(),
+                total_duration_min=self.mpp_total_min_var.get(),
+            )
             self._mpp_log(f"\nSaved: {os.path.basename(path)}")
             messagebox.showinfo("MPP Tracking Complete",
                                 f"Data saved to:\n{path}")
@@ -2640,34 +2589,18 @@ class JVMeasurementApp:
 
     def _stab_save_data(self, times, j_vals, pce_vals, v_applied, pin, stabilized_at):
         try:
-            import openpyxl
-            from openpyxl import Workbook
-            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            name = self.stab_sample_name_var.get() or "sample"
-            path = os.path.join(self.stab_export_folder_var.get(),
-                                f"{name}_StabCurrent_{ts}.xlsx")
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "StabilizedCurrent"
-
-            # Parameters row
-            ws.append(["Parameter", "Value"])
-            ws.append(["Sample",          name])
-            ws.append(["Applied Voltage (V)", v_applied])
-            ws.append(["Illumination (mW/cm²)", pin])
-            ws.append(["Duration (s)",    self.stab_duration_var.get()])
-            ws.append(["Interval (ms)",   self.stab_interval_var.get()])
-            ws.append(["Threshold (%/min)", self.stab_threshold_var.get()])
-            ws.append(["Stabilized at (s)",
-                       round(stabilized_at, 1) if stabilized_at is not None else "N/A"])
-            ws.append([])
-
-            # Data
-            ws.append(["Time (s)", "J (mA/cm²)", "PCE (%)"])
-            for t, j, pce in zip(times, j_vals, pce_vals):
-                ws.append([round(t, 3), round(j, 4), round(pce, 4)])
-
-            wb.save(path)
+            path = save_stab_current_data(
+                self.stab_export_folder_var.get(),
+                self.stab_sample_name_var.get() or "sample",
+                times, j_vals, pce_vals,
+                cell_area=self.stab_area_var.get(),
+                v_applied=v_applied,
+                illumination=pin,
+                duration_s=self.stab_duration_var.get(),
+                interval_ms=self.stab_interval_var.get(),
+                threshold_pct_per_min=self.stab_threshold_var.get(),
+                stabilized_at=stabilized_at,
+            )
             self._stab_log(f"Saved: {os.path.basename(path)}")
             messagebox.showinfo("Measurement Complete",
                                 f"Data saved to:\n{path}")
