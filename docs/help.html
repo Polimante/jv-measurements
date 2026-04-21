@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JV Measurement Software — User Documentation</title>
   <style>
-    /* ── Reset ─────────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
 
@@ -17,11 +16,11 @@
       background: #f7f8fa;
     }
 
-    /* ── Sidebar ────────────────────────────────────────────────────────── */
+    /* ── Sidebar ───────────────────────────────────────────────────────── */
     #sidebar {
       position: fixed;
       top: 0; left: 0;
-      width: 220px;
+      width: 230px;
       height: 100vh;
       background: #2c3e50;
       overflow-y: auto;
@@ -42,59 +41,53 @@
       text-transform: uppercase;
       letter-spacing: 1px;
     }
-    .sidebar-header p {
-      color: #7f8c8d;
-      font-size: 11px;
-      margin-top: 4px;
-    }
+    .sidebar-header p { color: #7f8c8d; font-size: 11px; margin-top: 4px; }
 
     #sidebar nav ul { list-style: none; padding: 6px 0; }
     #sidebar nav ul li a {
       display: block;
-      padding: 7px 14px;
+      padding: 6px 14px;
       color: #bdc3c7;
       text-decoration: none;
-      font-size: 12.5px;
+      font-size: 12px;
       border-left: 3px solid transparent;
       transition: background 0.15s, color 0.15s;
     }
-    #sidebar nav ul li a:hover {
-      background: #3d5166;
-      color: #ecf0f1;
-    }
+    #sidebar nav ul li a:hover { background: #3d5166; color: #ecf0f1; }
     #sidebar nav ul li a.active {
       background: #1a252f;
       color: #3498db;
       border-left-color: #3498db;
       font-weight: 600;
     }
+    .sidebar-group {
+      padding: 8px 14px 2px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #5d6d7e;
+    }
 
-    /* ── Main Content ───────────────────────────────────────────────────── */
+    /* ── Main Content ──────────────────────────────────────────────────── */
     #content {
-      margin-left: 220px;
+      margin-left: 230px;
       padding: 40px 60px 100px 50px;
       max-width: 1120px;
     }
 
-    /* ── Page Header ────────────────────────────────────────────────────── */
+    /* ── Page Header ───────────────────────────────────────────────────── */
     #page-header {
       border-bottom: 3px solid #2c3e50;
       padding-bottom: 22px;
       margin-bottom: 45px;
     }
-    #page-header h1 {
-      font-size: 26px;
-      color: #2c3e50;
-      margin-bottom: 6px;
-    }
+    #page-header h1 { font-size: 26px; color: #2c3e50; margin-bottom: 6px; }
     .subtitle { font-size: 14.5px; color: #555; margin-bottom: 3px; }
     .author-line { font-size: 13px; color: #888; }
 
-    /* ── Section ────────────────────────────────────────────────────────── */
-    .section {
-      margin-bottom: 65px;
-      scroll-margin-top: 25px;
-    }
+    /* ── Sections ──────────────────────────────────────────────────────── */
+    .section { margin-bottom: 65px; scroll-margin-top: 25px; }
     .section h2 {
       font-size: 21px;
       color: #2c3e50;
@@ -102,17 +95,8 @@
       padding-bottom: 8px;
       margin-bottom: 18px;
     }
-    .section h3 {
-      font-size: 16.5px;
-      color: #34495e;
-      margin: 22px 0 9px;
-    }
-    .section h4 {
-      font-size: 14.5px;
-      color: #2c3e50;
-      font-weight: 700;
-      margin: 14px 0 6px;
-    }
+    .section h3 { font-size: 16.5px; color: #34495e; margin: 22px 0 9px; }
+    .section h4 { font-size: 14.5px; color: #2c3e50; font-weight: 700; margin: 14px 0 6px; }
 
     p { margin-bottom: 11px; }
     ul, ol { padding-left: 24px; margin-bottom: 12px; }
@@ -121,7 +105,7 @@
     em { font-style: italic; }
     a { color: #2980b9; }
 
-    /* ── Callout boxes ──────────────────────────────────────────────────── */
+    /* ── Callout boxes ─────────────────────────────────────────────────── */
     .warning-box {
       background: #fff8e1;
       border-left: 4px solid #ffc107;
@@ -129,14 +113,8 @@
       padding: 11px 16px;
       margin: 14px 0;
     }
-    .warning-box .box-label {
-      font-weight: 700;
-      color: #7d5a00;
-      font-size: 12.5px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 5px;
-    }
+    .warning-box .box-label { font-weight: 700; color: #7d5a00; font-size: 12.5px;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
 
     .info-box {
       background: #e8f4fd;
@@ -145,16 +123,20 @@
       padding: 11px 16px;
       margin: 14px 0;
     }
-    .info-box .box-label {
-      font-weight: 700;
-      color: #1a5276;
-      font-size: 12.5px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 5px;
-    }
+    .info-box .box-label { font-weight: 700; color: #1a5276; font-size: 12.5px;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
 
-    /* ── Code ───────────────────────────────────────────────────────────── */
+    .tip-box {
+      background: #e8f8e8;
+      border-left: 4px solid #27ae60;
+      border-radius: 0 4px 4px 0;
+      padding: 11px 16px;
+      margin: 14px 0;
+    }
+    .tip-box .box-label { font-weight: 700; color: #1a6b2a; font-size: 12.5px;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+
+    /* ── Code ──────────────────────────────────────────────────────────── */
     code {
       font-family: 'Consolas', 'Courier New', monospace;
       background: #f0f0f0;
@@ -174,28 +156,13 @@
       line-height: 1.5;
     }
 
-    /* ── Tables ─────────────────────────────────────────────────────────── */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 14px 0 18px;
-      font-size: 13.5px;
-    }
-    th {
-      background: #2c3e50;
-      color: #fff;
-      padding: 9px 12px;
-      text-align: left;
-      font-weight: 600;
-    }
-    td {
-      padding: 8px 12px;
-      border-bottom: 1px solid #e2e6ea;
-      vertical-align: top;
-    }
+    /* ── Tables ────────────────────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 18px; font-size: 13.5px; }
+    th { background: #2c3e50; color: #fff; padding: 9px 12px; text-align: left; font-weight: 600; }
+    td { padding: 8px 12px; border-bottom: 1px solid #e2e6ea; vertical-align: top; }
     tr:nth-child(even) td { background: #f5f7fa; }
 
-    /* ── Image placeholders ─────────────────────────────────────────────── */
+    /* ── Image placeholders ────────────────────────────────────────────── */
     .img-placeholder {
       background: #eef1f5;
       border: 2px dashed #b0b8c4;
@@ -208,23 +175,12 @@
       margin: 20px 0;
     }
 
-    /* ── Numbered steps ─────────────────────────────────────────────────── */
-    .step-block {
-      border: 1px solid #dde1e7;
-      border-radius: 6px;
-      margin: 14px 0;
-      overflow: hidden;
-    }
-    .step-title {
-      background: #34495e;
-      color: #fff;
-      padding: 8px 14px;
-      font-weight: 600;
-      font-size: 13.5px;
-    }
+    /* ── Numbered steps ────────────────────────────────────────────────── */
+    .step-block { border: 1px solid #dde1e7; border-radius: 6px; margin: 14px 0; overflow: hidden; }
+    .step-title { background: #34495e; color: #fff; padding: 8px 14px; font-weight: 600; font-size: 13.5px; }
     .step-body { padding: 12px 16px; }
 
-    /* ── Equations ──────────────────────────────────────────────────────── */
+    /* ── Equations ─────────────────────────────────────────────────────── */
     .equation {
       background: #fff;
       border: 1px solid #dde1e7;
@@ -236,44 +192,27 @@
       font-family: 'Georgia', 'Times New Roman', serif;
     }
 
-    /* ── Troubleshooting ────────────────────────────────────────────────── */
-    .trouble-block {
-      border: 1px solid #dde1e7;
-      border-radius: 6px;
-      margin: 14px 0;
-      overflow: hidden;
-    }
-    .trouble-problem {
-      background: #fff3cd;
-      padding: 8px 14px;
-      font-weight: 700;
-      color: #7d5a00;
-      font-size: 13.5px;
-    }
+    /* ── Troubleshooting ───────────────────────────────────────────────── */
+    .trouble-block { border: 1px solid #dde1e7; border-radius: 6px; margin: 14px 0; overflow: hidden; }
+    .trouble-problem { background: #fff3cd; padding: 8px 14px; font-weight: 700; color: #7d5a00; font-size: 13.5px; }
     .trouble-inner { padding: 10px 14px; }
     .trouble-cause { color: #555; margin-bottom: 7px; }
     .trouble-solution { color: #1a6b2a; }
 
-    /* ── References ─────────────────────────────────────────────────────── */
+    /* ── References ────────────────────────────────────────────────────── */
     .ref-list { list-style: none; padding: 0; }
     .ref-list li {
-      padding: 8px 0 8px 30px;
+      padding: 8px 0 8px 36px;
       border-bottom: 1px solid #eee;
       font-size: 13.5px;
       line-height: 1.55;
       position: relative;
     }
-    .ref-list li::before {
-      content: attr(data-ref);
-      position: absolute;
-      left: 0;
-      font-weight: 700;
-      color: #2c3e50;
-    }
+    .ref-list li::before { content: attr(data-ref); position: absolute; left: 0; font-weight: 700; color: #2c3e50; }
     .ref-list li:last-child { border-bottom: none; }
     .ref-list a { word-break: break-all; }
 
-    /* ── Parameter definition blocks ────────────────────────────────────── */
+    /* ── Parameter definition blocks ───────────────────────────────────── */
     .param-block {
       background: #fff;
       border: 1px solid #dde1e7;
@@ -281,17 +220,51 @@
       padding: 14px 18px;
       margin: 14px 0;
     }
-    .param-name {
-      font-size: 15px;
-      font-weight: 700;
-      color: #2c3e50;
-      border-bottom: 1px solid #eee;
-      padding-bottom: 6px;
-      margin-bottom: 10px;
-    }
+    .param-name { font-size: 15px; font-weight: 700; color: #2c3e50;
+      border-bottom: 1px solid #eee; padding-bottom: 6px; margin-bottom: 10px; }
     .param-row { display: flex; margin-bottom: 5px; font-size: 13.5px; }
-    .param-key { width: 130px; color: #666; flex-shrink: 0; }
+    .param-key { width: 140px; color: #666; flex-shrink: 0; }
     .param-val { color: #333; }
+
+    /* ── Mode badge ────────────────────────────────────────────────────── */
+    .mode-badge {
+      display: inline-block;
+      background: #2c3e50;
+      color: #ecf0f1;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .mode-badge.jv     { background: #1565C0; }
+    .mode-badge.stab   { background: #1B5E20; }
+    .mode-badge.mpp    { background: #006064; }
+    .mode-badge.pmpp   { background: #4A148C; }
+
+    /* ── Sequence flow ──────────────────────────────────────────────────── */
+    .seq-flow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      align-items: center;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+    .seq-step {
+      background: #34495e;
+      color: #fff;
+      padding: 7px 12px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .seq-arrow {
+      padding: 0 8px;
+      color: #7f8c8d;
+      font-size: 18px;
+    }
+    .seq-step.optional { background: #7f8c8d; }
   </style>
 </head>
 <body>
@@ -302,26 +275,40 @@
 <aside id="sidebar">
   <div class="sidebar-header">
     <h3>User Documentation</h3>
-    <p>JV Measurement v2.4</p>
+    <p>JV Measurement v3.0</p>
   </div>
   <nav>
     <ul>
+      <div class="sidebar-group">Getting Started</div>
       <li><a href="#overview">1. Overview</a></li>
       <li><a href="#requirements">2. System Requirements</a></li>
       <li><a href="#drivers">3. Driver Installation</a></li>
       <li><a href="#installation">4. Software Installation</a></li>
       <li><a href="#connecting">5. Connecting the Instrument</a></li>
       <li><a href="#interface">6. Interface Guide</a></li>
-      <li><a href="#parameters">7. Measurement Parameters</a></li>
-      <li><a href="#instrument-settings">8. Instrument Settings</a></li>
-      <li><a href="#prebias">9. Pre-bias Conditioning</a></li>
-      <li><a href="#running">10. Running a Measurement</a></li>
-      <li><a href="#results">11. Understanding the Results</a></li>
-      <li><a href="#pv-parameters">12. Photovoltaic Parameters</a></li>
-      <li><a href="#circuit-model">13. Equivalent Circuit Model</a></li>
-      <li><a href="#hysteresis">14. Hysteresis in Perovskites</a></li>
-      <li><a href="#troubleshooting">15. Troubleshooting</a></li>
-      <li><a href="#references">16. References</a></li>
+
+      <div class="sidebar-group">Measurement Modes</div>
+      <li><a href="#modes">7. Measurement Modes Overview</a></li>
+      <li><a href="#jv-params">8. J-V Measurement Parameters</a></li>
+      <li><a href="#instrument-settings">9. Instrument Settings</a></li>
+      <li><a href="#prebias">10. Pre-bias Conditioning</a></li>
+      <li><a href="#running-jv">11. Running a J-V Measurement</a></li>
+      <li><a href="#stab">12. Stabilized Current</a></li>
+      <li><a href="#mpp">13. MPP Tracking (JV-SPO)</a></li>
+      <li><a href="#pure-mpp">14. Pure MPP Tracking (P&amp;O)</a></li>
+      <li><a href="#dark-jv">15. Dark J-V Measurement</a></li>
+
+      <div class="sidebar-group">Data &amp; Analysis</div>
+      <li><a href="#data-viewer">16. Data Viewer</a></li>
+      <li><a href="#excel-format">17. Excel File Format</a></li>
+      <li><a href="#results">18. Understanding J-V Results</a></li>
+      <li><a href="#pv-parameters">19. Photovoltaic Parameters</a></li>
+      <li><a href="#circuit-model">20. Equivalent Circuit Model</a></li>
+      <li><a href="#hysteresis">21. Hysteresis in Perovskites</a></li>
+
+      <div class="sidebar-group">Support</div>
+      <li><a href="#troubleshooting">22. Troubleshooting</a></li>
+      <li><a href="#references">23. References</a></li>
     </ul>
   </nav>
 </aside>
@@ -333,140 +320,158 @@
 
   <div id="page-header">
     <h1>JV Measurement Software — User Documentation</h1>
-    <p class="subtitle">Version 2.4 | Open-source J-V characterization for perovskite solar cells</p>
-    <p class="author-line">Developed by Lucas Polimante — UFABC</p>
+    <p class="subtitle">Version 3.0 | Open-source characterization tool for perovskite solar cells</p>
+    <p class="author-line">Developed by Lucas Polimante — Universidade Federal do ABC (UFABC)</p>
   </div>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 1. OVERVIEW                                                        -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       1. OVERVIEW
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="overview">
     <h2>1. Overview</h2>
     <p>
       <strong>JV Measurement Software</strong> is an open-source Python application for automated
-      current density–voltage (J-V) characterisation of perovskite and other thin-film solar cells.
-      It was developed at the Universidade Federal do ABC (UFABC) to provide a reliable,
-      reproducible, and well-documented measurement workflow compatible with common laboratory
-      instrumentation.
+      characterisation of perovskite and other thin-film solar cells, built for use with a
+      <strong>Keithley 2400 SourceMeter</strong> controlled via a GPIB-USB adapter.
+      It provides four complementary measurement modes that together cover the full characterisation
+      workflow recommended by international consensus protocols [Khenkin et al., 2020].
     </p>
-    <p>
-      The software is designed specifically for use with the <strong>Keithley 2400 SourceMeter</strong>
-      controlled via a GPIB-USB interface (KUSB-488B adapter). Communication uses the PyVISA library
-      with the SCPI command set native to the Keithley 2400.
-    </p>
+
+    <h3>Measurement modes</h3>
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>Shortcut</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>J-V Measurement</strong></td>
+          <td><code>Alt+F3</code></td>
+          <td>Forward and reverse voltage sweeps; extracts V<sub>oc</sub>, J<sub>sc</sub>,
+              FF, PCE, R<sub>s</sub>, R<sub>sh</sub>, and Hysteresis Index (HI)</td>
+        </tr>
+        <tr>
+          <td><strong>Stabilized Current</strong></td>
+          <td><code>Alt+F4</code></td>
+          <td>Holds cell at a fixed voltage and records current density over time; reports
+              quasi-steady-state PCE and detects the stabilization point</td>
+        </tr>
+        <tr>
+          <td><strong>MPP Tracking (JV-SPO)</strong></td>
+          <td><code>Alt+F5</code></td>
+          <td>Cyclic J-V scans followed by Stabilized Power Output (SPO) phases at V<sub>mpp</sub>;
+              tracks efficiency evolution over time with periodic J-V diagnostics</td>
+        </tr>
+        <tr>
+          <td><strong>Pure MPP Tracking (P&amp;O)</strong></td>
+          <td><code>Alt+F6</code></td>
+          <td>Continuous Perturb-and-Observe maximum power point tracking; records V<sub>mpp</sub>,
+              J, and PCE at every time step with no interruptions for J-V scans</td>
+        </tr>
+      </tbody>
+    </table>
 
     <h3>Key features</h3>
     <ul>
-      <li>Measures <strong>forward and reverse J-V scans</strong> with configurable voltage range, step size, and timing</li>
-      <li>Calculates all standard photovoltaic parameters: <strong>V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE, R<sub>s</sub>, R<sub>sh</sub></strong></li>
-      <li>Calculates the <strong>Hysteresis Index (HI, %)</strong> as defined by Christians et al. (2015)</li>
-      <li>Supports <strong>pre-bias conditioning</strong> before the reverse scan for reproducible hysteresis measurements</li>
-      <li>Exports data to <strong>Excel (.xlsx)</strong> with raw J-V data and extracted parameters in a format compatible with downstream macro-based analysis</li>
-      <li><strong>Persistent instrument connection</strong>: the GPIB session is kept alive across measurements (no reconnect overhead)</li>
-      <li>Built with <strong>Python/Tkinter</strong> — runs on Windows 10/11 without requiring MATLAB or LabVIEW</li>
+      <li><strong>J-V scanning</strong> with configurable voltage range, step size, and timing
+          (delay per point, NPLC); calculates all standard PV parameters automatically</li>
+      <li><strong>Pre-bias conditioning</strong> before the reverse scan for reproducible
+          hysteresis measurements following best-practice protocols [Christians et al., 2015]</li>
+      <li><strong>Dark J-V measurement</strong> option within the J-V mode to characterise
+          diode behaviour without illumination</li>
+      <li><strong>Stabilized Current / PCE measurement</strong> at a fixed bias voltage
+          with automatic stabilization detection</li>
+      <li><strong>MPP Tracking</strong> in two protocols: JV-SPO cycling (with per-cycle J-V
+          diagnostics) and pure P&amp;O continuous tracking</li>
+      <li><strong>Data Viewer</strong> window for opening and plotting any previously saved
+          Excel file, with metadata panel and interactive legend</li>
+      <li>All data exported to <strong>Excel (.xlsx)</strong> using a unified
+          row1=headers / row2=metadata / row3+=data layout compatible with downstream analysis</li>
+      <li><strong>Scan rate display</strong> (mV/s) calculated in real time from the
+          configured delay, NPLC, and step voltage</li>
+      <li>Built with <strong>Python/Tkinter</strong> — runs on Windows 10/11 without MATLAB or LabVIEW</li>
     </ul>
 
-    <div class="img-placeholder">INSERT IMAGE: software screenshot showing main window</div>
+    <div class="img-placeholder">INSERT IMAGE: annotated screenshot of main window showing mode tabs and J-V plot</div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 2. SYSTEM REQUIREMENTS                                             -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       2. SYSTEM REQUIREMENTS
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="requirements">
     <h2>2. System Requirements</h2>
 
-    <h3>Operating system and hardware</h3>
+    <h3>Hardware</h3>
     <ul>
       <li>Windows 10 or Windows 11 (64-bit)</li>
       <li>Keithley 2400 SourceMeter (or compatible 24xx series)</li>
       <li>KUSB-488B USB-to-GPIB adapter (Keithley/Tektronix)</li>
-      <li>USB 2.0 port (the KUSB-488B does not require USB 3.0)</li>
+      <li>USB 2.0 port on the computer (avoid USB hubs)</li>
       <li>Solar simulator or controllable light source with calibrated reference detector</li>
     </ul>
 
     <h3>Software dependencies</h3>
     <table>
       <thead>
-        <tr><th>Component</th><th>Version / Notes</th><th>Source</th></tr>
+        <tr><th>Package</th><th>Version</th><th>Install</th><th>Purpose</th></tr>
       </thead>
       <tbody>
-        <tr><td>Python</td><td>3.9 or higher (64-bit recommended)</td><td>python.org</td></tr>
-        <tr><td>pyvisa</td><td>≥ 1.12</td><td><code>pip install pyvisa</code></td></tr>
-        <tr><td>numpy</td><td>≥ 1.20</td><td><code>pip install numpy</code></td></tr>
-        <tr><td>matplotlib</td><td>≥ 3.4</td><td><code>pip install matplotlib</code></td></tr>
-        <tr><td>xlsxwriter</td><td>≥ 3.0</td><td><code>pip install xlsxwriter</code></td></tr>
-        <tr><td>playsound</td><td>optional (completion beep)</td><td><code>pip install playsound</code></td></tr>
-        <tr><td>NI-VISA runtime</td><td>2019 or later</td><td>ni.com/visa</td></tr>
-        <tr><td>KI-488 driver</td><td>v4.0 (NI-compatible mode)</td><td>tek.com/keithley</td></tr>
+        <tr><td>Python</td><td>3.9+ (64-bit)</td><td>python.org</td><td>Runtime</td></tr>
+        <tr><td>pyvisa</td><td>≥ 1.12</td><td><code>pip install pyvisa</code></td><td>VISA / GPIB communication</td></tr>
+        <tr><td>numpy</td><td>≥ 1.20</td><td><code>pip install numpy</code></td><td>Array math, parameter extraction</td></tr>
+        <tr><td>matplotlib</td><td>≥ 3.4</td><td><code>pip install matplotlib</code></td><td>Live J-V and time-series plots</td></tr>
+        <tr><td>xlsxwriter</td><td>≥ 3.0</td><td><code>pip install xlsxwriter</code></td><td>Writing Excel output files</td></tr>
+        <tr><td>openpyxl</td><td>≥ 3.0</td><td><code>pip install openpyxl</code></td><td>Reading Excel files (Data Viewer)</td></tr>
+        <tr><td>mplcursors</td><td>≥ 0.5</td><td><code>pip install mplcursors</code></td><td>Hover tooltips in Data Viewer</td></tr>
+        <tr><td>playsound</td><td>optional</td><td><code>pip install playsound</code></td><td>Completion sound (falls back to winsound.Beep)</td></tr>
+        <tr><td>NI-VISA runtime</td><td>2019 or later</td><td>ni.com/visa</td><td>VISA backend for GPIB</td></tr>
+        <tr><td>KI-488 driver</td><td>v4.0 (NI-compatible mode)</td><td>tek.com/keithley</td><td>KUSB-488B GPIB adapter driver</td></tr>
       </tbody>
     </table>
 
     <div class="warning-box">
       <div class="box-label">⚠ Important</div>
-      The NI-VISA runtime and the KI-488 driver must be installed in the correct order and with
-      the correct settings. Incorrect installation is the most common cause of "No instruments found"
-      errors. Follow Section 3 exactly.
+      The NI-VISA runtime and KI-488 driver must be installed in the correct order.
+      Incorrect installation is the most common cause of "No instruments found" errors.
+      Follow Section 3 exactly.
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 3. DRIVER INSTALLATION                                             -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       3. DRIVER INSTALLATION
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="drivers">
     <h2>3. Driver Installation</h2>
-    <p>
-      Correct driver installation is the most common source of problems. The KUSB-488B adapter
-      requires the <strong>KI-488 driver</strong> installed in <strong>NI command-compatible mode</strong>,
-      plus the <strong>NI-VISA runtime</strong>. Follow the steps below in order.
-    </p>
 
     <div class="warning-box">
       <div class="box-label">⚠ Critical Warning</div>
       The KI-488 driver installs a DLL (<code>GPIB32.DLL</code>) with the same filename as the
-      National Instruments DLL. Having both drivers simultaneously, or installing them in the
-      wrong order, causes system-level DLL conflicts that silently prevent VISA from detecting
-      any instruments. Always follow the order below and restart after each major step.
+      National Instruments DLL. Having both drivers simultaneously or installing them in the
+      wrong order causes silent DLL conflicts that prevent VISA from detecting any instruments.
+      Always follow the order below and restart after each major step.
     </div>
 
     <div class="step-block">
-      <div class="step-title">Step 1 — Clean the system (CRITICAL: do this first)</div>
+      <div class="step-title">Step 1 — Clean the system (do this first, hardware DISCONNECTED)</div>
       <div class="step-body">
         <ol>
-          <li><strong>Disconnect the KUSB-488B adapter from all USB ports.</strong></li>
-          <li>Open <em>Control Panel → Programs → Uninstall a program</em> and
-              remove <strong>all</strong> of the following if present:
-            <ul>
-              <li>NI-VISA (any version)</li>
-              <li>NI-488.2</li>
-              <li>NI GPIB (any variant)</li>
-              <li>KI-488 (any version)</li>
-              <li>Keithley I/O Layer</li>
-              <li>KUSB-488B drivers (any entry)</li>
-            </ul>
-          </li>
-          <li>Open <em>Device Manager</em>. Under <em>GPIB Interfaces</em> or <em>Universal Serial Bus controllers</em>,
-              check for any remaining GPIB/KUSB entries. Right-click → Uninstall device (also check
-              "Delete the driver software for this device").</li>
+          <li>Disconnect the KUSB-488B from all USB ports.</li>
+          <li>Via <em>Control Panel → Programs → Uninstall</em>, remove all of the following if present:
+            NI-VISA, NI-488.2, NI GPIB, KI-488, Keithley I/O Layer, KUSB-488B drivers.</li>
+          <li>In Device Manager, uninstall any remaining GPIB/KUSB entries (check "Delete the driver software").</li>
           <li>Restart the PC.</li>
         </ol>
       </div>
     </div>
 
     <div class="step-block">
-      <div class="step-title">Step 2 — Install the KI-488 driver (hardware DISCONNECTED)</div>
+      <div class="step-title">Step 2 — Install the KI-488 driver in NI-compatible mode (hardware DISCONNECTED)</div>
       <div class="step-body">
         <ol>
-          <li>Download the KI-488 driver from
-              <strong>tek.com/keithley</strong> → Support → Software Downloads → search "KUSB-488B".</li>
-          <li>Extract the downloaded <code>.zip</code> archive and run <code>setup.exe</code>.</li>
-          <li>In the InstallShield wizard, when asked to select the driver mode:
-            <ul>
-              <li>Select <strong>"NI command-compatible"</strong> (also labelled as
-                  "National Instruments compatible" depending on version).</li>
-              <li><em>Do not select</em> "Keithley mode" — this mode is not compatible with PyVISA.</li>
-            </ul>
-          </li>
-          <li>Complete the installation, then <strong>restart the PC before connecting the cable</strong>.</li>
+          <li>Download from <strong>tek.com/keithley</strong> → Support → Software → search "KUSB-488B".</li>
+          <li>Run <code>setup.exe</code>. When asked for driver mode, select
+              <strong>"NI command-compatible"</strong>. Do <em>not</em> select "Keithley mode"
+              (incompatible with PyVISA).</li>
+          <li>Complete the installation. <strong>Restart the PC before connecting the cable.</strong></li>
         </ol>
       </div>
     </div>
@@ -475,342 +480,260 @@
       <div class="step-title">Step 3 — Install NI-VISA runtime (hardware DISCONNECTED)</div>
       <div class="step-body">
         <ol>
-          <li>Download <strong>NI-VISA</strong> from <strong>ni.com/visa</strong> (free; requires an NI account).</li>
-          <li>Run the installer. During the component selection screen:
-            <ul>
-              <li>Install: <strong>NI-VISA runtime</strong> only</li>
-              <li>Uncheck / skip: NI-488.2, NI-DAQmx, NI Measurement Studio, and all other optional components</li>
-            </ul>
-          </li>
-          <li>Restart the PC after NI-VISA installation completes.</li>
+          <li>Download <strong>NI-VISA</strong> from <strong>ni.com/visa</strong> (free; requires NI account).</li>
+          <li>Install <strong>NI-VISA runtime only</strong>. Uncheck NI-488.2, NI-DAQmx, and all other components.</li>
+          <li>Restart the PC.</li>
         </ol>
       </div>
     </div>
 
     <div class="step-block">
-      <div class="step-title">Step 4 — Connect the adapter and verify</div>
+      <div class="step-title">Step 4 — Connect and verify</div>
       <div class="step-body">
         <ol>
-          <li>Connect the KUSB-488B to a USB port on the computer. Connect the GPIB cable to the Keithley 2400.</li>
-          <li>Ensure the Keithley 2400 is powered on.</li>
-          <li>Open the <strong>KI-488 Configuration Utility</strong>
-              (Start → Keithley Instruments → KI-488 Configuration Utility). The utility should
-              show <em>GPIB0</em> in the interface list and, after scanning, should detect
-              the Keithley 2400 at its address (typically <strong>GPIB address 21</strong>,
-              as set on the instrument front panel under Menu → Communication → GPIB Address).</li>
-          <li>In the KI-488 Diagnostic Tool (within the same utility), send the command
-              <code>*IDN?</code> to the detected instrument. The response should be:
-              <pre>KEITHLEY INSTRUMENTS INC.,MODEL 2400,xxxxxxx,C32 ...</pre>
-          </li>
-          <li>If the above succeeds, the driver is correctly installed. The VISA resource address
-              will be in the format <code>GPIB0::21::INSTR</code>.</li>
+          <li>Connect KUSB-488B to USB. Connect GPIB cable to Keithley 2400 (powered on).</li>
+          <li>Open <strong>KI-488 Configuration Utility</strong>. Confirm <em>GPIB0</em> appears and
+              the Keithley is detected at its address (default GPIB address 21).</li>
+          <li>Send <code>*IDN?</code> — response should be
+              <code>KEITHLEY INSTRUMENTS INC.,MODEL 2400,...</code></li>
+          <li>VISA resource address format: <code>GPIB0::21::INSTR</code></li>
         </ol>
       </div>
     </div>
-
-    <div class="img-placeholder">INSERT IMAGE: KI-488 Configuration Utility showing instrument detected at GPIB0::21</div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 4. SOFTWARE INSTALLATION                                           -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       4. SOFTWARE INSTALLATION
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="installation">
     <h2>4. Software Installation</h2>
 
     <ol>
-      <li>
-        <strong>Install Python 3.9 or higher</strong> from
-        <a href="https://python.org" target="_blank">python.org</a>.
-        During installation, check the option <strong>"Add Python to PATH"</strong>. Use the
-        64-bit installer.
-      </li>
-      <li>
-        <strong>Open a terminal (Command Prompt or PowerShell)</strong> in the project folder:
-        <pre>cd "path\to\jv-measurement"</pre>
-      </li>
-      <li>
-        <strong>Install all required Python packages</strong>:
-        <pre>pip install pyvisa numpy matplotlib xlsxwriter playsound</pre>
-        If <code>playsound</code> fails to install (known build issue on some Python versions),
-        the software will fall back to a <code>winsound.Beep</code> tone — this is not a critical
-        dependency.
-      </li>
-      <li>
-        <strong>Launch the software</strong>:
-        <pre>python main.py</pre>
-        The main window should open. If you see an error about missing modules, re-run the
-        <code>pip install</code> command above.
-      </li>
+      <li><strong>Install Python 3.9+</strong> from python.org. Check <strong>"Add Python to PATH"</strong>
+          during installation. Use the 64-bit installer.</li>
+      <li><strong>Open a terminal</strong> in the project folder:
+          <pre>cd "path\to\jv-measurements"</pre></li>
+      <li><strong>Install all dependencies</strong>:
+          <pre>pip install pyvisa numpy matplotlib xlsxwriter openpyxl mplcursors playsound</pre>
+          If <code>playsound</code> fails to install, omit it — the software falls back to
+          <code>winsound.Beep</code>.</li>
+      <li><strong>Launch the software</strong>:
+          <pre>python main.py</pre></li>
     </ol>
 
     <div class="info-box">
       <div class="box-label">ℹ Note</div>
-      The software stores no user data outside the project folder. No installation step writes
-      to the Windows Registry. To remove the software, simply delete the project folder.
+      The software stores no data outside the project folder and makes no registry entries.
+      To uninstall, simply delete the project folder.
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 5. CONNECTING THE INSTRUMENT                                       -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       5. CONNECTING THE INSTRUMENT
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="connecting">
     <h2>5. Connecting the Instrument</h2>
 
-    <h3>Software connection workflow</h3>
     <ol>
-      <li>Launch the software (<code>python main.py</code>).</li>
-      <li>In the menu bar, go to <strong>Instrument → Connect…</strong></li>
-      <li>The <em>Connect Instrument</em> dialog opens and automatically scans all VISA resources
-          available on the system. Each resource is queried with the SCPI command <code>*IDN?</code>
-          to identify the connected device.</li>
-      <li>Select the <strong>Keithley 2400</strong> entry from the list (address format:
-          <code>GPIB0::21::INSTR</code>). Confirm the identification string shows "KEITHLEY".</li>
-      <li>Click <strong>✔ Connect</strong>. The dialog closes and the status banner at the top of
-          the main window changes from a warning to the instrument model string.</li>
-      <li>The connection is <strong>persistent for the entire session</strong> — the GPIB session
-          stays open between measurements, eliminating reconnect overhead.
-          The <em>Start Measurement</em> button becomes enabled.</li>
-      <li>To disconnect: <strong>Instrument → Disconnect</strong>. This sends <code>:OUTP OFF</code>
-          and closes the VISA session safely.</li>
+      <li>Launch <code>python main.py</code>.</li>
+      <li>Go to <strong>Instrument → Connect…</strong>. The dialog scans all VISA resources
+          and queries each with <code>*IDN?</code> to identify devices.</li>
+      <li>Select the Keithley 2400 entry (<code>GPIB0::21::INSTR</code>) and click
+          <strong>✔ Connect</strong>.</li>
+      <li>The connection is <strong>persistent for the entire session</strong>. All four
+          measurement modes share this connection. Disconnect via
+          <strong>Instrument → Disconnect</strong>.</li>
     </ol>
 
-    <div class="img-placeholder">INSERT IMAGE: instrument connection dialog showing Keithley detected at GPIB0::21::INSTR</div>
-
-    <h3>Physical wiring: 2-wire vs. 4-wire connection</h3>
-
-    <h4>2-wire (default)</h4>
-    <p>
-      In 2-wire mode, two terminals of the Keithley carry both the source current and the sense
-      voltage. Connect as follows:
-    </p>
+    <h3>2-wire connection (default)</h3>
     <ul>
-      <li><strong>Force HI (red)</strong> → counter-electrode (Au or Ag back contact)</li>
-      <li><strong>Force LO (black)</strong> → transparent front electrode (FTO or ITO, the photoanode side)</li>
+      <li><strong>Force HI (red)</strong> → counter-electrode (Au/Ag back contact)</li>
+      <li><strong>Force LO (black)</strong> → transparent front electrode (FTO/ITO)</li>
     </ul>
-    <p>
-      In this mode, the resistance of the measurement cables, probes, and contact pads is included
-      in the voltage reading. For typical laboratory setups with short cables, this error is small
-      (&lt;1 Ω total), but it does affect R<sub>s</sub> accuracy.
-    </p>
 
-    <h4>4-wire (Kelvin sensing)</h4>
-    <p>
-      In 4-wire (remote sensing) mode, two additional terminals measure the voltage directly at
-      the device contacts, eliminating the resistance of the force cables from the measurement.
-      Connect as follows:
-    </p>
+    <h3>4-wire connection (Kelvin sensing)</h3>
+    <p>Use when accurate R<sub>s</sub> is required. Enable via the <strong>Instrument Settings</strong>
+       panel. Connects two additional Sense terminals directly at the cell contacts, eliminating
+       cable resistance from the voltage reading.
+       Sends <code>:SYST:RSEN ON</code> to the Keithley.</p>
     <ul>
-      <li><strong>Force HI (red)</strong> → counter-electrode</li>
-      <li><strong>Force LO (black)</strong> → front electrode</li>
-      <li><strong>Sense HI (orange/green)</strong> → counter-electrode contact, as close to the cell as possible</li>
-      <li><strong>Sense LO (orange/green)</strong> → front electrode contact, as close to the cell as possible</li>
+      <li>Force HI / Force LO: same as 2-wire above</li>
+      <li>Sense HI / Sense LO: connect as close to the cell pads as possible</li>
     </ul>
-    <p>
-      Enable 4-wire sensing in the <em>Instrument Settings</em> panel by checking
-      <strong>"4-Wire (Kelvin) sensing"</strong>. This sends <code>:SYST:RSEN ON</code> to the
-      Keithley. The improvement in R<sub>s</sub> accuracy is typically 0.5–2 Ω·cm² depending on
-      cable and contact quality.
-    </p>
-
-    <div class="img-placeholder">INSERT IMAGE: diagram of 4-wire Kelvin connection to solar cell measurement board</div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 6. INTERFACE GUIDE                                                 -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       6. INTERFACE GUIDE
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="interface">
     <h2>6. Interface Guide</h2>
 
-    <div class="img-placeholder">INSERT IMAGE: annotated screenshot of full main window with labels for each panel</div>
+    <div class="img-placeholder">INSERT IMAGE: annotated screenshot of main window</div>
 
-    <h3>Instrument status banner (top, dark background)</h3>
-    <p>
-      Displays the connection status at all times. When no instrument is connected, shows a yellow
-      warning and the <em>Start Measurement</em> button is disabled. Once connected, shows the
-      instrument identification string and VISA address in white text on the dark banner.
-    </p>
+    <h3>Instrument status banner (dark top bar)</h3>
+    <p>Shows the current connection state. Yellow warning = no instrument connected; measurement
+       buttons are disabled. White text = instrument identified; measurement can proceed.</p>
 
-    <h3>Sample Information panel</h3>
+    <h3>Mode switching</h3>
+    <p>Four modes are accessible from the <strong>Mode</strong> menu or via keyboard shortcuts
+       (Alt+F3 through Alt+F6). Each mode reveals its own panel of controls in the left pane.
+       Only one mode can be active at a time. Switching mode does not disconnect the instrument.</p>
+
+    <h3>J-V mode panel (<code>Alt+F3</code>)</h3>
+    <p>Sample name, export folder, voltage sweep parameters, cell area, instrument settings,
+       illumination input, pre-bias conditioning, and dark J-V option. Contains the main
+       J-V plot area and measurement log.</p>
+
+    <h3>Stabilized Current panel (<code>Alt+F4</code>)</h3>
+    <p>Sample name, export folder, cell area, applied voltage, illumination, duration, reading
+       interval, and stabilization threshold. Contains a live dual-axis plot (J and PCE vs time).</p>
+
+    <h3>MPP Tracking panel (<code>Alt+F5</code>)</h3>
+    <p>Sample name, export folder, cell area, scan parameters, pre-bias option, illumination,
+       total duration, SPO duration per cycle. Contains SPO plot and J-V per cycle overlay.</p>
+
+    <h3>Pure MPP Tracking panel (<code>Alt+F6</code>)</h3>
+    <p>Sample name, export folder, cell area, perturbation step, interval, NPLC, delay,
+       illumination, and initial scan parameters. Contains dual-axis plot (PCE and V<sub>mpp</sub>).</p>
+
+    <h3>File menu</h3>
     <ul>
-      <li><strong>Sample Name:</strong> a text identifier for this measurement session. This string
-          is used in the output Excel filename (e.g. <code>D1C1_20240509_143022.xlsx</code>).
-          Use a consistent naming scheme (e.g. batch letter + cell number: <code>B3C2</code>).</li>
-      <li><strong>Export Folder:</strong> destination directory where Excel files are saved.
-          Click <em>Browse</em> to select a folder using the system file dialog.</li>
+      <li><strong>Open Data File…</strong> — opens the Data Viewer window for any saved .xlsx file</li>
+      <li><strong>Export Measurement Log…</strong> — saves the J-V session log as plain text</li>
     </ul>
-
-    <h3>Measurement Parameters panel</h3>
-    <p>Controls the voltage sweep range and cell area. See Section 7 for detailed descriptions.</p>
-
-    <h3>Instrument Settings panel</h3>
-    <p>Controls timing (delay per point, NPLC) and sensing mode (2-wire / 4-wire).
-       See Section 8 for detailed descriptions.</p>
-
-    <h3>Pre-bias Conditioning panel</h3>
-    <p>Optional pre-bias before the reverse scan. See Section 9 for physical motivation and
-       recommended settings.</p>
-
-    <h3>Illumination Settings panel</h3>
-    <ul>
-      <li><strong>Detector Power (mW):</strong> optical power reading from the calibrated reference
-          detector placed at the sample position. Measure with an optical power meter before
-          each sample.</li>
-      <li><strong>Detector Area (cm²):</strong> active area of the reference detector.
-          Default 1.13 cm² (Ophir PD300-UV or similar). Update this value if using a different
-          detector.</li>
-      <li><strong>Illumination (mW/cm²):</strong> calculated automatically as
-          Power / Area. For standard 1-sun AM1.5G conditions this should read
-          <strong>100 mW/cm²</strong>. This value is used as P<sub>in</sub> in the PCE calculation
-          and is saved in the Excel output.</li>
-    </ul>
-
-    <h3>Start / Stop buttons</h3>
-    <ul>
-      <li><strong>Start Measurement:</strong> disabled until an instrument is connected and inputs
-          are valid. Clicking opens a safety confirmation dialog before the measurement begins.</li>
-      <li><strong>Stop Measurement:</strong> aborts the current measurement safely at the end of
-          the current voltage step. The output is turned off and all controls are re-enabled.</li>
-    </ul>
-
-    <h3>Measurement Log</h3>
-    <p>
-      A scrollable text area that records all completed measurements with timestamps. Parameters
-      and extracted values from each scan are appended automatically. The log persists for the
-      entire session and can be exported as a plain-text file via
-      <strong>File → Export Measurement Log…</strong>
-    </p>
-
-    <h3>J-V plot area</h3>
-    <p>
-      Updates after each completed measurement. Shows four curves: forward J (blue solid),
-      reverse J (red solid), forward power density (blue dashed), and reverse power density
-      (red dashed). The second y-axis on the right shows power density in mW/cm².
-    </p>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 7. MEASUREMENT PARAMETERS                                          -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <section class="section" id="parameters">
-    <h2>7. Measurement Parameters</h2>
+  <!-- ════════════════════════════════════════════════════════════════════
+       7. MEASUREMENT MODES OVERVIEW
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="modes">
+    <h2>7. Measurement Modes Overview</h2>
+
+    <p>The four modes complement each other within a complete efficiency characterisation workflow.
+       The order below reflects the recommended characterisation sequence for a new perovskite cell.</p>
+
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>Typical duration</th><th>Key output</th><th>When to use</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Dark J-V</strong> (within J-V mode)</td>
+          <td>1–5 min</td>
+          <td>Dark diode curve, R<sub>sh</sub> estimate</td>
+          <td>First measurement; diagnoses shunting and contact quality before illumination</td>
+        </tr>
+        <tr>
+          <td><strong>J-V Measurement</strong></td>
+          <td>2–10 min</td>
+          <td>V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE, R<sub>s</sub>, R<sub>sh</sub>, HI</td>
+          <td>Primary characterisation; always include forward + reverse scans for HI reporting</td>
+        </tr>
+        <tr>
+          <td><strong>Stabilized Current</strong></td>
+          <td>1–5 min</td>
+          <td>Quasi-steady-state J and PCE at fixed V</td>
+          <td>Quick validation of dynamic J-V PCE; reports stabilized efficiency after transients decay</td>
+        </tr>
+        <tr>
+          <td><strong>MPP Tracking (JV-SPO)</strong></td>
+          <td>30 min – 24 h</td>
+          <td>PCE vs time with periodic J-V diagnostics</td>
+          <td>Stability studies; efficiency evolution over time; per-cycle J-V parameter tracking</td>
+        </tr>
+        <tr>
+          <td><strong>Pure MPP Tracking (P&amp;O)</strong></td>
+          <td>5 min – 24 h</td>
+          <td>Continuous PCE and V<sub>mpp</sub> vs time</td>
+          <td>Certified stabilized efficiency reporting; no J-V scan interruptions</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="info-box">
+      <div class="box-label">ℹ Recommendation for efficiency reporting</div>
+      Per the ISOS consensus [Khenkin et al., 2020], a credible efficiency claim for perovskite solar
+      cells requires: (1) J-V scans in both directions with reported scan rate and HI, AND
+      (2) a stabilized PCE from MPP tracking or Stabilized Current measurement over ≥60 s.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       8. J-V MEASUREMENT PARAMETERS
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="jv-params">
+    <h2>8. J-V Measurement Parameters <span class="mode-badge jv">Alt+F3</span></h2>
 
     <div class="param-block">
       <div class="param-name">Start Voltage (V)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">−0.1 V</span></div>
-      <div class="param-row"><span class="param-key">Physical meaning:</span><span class="param-val">Starting point of the forward scan (low to high voltage direction).</span></div>
-      <p style="margin-top:8px;">
-        Setting the start slightly below 0 V (e.g. −0.1 V) ensures the full J<sub>sc</sub> plateau
-        is captured and that the zero-crossing of the current (needed for R<sub>sh</sub> extraction)
-        is reliably identified. Starting exactly at 0 V can miss the true J<sub>sc</sub> if there
-        is a small voltage offset from contact potential or cable IR drop.
-        A value of −0.2 V is safe for most perovskite cells. Avoid values below −0.5 V as this
-        may cause irreversible degradation of organic transport layers.
-      </p>
+      <p style="margin-top:8px;">Starting point of the forward scan. Setting slightly below 0 V ensures
+         J<sub>sc</sub> plateau is fully captured and zero-crossing for R<sub>sh</sub> extraction is reliable.
+         Avoid values below −0.5 V (risk of degrading organic transport layers).</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">End Voltage (V)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">1.05 V</span></div>
-      <div class="param-row"><span class="param-key">Physical meaning:</span><span class="param-val">End point of the forward scan (and start of the reverse scan).</span></div>
-      <p style="margin-top:8px;">
-        Should be set slightly above the expected V<sub>oc</sub> to ensure the current zero-crossing
-        is captured within the measured range. For typical FA/MA mixed-cation perovskites under
-        1-sun AM1.5G, V<sub>oc</sub> is typically 1.0–1.15 V, so 1.1–1.2 V is a good end voltage.
-        Setting this value too low will truncate the curve before V<sub>oc</sub>, making V<sub>oc</sub>
-        extraction impossible. Setting it too high (beyond V<sub>oc</sub> + 0.3 V) may stress the
-        cell and is unnecessary.
-      </p>
+      <p style="margin-top:8px;">Should be slightly above the expected V<sub>oc</sub> to ensure the
+         zero-crossing is captured. For typical FA/MA perovskites (V<sub>oc</sub> ≈ 1.0–1.15 V),
+         use 1.1–1.2 V. Setting below V<sub>oc</sub> makes V<sub>oc</sub> extraction impossible.</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Step Voltage (V)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">0.025 V (25 mV)</span></div>
-      <div class="param-row"><span class="param-key">Physical meaning:</span><span class="param-val">Voltage increment between measurement points.</span></div>
-      <p style="margin-top:8px;">
-        Smaller steps produce a smoother curve and improve the accuracy of J<sub>sc</sub>,
-        V<sub>oc</sub>, and MPP extraction through better sampling density near the key features
-        of the J-V curve. Typical recommendations for perovskites: 10–50 mV. For a range of
-        −0.1 to 1.05 V with 25 mV steps, the scan contains 47 points per direction.
-      </p>
-      <p>
-        <strong>Effect on scan rate:</strong> The effective scan rate (mV/s) is determined by:
-      </p>
+      <p style="margin-top:8px;">Voltage increment between measured points. Smaller steps improve
+         the accuracy of J<sub>sc</sub>, V<sub>oc</sub>, and MPP extraction. Typical range for
+         perovskites: 10–50 mV. The <strong>Scan Rate (mV/s)</strong> field updates automatically
+         to reflect the effective rate with the configured step, delay, and NPLC.</p>
       <div class="equation">
-        scan rate (mV/s) = Step (mV) / [Delay (s) + NPLC × (1/f<sub>grid</sub>) + safety margin (s)]
+        scan rate (mV/s) = Step (mV) / (Delay<sub>HW</sub> + NPLC / f<sub>grid</sub> + 20 ms) × 1000
       </div>
-      <p>Scan rate directly affects the apparent hysteresis in perovskites — faster scans
-         exaggerate hysteresis; slower scans approach quasi-steady-state behaviour.
-         Always report scan rate when publishing HI values.</p>
+      <p>The 20 ms is a fixed Python-side overhead per point. The displayed scan rate is saved in the Excel file.</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Cell Area (cm²)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">0.07 cm²</span></div>
-      <div class="param-row"><span class="param-key">Physical meaning:</span><span class="param-val">Active area of the solar cell, used to convert measured current (A) to current density (mA/cm²).</span></div>
-      <p style="margin-top:8px;">
-        This value must be measured accurately using a calibrated aperture mask or optical
-        microscopy. A 5% error in the cell area propagates directly to a 5% error in
-        J<sub>sc</sub> and PCE. When using an aperture mask (recommended to avoid edge effects
-        and shunt leakage from the cell perimeter), enter the mask opening area, not the total
-        cell area.
-      </p>
+      <p style="margin-top:8px;">Used to convert measured current (A) to current density (mA/cm²).
+         A 5% area error propagates directly to 5% error in J<sub>sc</sub> and PCE. When using
+         an aperture mask, enter the mask opening area, not the total cell area.</p>
     </div>
 
     <h3>Scan rate reference table</h3>
-    <p>Approximate scan rates for common parameter combinations (Brazil grid: 60 Hz, 1 NPLC ≈ 16.7 ms).
-       A 20 ms internal safety margin is added per point.</p>
+    <p>Brazil grid 60 Hz; 1 NPLC ≈ 16.7 ms. The 20 ms software overhead is included.</p>
     <table>
       <thead>
-        <tr>
-          <th>Delay (ms)</th>
-          <th>NPLC</th>
-          <th>Approx. time/point (ms)</th>
-          <th>Scan rate at 25 mV step (mV/s)</th>
-          <th>Typical use case</th>
-        </tr>
+        <tr><th>Delay (ms)</th><th>NPLC</th><th>Time/point (ms)</th><th>Rate at 25 mV step</th><th>Use case</th></tr>
       </thead>
       <tbody>
-        <tr><td>50</td><td>0.5</td><td>~79</td><td>~316</td><td>Fast hysteresis screening</td></tr>
-        <tr><td>100</td><td>1.0</td><td>~137</td><td>~182</td><td>Standard perovskite measurement</td></tr>
-        <tr><td>200</td><td>1.0</td><td>~237</td><td>~105</td><td>Cells with high ionic activity</td></tr>
-        <tr><td>500</td><td>1.0</td><td>~537</td><td>~47</td><td>Slow quasi-steady-state scan</td></tr>
-        <tr><td>500</td><td>5.0</td><td>~604</td><td>~41</td><td>Low-noise slow scan (dark J-V)</td></tr>
+        <tr><td>50</td><td>0.5</td><td>~79</td><td>~316 mV/s</td><td>Fast hysteresis screening</td></tr>
+        <tr><td>100</td><td>1.0</td><td>~137</td><td>~182 mV/s</td><td>Standard perovskite measurement</td></tr>
+        <tr><td>200</td><td>1.0</td><td>~237</td><td>~105 mV/s</td><td>Cells with high ionic activity</td></tr>
+        <tr><td>500</td><td>1.0</td><td>~537</td><td>~47 mV/s</td><td>Quasi-steady-state scan</td></tr>
+        <tr><td>500</td><td>5.0</td><td>~604</td><td>~41 mV/s</td><td>Low-noise dark J-V scan</td></tr>
       </tbody>
     </table>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 8. INSTRUMENT SETTINGS                                             -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       9. INSTRUMENT SETTINGS
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="instrument-settings">
-    <h2>8. Instrument Settings</h2>
+    <h2>9. Instrument Settings</h2>
 
     <div class="param-block">
       <div class="param-name">Delay per point (ms)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">100 ms</span></div>
-      <div class="param-row"><span class="param-key">SCPI command:</span><span class="param-val"><code>:SOUR:DEL {value}</code></span></div>
-      <p style="margin-top:8px;">
-        The hardware delay set directly on the Keithley via SCPI. This is the time the instrument
-        waits between <em>applying</em> the new voltage step and <em>triggering</em> the ADC to
-        read the current. It is more precise and reproducible than a Python-side <code>sleep()</code>
-        call because the timing is handled entirely by the instrument's internal firmware.
-      </p>
-      <p>
-        For silicon solar cells, 5–20 ms is typically sufficient. For perovskite solar cells,
-        100–500 ms is recommended due to slow ionic redistribution after each voltage step.
-        The slow ionic response means the photocurrent takes tens to hundreds of milliseconds
-        to stabilise after a voltage change — measuring too quickly captures a transient current,
-        not the steady-state response, which artificially increases apparent J<sub>sc</sub> and FF.
-      </p>
-      <p>
-        Additionally, the software adds a fixed 20 ms Python-side safety margin after each
-        <code>:SOUR:VOLT</code> write command (before the SCPI <code>:READ?</code> query).
-        This margin is not user-configurable and is separate from the Keithley hardware delay.
-      </p>
+      <div class="param-row"><span class="param-key">SCPI:</span><span class="param-val"><code>:SOUR:DEL {value}</code></span></div>
+      <p style="margin-top:8px;">Hardware delay set on the Keithley between applying a voltage step
+         and triggering the ADC. More precise than a Python sleep because it is handled by the
+         instrument firmware. For perovskites, 100–500 ms is recommended to allow slow ionic
+         redistribution to partially settle before the current reading [Tress et al., 2015].</p>
       <div class="warning-box">
         <div class="box-label">⚠ Note for publications</div>
-        Always report the delay per point and NPLC settings when publishing J-V data on
-        perovskite cells. The apparent PCE and HI values are scan-rate-dependent.
+        Always report delay per point and NPLC when publishing J-V data on perovskites.
         Both values are saved automatically in the Excel output.
       </div>
     </div>
@@ -819,218 +742,566 @@
       <div class="param-name">NPLC (Number of Power Line Cycles)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">1.0</span></div>
       <div class="param-row"><span class="param-key">Range:</span><span class="param-val">0.01 – 25</span></div>
-      <div class="param-row"><span class="param-key">SCPI command:</span><span class="param-val"><code>:SENS:CURR:NPLC {value}</code></span></div>
-      <p style="margin-top:8px;">
-        Controls the integration time of the Keithley's analogue-to-digital converter per
-        reading. The Keithley averages the current signal over a time window of
-        NPLC × (1/f<sub>grid</sub>) seconds. In Brazil (60 Hz grid), 1 NPLC = 16.7 ms.
-        Higher NPLC values average out more 60 Hz electrical noise, producing more precise
-        current readings at the cost of slower scan speed.
-      </p>
-      <ul>
-        <li><strong>NPLC 0.01–0.1:</strong> fastest readout, most noise; useful for studying
-            hysteresis rate dependence where scan speed must be maximised.</li>
-        <li><strong>NPLC 1.0 (default):</strong> good balance of speed and noise for illuminated
-            J-V scans under 1-sun conditions where photocurrents are large (15–25 mA/cm²).</li>
-        <li><strong>NPLC 5–10:</strong> slower but very low noise; recommended for dark J-V
-            measurements where currents are in the nA–μA range.</li>
-        <li><strong>NPLC 25:</strong> maximum integration (≈417 ms per point at 60 Hz); rarely
-            needed for standard J-V measurements.</li>
-      </ul>
+      <div class="param-row"><span class="param-key">SCPI:</span><span class="param-val"><code>:SENS:CURR:NPLC {value}</code></span></div>
+      <p style="margin-top:8px;">Integration time of the Keithley ADC. At 60 Hz, 1 NPLC = 16.7 ms.
+         Higher NPLC averages out more 60 Hz noise at the cost of slower scan speed.
+         Use NPLC 5–10 for dark J-V where currents are in the nA–μA range;
+         NPLC 1.0 is sufficient for illuminated measurements.</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">4-Wire (Kelvin) sensing</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">OFF</span></div>
-      <div class="param-row"><span class="param-key">SCPI command:</span><span class="param-val"><code>:SYST:RSEN ON</code> / <code>:SYST:RSEN OFF</code></span></div>
-      <p style="margin-top:8px;">
-        When enabled, the Keithley uses separate Force terminals (to supply current) and Sense
-        terminals (to measure voltage) via its internal circuitry. The Sense terminals draw
-        negligible current (&lt;1 μA), so the voltage they measure is essentially the true voltage
-        at the cell contacts, free from the ohmic drop in the Force cables.
-      </p>
-      <p>
-        In 2-wire mode, if the total cable + contact resistance is 0.5 Ω and J<sub>sc</sub> is
-        20 mA/cm² over 0.07 cm² (I = 1.4 mA), the cable drop is only 0.7 mV — negligible
-        for V<sub>oc</sub> and FF. However, R<sub>s</sub> derived from the slope near V<sub>oc</sub>
-        will include this cable resistance and may be overestimated by 0.5–2 Ω·cm².
-        Enable 4-wire sensing when accurate R<sub>s</sub> values are important (e.g. when
-        comparing transport layer conductivities).
-      </p>
+      <div class="param-row"><span class="param-key">SCPI:</span><span class="param-val"><code>:SYST:RSEN ON</code> / <code>OFF</code></span></div>
+      <p style="margin-top:8px;">Removes cable and contact resistance from the voltage measurement.
+         Improves R<sub>s</sub> accuracy by 0.5–2 Ω·cm² in typical setups. Recommended when
+         comparing transport layer conductivities or when cable length is &gt;1 m.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Scan Rate (mV/s) — read-only display</div>
+      <p style="margin-top:8px;">Calculated automatically from Step, Delay, and NPLC and displayed
+         in the panel. Updates in real time as parameters are changed. This value is written to
+         column AA of the Excel output and is shown in the Data Viewer metadata panel.
+         Use it to ensure consistent scan rates across a measurement series.</p>
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 9. PRE-BIAS CONDITIONING                                           -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       10. PRE-BIAS CONDITIONING
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="prebias">
-    <h2>9. Pre-bias Conditioning</h2>
+    <h2>10. Pre-bias Conditioning</h2>
 
-    <h3>What it is</h3>
+    <h3>Physical motivation</h3>
     <p>
-      Pre-bias conditioning applies a fixed forward voltage to the cell for a defined duration
-      <em>immediately before the reverse scan</em>. The Keithley output is left ON at the
-      pre-bias voltage during the conditioning period, and then the voltage sweep begins from
-      the end voltage (V<sub>oc</sub> side) downwards.
-    </p>
-
-    <h3>Why it matters physically</h3>
-    <p>
-      Perovskite absorber materials (e.g. MAPbI<sub>3</sub>, FAPbI<sub>3</sub>, and mixed-cation
-      compositions) are <strong>mixed ionic-electronic conductors</strong>. Mobile ionic species —
-      primarily iodide vacancies (V<sub>I</sub><sup>+</sup>), methylammonium cations (MA<sup>+</sup>),
-      and, to a lesser extent, Pb<sup>2+</sup> — can redistribute slowly (timescales of seconds
-      to minutes) in response to the electric field inside the device.
+      Perovskite absorbers are <strong>mixed ionic-electronic conductors</strong>. Mobile ionic
+      species (primarily iodide vacancies V<sub>I</sub><sup>+</sup> and interstitial ions)
+      redistribute slowly (seconds to minutes) in response to the electric field.
+      If J-V scans begin from an unknown ionic state, the results are irreproducible.
     </p>
     <p>
-      If a J-V scan is performed starting from an unknown or variable ionic state, the result
-      is irreproducible: two identical cells measured at different times of day, or after different
-      waiting times in the dark, may show significantly different PCE and HI values because their
-      ionic distributions differ at the start of the measurement.
-    </p>
-    <p>
-      Applying a pre-bias voltage slightly above V<sub>oc</sub> (forward bias) for 2–5 s drives
-      the ions to a well-defined accumulation state at the ETL/perovskite and HTL/perovskite
-      interfaces. Starting the reverse scan immediately after pre-bias ensures all measurements
-      begin from the <em>same</em> ionic configuration, making the HI value reproducible and
-      comparable across samples, laboratories, and publications.
+      Applying a forward bias slightly above V<sub>oc</sub> for 2–5 s drives ions to a well-defined
+      accumulation state at both interfaces, ensuring all reverse scans start from the <em>same</em>
+      ionic configuration. This makes the HI value reproducible and comparable between experiments
+      [Christians et al., 2015].
     </p>
 
-    <h3>Correct measurement sequence (as implemented)</h3>
-    <ol>
-      <li><strong>Forward scan</strong> — measured without pre-bias, capturing the device in its
-          "natural" or history-dependent ionic state.</li>
-      <li><strong>Pre-bias applied</strong> — the Keithley holds the cell at the pre-bias voltage
-          for the specified duration.</li>
-      <li><strong>Reverse scan</strong> — measured immediately after pre-bias, starting from the
-          conditioned ionic state.</li>
-    </ol>
+    <h3>Measurement sequence when pre-bias is enabled</h3>
+    <div class="seq-flow">
+      <div class="seq-step">Forward scan (no pre-bias)</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Pre-bias hold</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Reverse scan</div>
+    </div>
     <div class="info-box">
       <div class="box-label">ℹ Why this order?</div>
-      Applying pre-bias before the forward scan would artificially condition the ionic state of
-      the device before measuring FS, distorting the forward-scan results and making the HI
-      calculation physically meaningless. The forward scan should reflect the device in its
-      unperturbed state; only the reverse scan benefits from ionic conditioning.
+      Pre-bias is applied only before the reverse scan. Conditioning before the forward scan
+      would distort FS results and make the HI calculation physically meaningless.
     </div>
 
-    <h3>Parameters</h3>
     <div class="param-block">
       <div class="param-name">Pre-bias Voltage (V)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">1.2 V</span></div>
-      <p style="margin-top:8px;">
-        Should be set to 0.1–0.2 V above the expected V<sub>oc</sub>. For typical n-i-p
-        FA/MA perovskites with V<sub>oc</sub> ~ 1.0–1.1 V, a pre-bias of 1.2 V is appropriate.
-        Using a voltage too far above V<sub>oc</sub> (e.g. &gt;1.5 V for a 1.1 V V<sub>oc</sub> cell)
-        risks forward-biasing the device into degradation. Using a voltage below V<sub>oc</sub>
-        does not fully drive ion accumulation at the interfaces.
-      </p>
+      <p style="margin-top:8px;">Set 0.1–0.2 V above the expected V<sub>oc</sub>.
+         For FA/MA perovskites with V<sub>oc</sub> ≈ 1.0–1.1 V, 1.2 V is appropriate.
+         Avoid values far above V<sub>oc</sub> (&gt;1.5 V for a 1.1 V cell) to prevent degradation.</p>
     </div>
     <div class="param-block">
       <div class="param-name">Pre-bias Duration (s)</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">2.0 s</span></div>
-      <p style="margin-top:8px;">
-        Literature recommendation: 2–5 s for typical perovskites [Christians et al., 2015].
-        Cells with high ion concentrations or thick absorber layers may need up to 10 s for
-        full ionic equilibration. The status bar shows a countdown during the conditioning period.
-      </p>
+      <p style="margin-top:8px;">Literature recommendation: 2–5 s [Christians et al., 2015].
+         High-ionic-density absorbers or thick films may need up to 10 s for full equilibration.</p>
     </div>
-
-    <p><strong>Reference:</strong> J.A. Christians, J.S. Manser, P.V. Kamat,
-    <em>Best Practices in Perovskite Solar Cell Efficiency Measurements</em>,
-    J. Phys. Chem. Lett. 6 (2015) 3808–3814.
-    <a href="https://doi.org/10.1021/acs.jpclett.5b00289">doi:10.1021/acs.jpclett.5b00289</a></p>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 10. RUNNING A MEASUREMENT                                          -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <section class="section" id="running">
-    <h2>10. Running a Measurement</h2>
+  <!-- ════════════════════════════════════════════════════════════════════
+       11. RUNNING A J-V MEASUREMENT
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="running-jv">
+    <h2>11. Running a J-V Measurement <span class="mode-badge jv">Alt+F3</span></h2>
 
+    <h3>Measurement sequence (automated)</h3>
+    <div class="seq-flow">
+      <div class="seq-step optional">Dark J-V fwd + rev</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Open shutter prompt</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step optional">Light soaking timer</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Illuminated fwd scan</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step optional">Pre-bias hold</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Illuminated rev scan</div>
+    </div>
+    <p style="margin-top:8px;">Steps in grey are optional (can be enabled/disabled independently).</p>
+
+    <h3>Step-by-step procedure</h3>
     <ol>
-      <li>
-        <strong>Turn on the Keithley 2400</strong> and the solar simulator.
-        Allow the lamp to warm up for at least <strong>15–30 minutes</strong> before taking
-        any measurements. Most Xe-arc simulators need this time to reach stable irradiance.
-      </li>
-      <li>
-        <strong>Connect the KUSB-488B adapter</strong> to a USB port and launch the software:
-        <pre>python main.py</pre>
-      </li>
-      <li>
-        Go to <strong>Instrument → Connect…</strong>. Select the Keithley 2400 from the list
-        and click Connect. Confirm the status banner shows the instrument model.
-      </li>
-      <li>
-        Enter the <strong>Sample Name</strong> and select the <strong>Export Folder</strong>.
-      </li>
-      <li>
-        With the reference detector at the sample position (without the cell), measure the
-        optical power using the power meter. Enter the reading in
-        <strong>Detector Power (mW)</strong>. Verify that the
-        <em>Illumination (mW/cm²)</em> field shows approximately
-        <strong>100 mW/cm²</strong> for 1-sun AM1.5G conditions.
-        If it reads significantly higher or lower, check lamp alignment and shutter state.
-      </li>
-      <li>
-        Set <strong>Measurement Parameters</strong>: start/end voltage appropriate for the
-        cell's expected V<sub>oc</sub>, step size, and cell area (from mask or microscopy).
-      </li>
-      <li>
-        Adjust <strong>Instrument Settings</strong>: delay per point (100–200 ms for perovskites),
-        NPLC (1.0 for standard measurements), and 4-wire sensing if needed.
-      </li>
-      <li>
-        If performing hysteresis characterisation, <strong>enable Pre-bias Conditioning</strong>
-        and set the voltage slightly above expected V<sub>oc</sub> and duration to 2–5 s.
-      </li>
-      <li>
-        Place the cell under the simulator and connect the probes (Force HI to counter-electrode,
-        Force LO to front electrode). For 4-wire: also connect the Sense terminals.
-      </li>
-      <li>
-        Click <strong>Start Measurement</strong>. Read the safety check dialog carefully and
-        click OK to proceed.
-      </li>
-      <li>
-        The software executes the following sequence automatically:
-        <ol type="a">
-          <li>Resets and configures the Keithley (<code>*RST</code>, source function, compliance, NPLC, delay)</li>
-          <li>Measures the <strong>forward scan</strong> (low V → high V)</li>
-          <li>If pre-bias is enabled: applies the conditioning voltage for the specified duration</li>
-          <li>Measures the <strong>reverse scan</strong> (high V → low V)</li>
-          <li>Calculates V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE, R<sub>s</sub>, R<sub>sh</sub>, and HI for both scans</li>
-          <li>Updates the J-V plot</li>
-          <li>Saves the results to an Excel file in the export folder</li>
-          <li>Turns the Keithley output OFF (connection remains open for the next measurement)</li>
-          <li>Plays a completion beep</li>
-        </ol>
-      </li>
-      <li>
-        Review the results in the <strong>Measurement Log</strong> and the <strong>J-V plot</strong>.
-        The Excel file is available immediately in the export folder.
-      </li>
+      <li>Turn on the Keithley 2400 and solar simulator. Allow the lamp to warm up
+          <strong>≥15–30 minutes</strong> before taking measurements.</li>
+      <li>Connect the instrument: <strong>Instrument → Connect…</strong></li>
+      <li>Select mode <strong>J-V Measurement</strong> (Alt+F3) if not already active.</li>
+      <li>Enter <strong>Sample Name</strong> and select <strong>Export Folder</strong>.</li>
+      <li>Place the reference detector at the sample position and measure optical power.
+          Enter the reading in <strong>Detector Power (mW)</strong>. Verify
+          <em>Illumination ≈ 100 mW/cm²</em> for 1-sun conditions.</li>
+      <li>Set voltage range (start, end, step), cell area, delay, and NPLC. Verify the
+          <strong>Scan Rate</strong> field shows the expected value.</li>
+      <li>If measuring hysteresis: enable <strong>Pre-bias Conditioning</strong>
+          and set voltage slightly above expected V<sub>oc</sub>.</li>
+      <li>Connect the cell (Force HI → counter-electrode, Force LO → front electrode).</li>
+      <li>Click <strong>Start Measurement</strong>, confirm the safety dialog, and click OK.</li>
+      <li>The software executes the full sequence automatically. Results appear in the
+          Measurement Log and J-V plot. The Excel file is saved immediately upon completion.</li>
     </ol>
 
-    <div class="img-placeholder">INSERT IMAGE: J-V plot showing forward and reverse curves with power density curves overlaid</div>
+    <div class="img-placeholder">INSERT IMAGE: J-V plot showing forward and reverse scans with power density curves</div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 11. UNDERSTANDING THE RESULTS                                      -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       12. STABILIZED CURRENT MEASUREMENT
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="stab">
+    <h2>12. Stabilized Current Measurement <span class="mode-badge stab">Alt+F4</span></h2>
+
+    <h3>What it measures</h3>
+    <p>
+      The cell is held at a constant user-defined voltage while the current density and PCE
+      are read at regular intervals. The measurement continues for the configured duration and
+      automatically detects the point at which the cell output has stabilized.
+    </p>
+    <p>
+      Unlike a J-V scan, this measurement captures the <strong>quasi-steady-state</strong>
+      response of the cell. Perovskite cells often show transient current behaviour immediately
+      after a voltage step; the stabilized current measured after these transients decay is a
+      more physically meaningful efficiency metric than the dynamic J-V scan value
+      [Snaith et al., 2014].
+    </p>
+
+    <h3>Parameters</h3>
+    <div class="param-block">
+      <div class="param-name">Applied Voltage (V)</div>
+      <p style="margin-top:8px;">The constant voltage applied to the cell throughout the measurement.
+         Typically set to the V<sub>mpp</sub> obtained from a preceding J-V scan.
+         The PCE is calculated as J(V) × V / P<sub>in</sub> × 100 %.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Duration (s)</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">120 s</span></div>
+      <p style="margin-top:8px;">Total measurement duration. A duration of 60–300 s is recommended
+         for credible stabilized efficiency reporting [Khenkin et al., 2020].</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Reading Interval (ms)</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">500 ms</span></div>
+      <p style="margin-top:8px;">Time between successive current readings. Shorter intervals provide
+         finer time resolution but increase file size. 200–1000 ms is typical.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Stabilization Threshold (%/min)</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">0.1 %/min</span></div>
+      <p style="margin-top:8px;">The current is considered stabilized when the rate of change
+         of J drops below this threshold. When stabilization is detected, a green marker is
+         placed on the plot and the time is saved to the Excel output.
+         The threshold criterion is calculated over a rolling window of readings.</p>
+    </div>
+
+    <h3>Live plot</h3>
+    <p>The dual-axis plot shows current density J (left axis, blue) and PCE (right axis, orange)
+       vs time in seconds. A vertical dashed green line is drawn at the detected stabilization time.
+       The plot updates in real time during the measurement.</p>
+
+    <h3>Measurement sequence</h3>
+    <div class="seq-flow">
+      <div class="seq-step">Apply voltage</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Read J every interval</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Detect stabilization</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Complete at duration</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Output OFF, save Excel</div>
+    </div>
+
+    <div class="tip-box">
+      <div class="box-label">Tip</div>
+      For the most meaningful stabilized PCE, first run a J-V measurement to determine
+      V<sub>mpp</sub>, then enter that value as the Applied Voltage for the Stabilized Current
+      measurement.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       13. MPP TRACKING — JV-SPO CYCLING
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="mpp">
+    <h2>13. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F5</span></h2>
+
+    <h3>Protocol overview</h3>
+    <p>
+      The JV-SPO cycling protocol alternates between <strong>J-V diagnostic scans</strong> and
+      <strong>Stabilized Power Output (SPO) phases</strong> held at V<sub>mpp</sub>. Each cycle
+      consists of:
+    </p>
+    <div class="seq-flow">
+      <div class="seq-step optional">Fwd J-V scan</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step optional">Pre-bias hold</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Rev J-V scan</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">SPO phase at V<sub>mpp</sub></div>
+    </div>
+    <p style="margin-top:8px;">
+      V<sub>mpp</sub> is determined from the reverse J-V scan of that cycle. The Keithley output
+      remains continuously ON throughout the entire experiment (turned off only in the
+      <code>finally</code> block). This avoids transient perturbations between cycles.
+    </p>
+
+    <h3>SPO phase behaviour</h3>
+    <p>
+      During the SPO phase, the voltage is held at V<sub>mpp</sub> and current density J is
+      read continuously at the configured delay. PCE is calculated as
+      J × V<sub>mpp</sub> / P<sub>in</sub>. The time axis of the SPO plot uses
+      <strong>accumulated SPO-only time</strong> — J-V scan durations are excluded — so
+      consecutive SPO segments from different cycles appear side by side without gaps.
+      Dashed vertical lines mark cycle boundaries.
+    </p>
+
+    <h3>Parameters</h3>
+    <div class="param-block">
+      <div class="param-name">Total Duration (min)</div>
+      <p style="margin-top:8px;">Total experiment duration. The tracker keeps cycling
+         until this time is reached or Stop is clicked.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">SPO Duration (s)</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">120 s</span></div>
+      <p style="margin-top:8px;">Duration of the SPO phase per cycle. Longer SPO phases give
+         more representative stabilized efficiency data per cycle.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Stabilization Threshold (%/min)</div>
+      <p style="margin-top:8px;">Used within the SPO phase to flag when the output has stabilized.
+         Same criterion as in Stabilized Current mode.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Scan Parameters</div>
+      <p style="margin-top:8px;">Start voltage, end voltage, and step voltage for the J-V scans
+         within each cycle. Shared delay and NPLC settings apply.
+         These are independent of the main J-V mode scan parameters.</p>
+    </div>
+
+    <h3>Live plots</h3>
+    <ul>
+      <li><strong>SPO plot:</strong> PCE (left) and J (right) vs accumulated SPO time.
+          Cycle boundary markers shown as dashed vertical lines.</li>
+      <li><strong>J-V plot:</strong> reverse scan curves from each cycle overlaid, colour-coded
+          by cycle number.</li>
+    </ul>
+
+    <h3>When to use this mode vs Pure MPP</h3>
+    <p>Use <strong>JV-SPO cycling</strong> when you need periodic J-V diagnostics to track
+       parameter evolution (V<sub>oc</sub>, FF, PCE, HI) during a stability experiment.
+       Use <strong>Pure MPP (P&amp;O)</strong> when you need continuous uninterrupted tracking
+       without the perturbation of J-V scans.</p>
+
+    <div class="img-placeholder">INSERT IMAGE: MPP Tracking plot showing SPO PCE over time with cycle boundaries</div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       14. PURE MPP TRACKING — P&O
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="pure-mpp">
+    <h2>14. Pure MPP Tracking — Perturb &amp; Observe <span class="mode-badge pmpp">Alt+F6</span></h2>
+
+    <h3>Algorithm description</h3>
+    <p>
+      The <strong>Perturb-and-Observe (P&amp;O)</strong> algorithm is the most widely used
+      method for maximum power point tracking in photovoltaic systems [Hohm &amp; Ropp, 2003].
+      At each step, the algorithm applies a small voltage perturbation (±Δv) and compares
+      the resulting power with the previous reading:
+    </p>
+    <ul>
+      <li>If power increased → continue in the same direction (perturbation was toward MPP)</li>
+      <li>If power decreased → reverse direction (perturbation was away from MPP)</li>
+    </ul>
+    <p>This oscillates around V<sub>mpp</sub> with an amplitude of ±Δv. A smaller Δv gives
+       a more precise estimate of V<sub>mpp</sub> at the cost of slower tracking response
+       to changes in illumination or cell state.</p>
+
+    <h3>Measurement sequence</h3>
+    <div class="seq-flow">
+      <div class="seq-step">Initial reverse J-V scan</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Find V<sub>mpp</sub></div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">P&amp;O loop (continuous)</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Output OFF, save Excel</div>
+    </div>
+    <p style="margin-top:8px;">
+      The software first performs one reverse J-V scan to find the real V<sub>mpp</sub>
+      from the measured J-V curve, then enters the continuous P&amp;O loop starting from
+      that voltage. The time axis on the plot starts at <strong>t = 0 after the initial scan</strong>,
+      so the plot shows only the P&amp;O tracking phase.
+    </p>
+
+    <h3>Parameters</h3>
+    <div class="param-block">
+      <div class="param-name">Perturbation Step (V)</div>
+      <p style="margin-top:8px;">Voltage step Δv applied at each iteration. Smaller values
+         (0.005–0.010 V) track V<sub>mpp</sub> more precisely; larger values (0.01–0.02 V)
+         respond faster to drifting V<sub>mpp</sub>.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Step Interval (ms)</div>
+      <p style="margin-top:8px;">Time between P&amp;O perturbations. The inter-step wait is
+         broken into 50 ms chunks internally so the Stop button is checked frequently.
+         Shorter intervals increase tracking speed; longer intervals allow more time
+         for ionic equilibration after each step.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Initial Scan Parameters</div>
+      <p style="margin-top:8px;">Voltage range (scan_start_v, scan_end_v) and step size
+         for the initial reverse J-V scan. These determine the starting V<sub>mpp</sub>
+         estimate. The J-V scan result is also shown in the plot for reference.</p>
+    </div>
+
+    <h3>Live plots</h3>
+    <ul>
+      <li><strong>PCE plot:</strong> PCE (%) vs time (min) from the P&amp;O loop.</li>
+      <li><strong>V<sub>mpp</sub> plot:</strong> tracked voltage V<sub>mpp</sub> (V) vs time.</li>
+      <li><strong>J plot:</strong> current density J at V<sub>mpp</sub> vs time.</li>
+    </ul>
+
+    <div class="tip-box">
+      <div class="box-label">Tip — certified efficiency</div>
+      For efficiency certification following ISOS protocols, run Pure MPP Tracking for
+      ≥5 minutes. The plateau PCE value after initial transients have decayed is the
+      stabilized power conversion efficiency [Khenkin et al., 2020].
+    </div>
+
+    <div class="img-placeholder">INSERT IMAGE: Pure MPP plot showing PCE and Vmpp tracking over time</div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       15. DARK J-V MEASUREMENT
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="dark-jv">
+    <h2>15. Dark J-V Measurement <span class="mode-badge jv">Alt+F3 (within J-V mode)</span></h2>
+
+    <h3>What it measures</h3>
+    <p>
+      The dark J-V scan applies the standard forward + reverse voltage sweeps with the
+      solar simulator shutter <em>closed</em>. Without illumination, the measured current
+      reflects the dark diode characteristics of the device — exponential forward-bias injection
+      current and leakage (shunt) current near zero bias.
+    </p>
+    <p>
+      Dark J-V measurements are used to:
+    </p>
+    <ul>
+      <li>Estimate R<sub>sh</sub> before illumination (the slope near V = 0 in the dark is a
+          direct measure of shunting paths)</li>
+      <li>Extract the ideality factor n and dark saturation current J<sub>0</sub> of the diode</li>
+      <li>Diagnose contact and transport layer quality independently of illumination uniformity</li>
+      <li>Detect resistive heating artefacts in the illuminated measurement by comparison</li>
+    </ul>
+
+    <h3>How to use</h3>
+    <p>
+      Enable <strong>"Include Dark J-V scan"</strong> in the J-V measurement panel.
+      When the measurement starts, the software performs the dark scan (shutter closed) first,
+      prompts you to open the shutter, then proceeds with the illuminated scans.
+    </p>
+    <p>
+      Dark J-V data is saved to a <strong>separate Excel file</strong> (<code>_Dark_JV_</code>
+      in the filename) with the sheet name <code>Dark_JV_Data</code>.
+      No PCE, FF, or V<sub>oc</sub> values are extracted (those parameters have no physical
+      meaning in the dark).
+    </p>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ Sign convention</div>
+      The software applies a sign inversion to the raw Keithley current reading
+      (<code>current = −float(reading)</code>) to place photocurrent in the positive
+      (power-generating) quadrant per standard solar cell convention. In the dark,
+      forward-bias current (injection) appears as negative J in the plot — this is correct.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       16. DATA VIEWER
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="data-viewer">
+    <h2>16. Data Viewer</h2>
+
+    <h3>Opening the Data Viewer</h3>
+    <p>Go to <strong>File → Open Data File…</strong>. A file dialog opens; select any
+       <code>.xlsx</code> file previously saved by the software. A new viewer window opens
+       alongside the main application — you can open multiple viewer windows simultaneously.</p>
+    <p>Within the viewer, click <strong>"Open Another File…"</strong> (top-right button)
+       to replace the current file in the same window.</p>
+
+    <h3>Supported file types</h3>
+    <p>The viewer auto-detects the file type from the Excel sheet name:</p>
+    <table>
+      <thead>
+        <tr><th>Sheet name</th><th>Data type</th><th>Plot</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>MeasurementData</code></td>
+          <td>Illuminated J-V</td>
+          <td>Forward + reverse J-V curves and power density curves</td>
+        </tr>
+        <tr>
+          <td><code>Dark_JV_Data</code></td>
+          <td>Dark J-V</td>
+          <td>Dark forward and reverse J-V curves</td>
+        </tr>
+        <tr>
+          <td><code>StabCurrent_Data</code></td>
+          <td>Stabilized Current (new format)</td>
+          <td>J and PCE vs time; stabilization marker</td>
+        </tr>
+        <tr>
+          <td><code>StabilizedCurrent</code></td>
+          <td>Stabilized Current (legacy format)</td>
+          <td>Same as above</td>
+        </tr>
+        <tr>
+          <td><code>PureMPP_Data</code></td>
+          <td>Pure MPP Tracking (new + legacy)</td>
+          <td>PCE and V<sub>mpp</sub> vs time</td>
+        </tr>
+        <tr>
+          <td><code>MPP_SPO</code></td>
+          <td>MPP Tracking JV-SPO (new format)</td>
+          <td>PCE and J vs accumulated SPO time; cycle boundaries</td>
+        </tr>
+        <tr>
+          <td><code>JV_Parameters</code></td>
+          <td>MPP Tracking JV-SPO (legacy format)</td>
+          <td>Same as above</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Viewer layout</h3>
+    <ul>
+      <li><strong>Left panel (scrollable):</strong> metadata organized in collapsible sections:
+          File, Measurement Data, Instrument Settings, and type-specific results sections
+          (e.g., Forward/Reverse Scan and Hysteresis for J-V files; SPO Results and J-V Cycles
+          for MPP files).</li>
+      <li><strong>Right panel:</strong> matplotlib plot with interactive features.</li>
+    </ul>
+
+    <h3>Plot interactivity</h3>
+    <ul>
+      <li><strong>Clickable legend:</strong> click any entry in the legend to show/hide that curve.
+          Useful for isolating individual scans in multi-curve plots.</li>
+      <li><strong>Hover tooltips (mplcursors):</strong> hover over any data point to see its
+          exact coordinates. Tooltips show line label, x-coordinate, and y-coordinate.</li>
+    </ul>
+
+    <div class="info-box">
+      <div class="box-label">ℹ Axis locks (J-V files)</div>
+      For illuminated and dark J-V files, the axes are locked to the standard display range
+      used in the main window: X = 0–1.2 V, Y = −10 to 30 mA/cm². This ensures curves from
+      different measurements are always visually comparable. Time-series plots (Stab, MPP,
+      Pure MPP) use auto-scaling axes.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       17. EXCEL FILE FORMAT
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="excel-format">
+    <h2>17. Excel File Format</h2>
+
+    <p>All files use a unified three-row layout for easy programmatic parsing:</p>
+    <ul>
+      <li><strong>Row 1:</strong> column headers (bold, bordered)</li>
+      <li><strong>Row 2:</strong> scalar metadata values (one value per relevant column;
+          data columns in this row are empty)</li>
+      <li><strong>Rows 3+:</strong> time-series or voltage-sweep data arrays</li>
+    </ul>
+
+    <h3>File types and sheet names</h3>
+    <table>
+      <thead>
+        <tr><th>Measurement</th><th>Filename pattern</th><th>Sheets</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Illuminated J-V</td>
+          <td><code>{name}_{timestamp}.xlsx</code></td>
+          <td><code>MeasurementData</code></td>
+        </tr>
+        <tr>
+          <td>Dark J-V</td>
+          <td><code>{name}_Dark_JV_{timestamp}.xlsx</code></td>
+          <td><code>Dark_JV_Data</code></td>
+        </tr>
+        <tr>
+          <td>Stabilized Current</td>
+          <td><code>{name}_StabCurrent_{timestamp}.xlsx</code></td>
+          <td><code>StabCurrent_Data</code></td>
+        </tr>
+        <tr>
+          <td>Pure MPP Tracking</td>
+          <td><code>{name}_PureMPP_{timestamp}.xlsx</code></td>
+          <td><code>PureMPP_Data</code></td>
+        </tr>
+        <tr>
+          <td>MPP Tracking JV-SPO</td>
+          <td><code>{name}_MPP_{timestamp}.xlsx</code></td>
+          <td><code>MPP_SPO</code> + <code>MPP_JV</code> + <code>JV_Cycle_N</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>MeasurementData columns (illuminated J-V)</h3>
+    <table>
+      <thead>
+        <tr><th>Column</th><th>Header</th><th>Row 2 value</th><th>Row 3+ value</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>A–C</td><td>Fwd V, Fwd J, Fwd P</td><td>—</td><td>Array data</td></tr>
+        <tr><td>D–F</td><td>Rev V, Rev J, Rev P</td><td>—</td><td>Array data</td></tr>
+        <tr><td>G</td><td>Cell Area (cm²)</td><td>✓</td><td>—</td></tr>
+        <tr><td>H–M</td><td>Fwd V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE, R<sub>s</sub>, R<sub>sh</sub></td><td>✓</td><td>—</td></tr>
+        <tr><td>N–S</td><td>Rev V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE, R<sub>s</sub>, R<sub>sh</sub></td><td>✓</td><td>—</td></tr>
+        <tr><td>T</td><td>HI (%)</td><td>✓</td><td>—</td></tr>
+        <tr><td>U–W</td><td>Delay, NPLC, 4-Wire</td><td>✓</td><td>—</td></tr>
+        <tr><td>X–Y</td><td>Pre-bias V, Pre-bias t</td><td>✓</td><td>—</td></tr>
+        <tr><td>Z</td><td>Instrument IDN</td><td>✓</td><td>—</td></tr>
+        <tr><td>AA</td><td>Scan Rate (mV/s)</td><td>✓</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <p>The <code>CLAUDE.md</code> file in the repository documents the column mappings for all
+       other sheet types for developers maintaining the exporter and Data Viewer code.</p>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       18. UNDERSTANDING J-V RESULTS
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="results">
-    <h2>11. Understanding the Results</h2>
+    <h2>18. Understanding J-V Results</h2>
 
     <h3>Indicators of a good cell</h3>
     <ul>
-      <li><strong>FF &gt; 70%:</strong> the J-V curve is square-shaped, indicating low ohmic losses
-          (small R<sub>s</sub>) and high shunt resistance (large R<sub>sh</sub>).</li>
-      <li><strong>|HI| &lt; 5%:</strong> forward and reverse curves nearly overlap, indicating
-          minimal mobile ion activity or well-passivated interfaces.</li>
-      <li><strong>J<sub>sc</sub> consistent with illumination:</strong> for a 1.6 eV bandgap
-          perovskite under 100 mW/cm², J<sub>sc</sub> should be approximately 20–23 mA/cm².</li>
-      <li><strong>Smooth, monotonic J-V curve</strong> without kinks, plateaus, or inflection
-          points in the power-generating region.</li>
+      <li><strong>FF &gt; 70%:</strong> square-shaped curve; low R<sub>s</sub> and high R<sub>sh</sub>.</li>
+      <li><strong>|HI| &lt; 5%:</strong> forward and reverse curves nearly overlap.</li>
+      <li><strong>J<sub>sc</sub> ≈ 20–23 mA/cm²</strong> for a 1.6 eV bandgap perovskite under
+          100 mW/cm² AM1.5G illumination.</li>
+      <li><strong>Smooth, monotonic curve</strong> without kinks or S-shapes.</li>
     </ul>
 
     <h3>Common problems visible in the J-V curve</h3>
@@ -1040,419 +1311,289 @@
       </thead>
       <tbody>
         <tr>
-          <td>S-shaped curve (inflection point below V<sub>oc</sub>)</td>
-          <td>Extraction barrier at ETL or HTL interface; energy level misalignment</td>
-          <td>For n-i-p with TiO₂: try UV pretreatment or check compact TiO₂ quality.
-              For Spiro-OMeTAD: verify doping level (LiTFSI, Co complex).</td>
+          <td>S-shaped curve (kink below V<sub>oc</sub>)</td>
+          <td>Extraction barrier at ETL or HTL; energy misalignment</td>
+          <td>UV pretreatment (TiO₂); check Spiro-OMeTAD doping</td>
         </tr>
         <tr>
-          <td>Low FF with high R<sub>s</sub> (&gt;10 Ω·cm²)</td>
-          <td>Series resistance losses in contacts, transport layers, or TCO</td>
-          <td>Check contact pressure, probe resistance, HTL conductivity. Use 4-wire sensing.</td>
+          <td>Low FF, high R<sub>s</sub> (&gt;10 Ω·cm²)</td>
+          <td>Series resistance in contacts or transport layers</td>
+          <td>Check contact pressure; enable 4-wire sensing</td>
         </tr>
         <tr>
-          <td>Low R<sub>sh</sub> (&lt;200 Ω·cm²), slope near J<sub>sc</sub> not flat</td>
-          <td>Shunting path through pinholes in perovskite layer or incomplete coverage</td>
-          <td>Inspect film under microscope. Check dark J-V for large currents at V &lt; 0.</td>
+          <td>Low R<sub>sh</sub> (&lt;200 Ω·cm²)</td>
+          <td>Pinholes or incomplete perovskite coverage</td>
+          <td>Dark J-V scan; optical inspection</td>
         </tr>
         <tr>
-          <td>Large hysteresis (|HI| &gt; 20%)</td>
-          <td>High mobile ion density, unpassivated interface traps, poor grain boundary
-              passivation</td>
-          <td>Compare with stabilised power output (MPP tracking). Try passivation additives.</td>
+          <td>Large HI (&gt;20%)</td>
+          <td>High mobile ion density; unpassivated traps</td>
+          <td>Compare with stabilized PCE from MPP tracking</td>
         </tr>
         <tr>
-          <td>J<sub>sc</sub> mismatch between forward and reverse scans</td>
-          <td>Charge trapping/de-trapping artefacts at short timescales</td>
-          <td>Increase delay per point; verify illumination stability during measurement.</td>
+          <td>J<sub>sc</sub> mismatch between fwd/rev</td>
+          <td>Charge trapping at high scan speeds</td>
+          <td>Increase delay per point to 200–500 ms</td>
         </tr>
       </tbody>
     </table>
-
-    <div class="img-placeholder">INSERT IMAGE: examples of ideal J-V curve vs. S-shaped curve, low FF, and high shunting cases</div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 12. PHOTOVOLTAIC PARAMETERS                                        -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       19. PHOTOVOLTAIC PARAMETERS
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="pv-parameters">
-    <h2>12. Photovoltaic Parameters (Theory)</h2>
+    <h2>19. Photovoltaic Parameters</h2>
 
     <div class="param-block">
       <div class="param-name">Short-circuit Current Density — J<sub>sc</sub></div>
       <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">mA/cm²</span></div>
-      <div class="param-row"><span class="param-key">Typical (FA/MA perovskite):</span><span class="param-val">18–26 mA/cm² under AM1.5G 1-sun</span></div>
-      <p style="margin-top:8px;">
-        The current density when V = 0. Represents the maximum photogenerated current that can be
-        extracted from the cell. Limited by: (a) the optical bandgap of the absorber (determines
-        the fraction of the solar spectrum that can be absorbed), (b) film thickness and absorption
-        coefficient (incomplete absorption), and (c) carrier collection efficiency (recombination
-        before extraction).
-      </p>
-      <p><strong>Extraction method:</strong> the software finds the current density value at the
-         voltage point closest to V = 0 using <code>currents[argmin(|voltages|)]</code>.</p>
+      <div class="param-row"><span class="param-key">Typical:</span><span class="param-val">18–26 mA/cm² under AM1.5G 1-sun</span></div>
+      <p style="margin-top:8px;">Current density at V = 0. Limited by bandgap, film thickness, and
+         carrier collection efficiency. Extraction: <code>currents[argmin(|voltages|)]</code>.</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Open-circuit Voltage — V<sub>oc</sub></div>
       <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">V</span></div>
-      <div class="param-row"><span class="param-key">Typical (FA/MA perovskite):</span><span class="param-val">1.0–1.2 V</span></div>
-      <p style="margin-top:8px;">
-        The voltage at which the net current is zero: all photogenerated carriers recombine
-        internally without flowing through the external circuit. V<sub>oc</sub> is set by the
-        quasi-Fermi level splitting of electrons and holes in the absorber and is fundamentally
-        limited by non-radiative recombination (trap-assisted, interface recombination).
-        A higher V<sub>oc</sub> requires a lower dark saturation current density J<sub>0</sub>.
-      </p>
-      <p><strong>Extraction method:</strong> the software finds the first voltage point where
-         the sign of the current density changes (zero-crossing detection via
-         <code>np.diff(np.sign(currents))</code>).</p>
+      <div class="param-row"><span class="param-key">Typical:</span><span class="param-val">1.0–1.2 V</span></div>
+      <p style="margin-top:8px;">Voltage at which net current is zero. Set by quasi-Fermi level
+         splitting; limited by non-radiative recombination.
+         Extraction: first zero-crossing via <code>np.diff(np.sign(currents))</code>.</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Fill Factor — FF</div>
-      <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">% (dimensionless × 100)</span></div>
-      <div class="param-row"><span class="param-key">Typical (FA/MA perovskite):</span><span class="param-val">70–85%</span></div>
+      <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">%</span></div>
       <div class="param-row"><span class="param-key">Formula:</span><span class="param-val">FF = (V<sub>mp</sub> × J<sub>mp</sub>) / (V<sub>oc</sub> × J<sub>sc</sub>) × 100</span></div>
-      <p style="margin-top:8px;">
-        A measure of the "squareness" of the J-V curve — the ratio of the actual maximum power
-        output to the theoretical maximum power (V<sub>oc</sub> × J<sub>sc</sub>). FF is degraded
-        by series resistance (R<sub>s</sub>), shunting (low R<sub>sh</sub>), and recombination
-        near the maximum power point. The maximum thermodynamic FF for an ideal diode is
-        approximately 89% at room temperature.
-      </p>
-      <p><strong>Extraction method:</strong> <code>argmax(voltages × currents)</code> gives
-         V<sub>mp</sub> and J<sub>mp</sub>; then FF is computed from the formula above.</p>
+      <p style="margin-top:8px;">Ratio of actual maximum power to the theoretical maximum V<sub>oc</sub> × J<sub>sc</sub>.
+         Degraded by R<sub>s</sub>, low R<sub>sh</sub>, and recombination near MPP.
+         Extraction: <code>argmax(voltages × currents)</code>.</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Power Conversion Efficiency — PCE</div>
       <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">%</span></div>
-      <div class="param-row"><span class="param-key">Typical (lab-scale perovskite):</span><span class="param-val">15–25%</span></div>
-      <div class="param-row"><span class="param-key">Formula:</span><span class="param-val">PCE = (V<sub>oc</sub> × J<sub>sc</sub> × FF) / P<sub>in</sub> × 100 (with FF already in %: PCE = V<sub>oc</sub> × J<sub>sc</sub> × FF / P<sub>in</sub>)</span></div>
-      <p style="margin-top:8px;">
-        The fraction of incident optical power converted to electrical power. PCE extracted from
-        a J-V scan is a <em>dynamic</em> value that depends on scan speed. For certified
-        efficiency reporting, a stabilised PCE from maximum power point (MPP) tracking over
-        60–300 s should be used alongside the J-V scan.
-      </p>
+      <div class="param-row"><span class="param-key">Formula:</span><span class="param-val">PCE = V<sub>oc</sub> × J<sub>sc</sub> × FF / P<sub>in</sub></span></div>
+      <p style="margin-top:8px;">PCE from a dynamic J-V scan is scan-rate-dependent.
+         For certified reporting, always complement with stabilized PCE from MPP tracking or
+         Stabilized Current measurement.</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Series Resistance — R<sub>s</sub></div>
       <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">Ω·cm²</span></div>
-      <div class="param-row"><span class="param-key">Typical (perovskite):</span><span class="param-val">1–10 Ω·cm² (lower is better)</span></div>
-      <p style="margin-top:8px;">
-        The total ohmic resistance in series with the photovoltaic junction: TCO sheet resistance,
-        transport layer conductivity, contact resistance, and measurement cable resistance.
-        R<sub>s</sub> causes a voltage drop proportional to the current, compressing the J-V curve
-        horizontally near V<sub>oc</sub> and reducing FF.
-      </p>
-      <p><strong>Extraction method:</strong> linear regression of the J-V curve over
-         <em>n</em> points near V<sub>oc</sub>. The slope is dJ/dV ≈ −1/R<sub>s</sub>
-         (in mA cm<sup>−2</sup> V<sup>−1</sup>), so R<sub>s</sub> = 1000 / |slope|
-         (converted from V·cm²/mA to Ω·cm²).</p>
+      <div class="param-row"><span class="param-key">Typical:</span><span class="param-val">1–10 Ω·cm²</span></div>
+      <p style="margin-top:8px;">Extracted by linear regression near V<sub>oc</sub>:
+         R<sub>s</sub> = 1000 / |dJ/dV| (Ω·cm²).</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Shunt Resistance — R<sub>sh</sub></div>
       <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">Ω·cm²</span></div>
-      <div class="param-row"><span class="param-key">Typical (perovskite):</span><span class="param-val">500–10,000 Ω·cm² (higher is better)</span></div>
-      <p style="margin-top:8px;">
-        The effective resistance of all parallel leakage paths across the p-n junction:
-        pinholes in the perovskite layer, grain boundary shunts, incomplete film coverage.
-        Low R<sub>sh</sub> allows dark current to flow even at small forward biases, tilting
-        the J-V curve near J<sub>sc</sub> and reducing V<sub>oc</sub> and FF.
-      </p>
-      <p><strong>Extraction method:</strong> linear regression of the J-V curve over
-         <em>n</em> points near V = 0. The slope is dJ/dV ≈ −1/R<sub>sh</sub>, so
-         R<sub>sh</sub> = 1000 / |slope|. Always reported as a positive value (physical
-         resistance).</p>
+      <div class="param-row"><span class="param-key">Typical:</span><span class="param-val">500–10,000 Ω·cm²</span></div>
+      <p style="margin-top:8px;">Extracted by linear regression near V = 0:
+         R<sub>sh</sub> = 1000 / |dJ/dV|. Always reported as positive (physical resistance).</p>
     </div>
 
     <div class="param-block">
       <div class="param-name">Hysteresis Index — HI</div>
       <div class="param-row"><span class="param-key">Unit:</span><span class="param-val">% (signed)</span></div>
-      <div class="param-row"><span class="param-key">Formula:</span><span class="param-val">HI (%) = (PCE<sub>RS</sub> − PCE<sub>FS</sub>) / PCE<sub>RS</sub> × 100</span></div>
-      <p style="margin-top:8px;">
-        Quantifies the magnitude of J-V hysteresis. Positive HI = normal hysteresis
-        (reverse scan gives higher PCE, typical for n-i-p perovskites with TiO₂ ETL).
-        Negative HI = inverted hysteresis (forward scan gives higher PCE, less common,
-        associated with some p-i-n architectures). See Section 14 for detailed physics.
-      </p>
+      <div class="param-row"><span class="param-key">Formula:</span><span class="param-val">HI = (PCE<sub>RS</sub> − PCE<sub>FS</sub>) / PCE<sub>RS</sub> × 100</span></div>
+      <p style="margin-top:8px;">Definition following Kim &amp; Park [2014].
+         Positive HI = normal hysteresis (RS &gt; FS), typical for n-i-p architecture.
+         Negative HI = inverted hysteresis (FS &gt; RS).</p>
     </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 13. EQUIVALENT CIRCUIT MODEL                                       -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       20. EQUIVALENT CIRCUIT MODEL
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="circuit-model">
-    <h2>13. Equivalent Circuit Model</h2>
-    <p>
-      The standard single-diode model represents a solar cell as a photocurrent source in
-      parallel with a non-ideal diode, a shunt resistance, and a series resistance. This model
-      provides the physical basis for interpreting all extracted parameters.
-    </p>
+    <h2>20. Equivalent Circuit Model</h2>
 
-    <div class="img-placeholder">INSERT IMAGE: equivalent circuit diagram with photocurrent source (J<sub>ph</sub>), diode, R<sub>sh</sub>, and R<sub>s</sub> labelled</div>
+    <p>The single-diode model represents a solar cell as a photocurrent source in parallel with
+       a diode, a shunt resistance, and a series resistance.</p>
+
+    <div class="img-placeholder">INSERT IMAGE: equivalent circuit diagram with J<sub>ph</sub>, diode, R<sub>sh</sub>, R<sub>s</sub></div>
 
     <h3>Master equation</h3>
     <div class="equation">
       J = J<sub>ph</sub> − J<sub>0</sub> · [exp((V + J·R<sub>s</sub>) / (n·V<sub>T</sub>)) − 1] − (V + J·R<sub>s</sub>) / R<sub>sh</sub>
     </div>
-    <p>
-      Where V<sub>T</sub> = kT/q ≈ 25.7 mV at 300 K is the thermal voltage, n is the ideality
-      factor, J<sub>0</sub> is the dark saturation current density, and all current densities are
-      in mA/cm².
-    </p>
+    <p>V<sub>T</sub> = kT/q ≈ 25.7 mV at 300 K. All current densities in mA/cm².</p>
 
-    <h3>Physical meaning of each term</h3>
+    <h3>Parameter summary</h3>
     <table>
       <thead>
-        <tr><th>Parameter</th><th>Physical meaning</th><th>Typical value (FA/MA perovskite)</th></tr>
+        <tr><th>Parameter</th><th>Physical meaning</th><th>Typical value</th></tr>
       </thead>
       <tbody>
-        <tr>
-          <td><strong>J<sub>ph</sub></strong></td>
-          <td>Photocurrent density generated by absorbed photons. Approximately equal to J<sub>sc</sub>
-              at 1-sun.</td>
-          <td>20–25 mA/cm²</td>
-        </tr>
-        <tr>
-          <td><strong>J<sub>0</sub></strong></td>
-          <td>Dark saturation current density. Determined by non-radiative recombination rate.
-              Lower J<sub>0</sub> → higher V<sub>oc</sub>. J<sub>0</sub> = J<sub>ph</sub> ·
-              exp(−V<sub>oc</sub> / n·V<sub>T</sub>) (simplified).</td>
-          <td>10<sup>−18</sup> – 10<sup>−15</sup> mA/cm²</td>
-        </tr>
-        <tr>
-          <td><strong>n</strong></td>
-          <td>Ideality factor. n = 1: radiative (band-to-band) or bimolecular recombination.
-              n = 2: Shockley-Read-Hall (SRH) trap-assisted recombination. n &gt; 2 often indicates
-              interface recombination or ionic effects.</td>
-          <td>1.3–2.0</td>
-        </tr>
-        <tr>
-          <td><strong>R<sub>s</sub></strong></td>
-          <td>Series resistance. Causes a horizontal compression of the J-V curve, most visible
-              near V<sub>oc</sub> where current is high.</td>
-          <td>1–10 Ω·cm²</td>
-        </tr>
-        <tr>
-          <td><strong>R<sub>sh</sub></strong></td>
-          <td>Shunt resistance. Causes a tilt of the J-V curve near J<sub>sc</sub>, most visible
-              at low light intensities or in dark J-V measurements.</td>
-          <td>500–10,000 Ω·cm²</td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h3>Derived parameter equations</h3>
-    <table>
-      <thead>
-        <tr><th>Parameter</th><th>Extraction equation</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>V<sub>oc</sub></td><td>V(J = 0); approximately (n·V<sub>T</sub>) · ln(J<sub>ph</sub>/J<sub>0</sub> + 1)</td></tr>
-        <tr><td>J<sub>sc</sub></td><td>J(V = 0)</td></tr>
-        <tr><td>FF</td><td>(V<sub>mp</sub> · J<sub>mp</sub>) / (V<sub>oc</sub> · J<sub>sc</sub>) × 100</td></tr>
-        <tr><td>PCE</td><td>(V<sub>oc</sub> · J<sub>sc</sub> · FF) / P<sub>in</sub></td></tr>
-        <tr><td>R<sub>s</sub></td><td>1000 / |dJ/dV| evaluated near V<sub>oc</sub> (Ω·cm²)</td></tr>
-        <tr><td>R<sub>sh</sub></td><td>1000 / |dJ/dV| evaluated near V = 0 (Ω·cm²)</td></tr>
-        <tr><td>HI</td><td>(PCE<sub>RS</sub> − PCE<sub>FS</sub>) / PCE<sub>RS</sub> × 100 (%)</td></tr>
+        <tr><td><strong>J<sub>ph</sub></strong></td><td>Photogenerated current ≈ J<sub>sc</sub></td><td>20–25 mA/cm²</td></tr>
+        <tr><td><strong>J<sub>0</sub></strong></td><td>Dark saturation current; lower J<sub>0</sub> → higher V<sub>oc</sub></td><td>10<sup>−18</sup>–10<sup>−15</sup> mA/cm²</td></tr>
+        <tr><td><strong>n</strong></td><td>Ideality factor: n=1 (radiative), n=2 (SRH), n&gt;2 (interface/ionic)</td><td>1.3–2.0</td></tr>
+        <tr><td><strong>R<sub>s</sub></strong></td><td>Series resistance; compresses curve near V<sub>oc</sub></td><td>1–10 Ω·cm²</td></tr>
+        <tr><td><strong>R<sub>sh</sub></strong></td><td>Shunt resistance; tilts curve near J<sub>sc</sub></td><td>500–10,000 Ω·cm²</td></tr>
       </tbody>
     </table>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 14. HYSTERESIS IN PEROVSKITES                                      -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       21. HYSTERESIS IN PEROVSKITES
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="hysteresis">
-    <h2>14. Hysteresis in Perovskites</h2>
-
-    <h3>What is J-V hysteresis?</h3>
-    <p>
-      In ideal inorganic solar cells — crystalline silicon, GaAs, CdTe — the J-V curve is
-      path-independent: the forward scan (J<sub>sc</sub> → V<sub>oc</sub>) and reverse scan
-      (V<sub>oc</sub> → J<sub>sc</sub>) produce identical curves at any scan speed.
-      In perovskite solar cells, these two scan directions produce measurably different results.
-      This phenomenon is called <strong>J-V hysteresis</strong>.
-    </p>
+    <h2>21. Hysteresis in Perovskite Solar Cells</h2>
 
     <h3>Physical origin</h3>
-    <p>
-      Perovskite absorbers (e.g. FAPbI<sub>3</sub>, MAPbI<sub>3</sub>, FA<sub>0.83</sub>MA<sub>0.17</sub>PbI<sub>3</sub>)
-      are <strong>mixed ionic-electronic conductors</strong>. Mobile ionic defects — most importantly
-      iodide vacancies (V<sub>I</sub><sup>+</sup>) and interstitial ions (I<sub>i</sub><sup>−</sup>) —
-      are present in concentrations of 10<sup>15</sup>–10<sup>17</sup> cm<sup>−3</sup> in typical
-      solution-processed films. These species migrate in response to the electric field during
-      the voltage sweep, with characteristic migration times of tens of milliseconds to seconds
-      [Tress et al., 2015].
-    </p>
-    <p>
-      During a voltage sweep, the ionic redistribution lags behind the electronic response because
-      ions move orders of magnitude more slowly than electrons and holes. The slow ionic motion
-      creates a time-dependent internal field that adds to or subtracts from the applied field,
-      resulting in scan-direction-dependent charge extraction efficiency.
-    </p>
+    <p>Perovskite absorbers are <strong>mixed ionic-electronic conductors</strong>. Mobile ionic
+       defects (iodide vacancies V<sub>I</sub><sup>+</sup>, interstitial ions I<sub>i</sub><sup>−</sup>,
+       typical concentrations 10<sup>15</sup>–10<sup>17</sup> cm<sup>−3</sup>) migrate in response
+       to the electric field during a voltage sweep. Because ions move orders of magnitude more slowly
+       than electrons and holes, their redistribution lags behind the electronic response, creating a
+       time-dependent internal field that depends on the scan direction [Tress et al., 2015;
+       Snaith et al., 2014].</p>
 
     <h3>Normal vs. inverted hysteresis</h3>
     <table>
       <thead>
-        <tr><th>Type</th><th>Definition</th><th>HI sign</th><th>Common architecture</th></tr>
+        <tr><th>Type</th><th>Condition</th><th>HI</th><th>Common architecture</th></tr>
       </thead>
       <tbody>
-        <tr>
-          <td><strong>Normal (standard)</strong></td>
-          <td>Reverse scan PCE &gt; Forward scan PCE</td>
-          <td>HI &gt; 0 (positive)</td>
-          <td>n-i-p with TiO₂ or SnO₂ ETL</td>
-        </tr>
-        <tr>
-          <td><strong>Inverted (anomalous)</strong></td>
-          <td>Forward scan PCE &gt; Reverse scan PCE</td>
-          <td>HI &lt; 0 (negative)</td>
-          <td>p-i-n with PEDOT:PSS or specific passivation conditions</td>
-        </tr>
-        <tr>
-          <td><strong>Negligible</strong></td>
-          <td>RS ≈ FS</td>
-          <td>|HI| &lt; 2–3%</td>
-          <td>Well-passivated cells; slow scans; annealed ionic profiles</td>
-        </tr>
+        <tr><td>Normal</td><td>PCE<sub>RS</sub> &gt; PCE<sub>FS</sub></td><td>HI &gt; 0</td><td>n-i-p with TiO₂/SnO₂ ETL</td></tr>
+        <tr><td>Inverted</td><td>PCE<sub>FS</sub> &gt; PCE<sub>RS</sub></td><td>HI &lt; 0</td><td>p-i-n with PEDOT:PSS</td></tr>
+        <tr><td>Negligible</td><td>RS ≈ FS</td><td>|HI| &lt; 2–3%</td><td>Well-passivated cells; slow scans</td></tr>
       </tbody>
     </table>
 
-    <h3>How scan parameters affect hysteresis</h3>
+    <h3>Effect of scan parameters</h3>
     <ul>
-      <li><strong>Faster scans → larger apparent hysteresis.</strong> At high scan speeds, ions have
-          less time to redistribute between voltage steps, creating a larger discrepancy between
-          the ionic state during the RS and FS. Reported HI values are therefore only comparable
-          between experiments performed at the same scan rate.</li>
-      <li><strong>Slower scans → smaller hysteresis.</strong> As the scan rate approaches
-          quasi-steady state (scan rate ≪ ionic relaxation rate), the J-V curve becomes
-          path-independent. This is why slowing down the measurement (increasing delay per point)
-          reduces HI without changing the device physics.</li>
-      <li><strong>Pre-bias conditioning</strong> standardises the ionic state before the reverse
-          scan, making HI values reproducible and comparable between sessions and laboratories.</li>
-      <li><strong>Temperature</strong> increases ionic mobility, which can dramatically change
-          both the magnitude and sign of hysteresis. Measurements above ~50°C may show very
-          different HI values compared to room temperature.</li>
+      <li><strong>Faster scans → larger apparent HI.</strong> HI values are only comparable
+          between measurements performed at the same scan rate.</li>
+      <li><strong>Slower scans → smaller HI.</strong> As scan rate → quasi-steady-state,
+          the J-V curve becomes path-independent.</li>
+      <li><strong>Pre-bias conditioning</strong> standardises the ionic state before the
+          reverse scan, ensuring reproducible HI values across sessions and laboratories.</li>
     </ul>
 
-    <h3>Why hysteresis matters for reporting</h3>
-    <p>
-      Hysteresis makes it impossible to report a single "true" PCE value from a J-V scan alone.
-      A cell with HI = 20% and PCE<sub>RS</sub> = 20% has PCE<sub>FS</sub> = 16% — reporting
-      only the reverse scan value significantly overstates the true operating efficiency.
-    </p>
-    <p>Best practice (per ISOS consensus [Khenkin et al., 2020]):</p>
+    <h3>Best practices for reporting</h3>
+    <p>Per ISOS consensus [Khenkin et al., 2020]:</p>
     <ul>
-      <li>Always report <em>both</em> forward and reverse scan parameters (V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE)</li>
-      <li>Report scan direction, scan speed (mV/s), and pre-bias conditions</li>
-      <li>Report the Hysteresis Index</li>
-      <li>Complement with stabilised power output (MPP tracking over ≥60 s) whenever possible</li>
+      <li>Report forward and reverse scan parameters (V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE) for both directions</li>
+      <li>Report scan rate (mV/s), pre-bias conditions, and HI</li>
+      <li>Complement with stabilized PCE (MPP tracking or Stabilized Current ≥60 s)</li>
     </ul>
-
-    <p><strong>References:</strong> Christians et al., J. Phys. Chem. Lett. 2015;
-       Tress et al., Energy Environ. Sci. 2015; Khenkin et al. (ISOS), Nat. Energy 2020.</p>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 15. TROUBLESHOOTING                                                -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       22. TROUBLESHOOTING
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="troubleshooting">
-    <h2>15. Troubleshooting</h2>
+    <h2>22. Troubleshooting</h2>
 
     <div class="trouble-block">
       <div class="trouble-problem">❌ "No instruments found" in the connection dialog</div>
       <div class="trouble-inner">
-        <div class="trouble-cause"><strong>Possible causes:</strong>
+        <div class="trouble-cause"><strong>Causes:</strong> KUSB-488B not detected; NI-VISA not installed;
+          KI-488 in wrong mode; incorrect installation order.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ol>
+            <li>Check Device Manager for the KUSB-488B. A yellow exclamation mark indicates a driver problem.</li>
+            <li>Open NI MAX — VISA resources should appear under <em>Devices and Interfaces</em>.</li>
+            <li>If uncertain, repeat the full driver installation in Section 3 (clean → KI-488 in
+                NI-compatible mode → NI-VISA → reboot → connect).</li>
+            <li>Try a different USB port directly on the motherboard (avoid hubs).</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "ERROR ID CODE +803" on Keithley front panel</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> A measurement command was sent before
+          <code>:OUTP ON</code>; usually from a partially-initialised state after a Python crash.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Press LOCAL on the Keithley.
+          Turn output OFF. In software: Instrument → Disconnect, then reconnect.
+          The <code>*RST</code> sent at the start of each measurement prevents this from persisting.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "No current zero-crossing found" error</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> End Voltage is set below V<sub>oc</sub>;
+          shutter is closed; cell is not illuminated or not connected.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
           <ul>
-            <li>KUSB-488B not detected by Windows (missing or incorrect driver)</li>
-            <li>NI-VISA not installed, or wrong version</li>
-            <li>KI-488 driver installed in wrong mode (Keithley mode instead of NI-compatible)</li>
-            <li>Driver installation order was incorrect</li>
+            <li>Increase End Voltage to at least 0.1 V above the expected V<sub>oc</sub>.</li>
+            <li>Verify the solar simulator shutter is open and illumination is ≥100 mW/cm².</li>
+            <li>Check cell contact polarity (Force HI to counter-electrode).</li>
           </ul>
         </div>
-        <div class="trouble-solution"><strong>Solutions:</strong>
-          <ol>
-            <li>Open Device Manager. Under <em>GPIB Interfaces</em> or <em>Universal Serial Bus controllers</em>,
-                check whether the KUSB-488B appears without a warning icon. A yellow exclamation
-                mark indicates a driver problem.</li>
-            <li>Confirm NI-VISA is installed: open <em>NI MAX</em> (NI Measurement &amp; Automation
-                Explorer); VISA resources should appear under <em>Devices and Interfaces</em>.</li>
-            <li>If uncertain, repeat the full driver installation procedure in Section 3
-                (clean → KI-488 in NI-compatible mode → NI-VISA → reboot → connect).</li>
-            <li>Try a different USB port (avoid USB hubs; use a port directly on the motherboard).</li>
-          </ol>
-        </div>
       </div>
     </div>
 
-    <div class="img-placeholder">INSERT IMAGE: Device Manager showing KUSB-488B correctly installed under GPIB Interfaces</div>
-
     <div class="trouble-block">
-      <div class="trouble-problem">❌ "ERROR ID CODE +803" on Keithley 2400 front panel</div>
+      <div class="trouble-problem">❌ R<sub>sh</sub> very low (&lt;100 Ω·cm²)</div>
       <div class="trouble-inner">
-        <div class="trouble-cause"><strong>Cause:</strong>
-          Error +803 means "Not permitted with output off" — a measurement command such as
-          <code>:MEAS:CURR?</code> or <code>:READ?</code> was received before the output was
-          enabled with <code>:OUTP ON</code>. This usually happens when the Keithley is in
-          a partially-initialised state from a previous interrupted session (e.g. Python crash).
-        </div>
-        <div class="trouble-solution"><strong>Solution:</strong>
+        <div class="trouble-cause"><strong>Causes:</strong> Pinholes or cracks in perovskite layer;
+          incorrect cell area (too large).</div>
+        <div class="trouble-solution"><strong>Diagnostics:</strong>
           <ol>
-            <li>Press the <strong>LOCAL</strong> button on the Keithley front panel to release
-                remote control.</li>
-            <li>Turn the output OFF using the front panel OPERATE/STANDBY key.</li>
-            <li>In the software, use <strong>Instrument → Disconnect</strong>, then
-                <strong>Instrument → Connect…</strong> to open a fresh session.</li>
-            <li>The software's <em>init_instrument</em> routine sends <code>*RST</code> at the
-                start of every measurement, which should prevent this error from persisting.</li>
+            <li>Verify the cell area value.</li>
+            <li>Perform a dark J-V scan — a shunted cell will show significant current at V = 0.</li>
+            <li>Inspect the cell optically for pinholes.</li>
           </ol>
         </div>
       </div>
     </div>
 
     <div class="trouble-block">
-      <div class="trouble-problem">❌ R<sub>sh</sub> value is very low (&lt;100 Ω·cm²)</div>
+      <div class="trouble-problem">❌ S-shaped J-V curve (kink below V<sub>oc</sub>)</div>
       <div class="trouble-inner">
-        <div class="trouble-cause"><strong>Possible causes:</strong>
-          Pinholes or cracks in the perovskite layer creating a direct short-circuit path;
-          incomplete perovskite coverage on the ETL; incorrect cell area entry (too large).
-        </div>
-        <div class="trouble-solution"><strong>Diagnostic steps:</strong>
-          <ol>
-            <li>Verify the cell area value is correct — an area that is too large will give an
-                artificially low R<sub>sh</sub> (in Ω·cm²).</li>
-            <li>Perform a dark J-V scan (block illumination). For a shunted cell, there will
-                be significant current at V = 0 in the dark (ideally should be near zero).</li>
-            <li>Inspect the cell under a bright lamp (transillumination) or optical microscope
-                for visible pinholes.</li>
-          </ol>
-        </div>
-      </div>
-    </div>
-
-    <div class="trouble-block">
-      <div class="trouble-problem">❌ S-shaped J-V curve (inflection point, kink below V<sub>oc</sub>)</div>
-      <div class="trouble-inner">
-        <div class="trouble-cause"><strong>Cause:</strong>
-          An extraction barrier at one of the perovskite/transport layer interfaces, caused by
-          energy level misalignment, interfacial traps, or poor charge transport layer quality.
-          Common for TiO₂ ETL that has not been properly sintered or UV-activated.
-        </div>
+        <div class="trouble-cause"><strong>Cause:</strong> Extraction barrier at
+          perovskite/transport layer interface; energy level misalignment; poor ETL quality.</div>
         <div class="trouble-solution"><strong>Solutions:</strong>
           <ul>
-            <li><strong>For TiO₂ ETL:</strong> UV-ozone treatment (15–20 min) before
-                perovskite deposition often eliminates the S-kink by filling oxygen vacancies
-                and improving band alignment.</li>
-            <li><strong>For Spiro-OMeTAD HTL:</strong> verify doping (LiTFSI and Co complex
-                concentrations). Excess or insufficient doping shifts the HOMO and can create
-                a barrier.</li>
-            <li><strong>General:</strong> try a fresh reference cell on the same setup to confirm
-                the problem is the device, not the measurement system.</li>
+            <li>TiO₂ ETL: UV-ozone treatment 15–20 min before perovskite deposition.</li>
+            <li>Spiro-OMeTAD HTL: verify doping concentrations (LiTFSI, Co complex).</li>
+            <li>Test a known-good reference cell to confirm the issue is the device, not the system.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Pure MPP Tracking shows unstable or oscillating PCE</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> Perturbation step too large relative
+          to the width of the MPP region; step interval too short (current not settled before next
+          perturbation); high ionic noise in the cell.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Reduce the perturbation step to 0.005–0.010 V.</li>
+            <li>Increase the step interval to 500–1000 ms for ionic-active cells.</li>
+            <li>Run an initial J-V scan at a slow scan rate to verify the MPP region is
+                well-defined before starting P&amp;O tracking.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Data Viewer shows blank plot or error opening a file</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> File saved by a version of the software
+          before the current export format; <code>mplcursors</code> not installed.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>The Data Viewer supports both new and legacy formats — check the terminal for the
+                specific error message to identify the mismatch.</li>
+            <li>Install mplcursors: <code>pip install mplcursors</code> in the correct Python
+                environment.</li>
+            <li>Verify the file is a valid <code>.xlsx</code> file with one of the supported
+                sheet names (see Section 16).</li>
           </ul>
         </div>
       </div>
@@ -1461,106 +1602,108 @@
     <div class="trouble-block">
       <div class="trouble-problem">❌ Software crashes or freezes on "Start Measurement"</div>
       <div class="trouble-inner">
-        <div class="trouble-cause"><strong>Possible causes:</strong>
-          GPIB communication timeout; instrument in an unexpected state; Python package version
-          incompatibility; compliance current set incorrectly.
-        </div>
+        <div class="trouble-cause"><strong>Causes:</strong> GPIB timeout; instrument in unexpected
+          state; Python package version incompatibility.</div>
         <div class="trouble-solution"><strong>Solutions:</strong>
           <ol>
-            <li>Verify PyVISA version: <code>pip show pyvisa</code> — should be ≥ 1.12.</li>
-            <li>Check the GPIB address on the Keithley front panel (Menu → Communication →
-                GPIB Address). Default is 21. If changed, the VISA address in the connection
-                dialog must match.</li>
-            <li>Check that the compliance current (0.1 A hardcoded in software) is appropriate
-                for your cell area. For a 0.07 cm² cell at J<sub>sc</sub> ≈ 20 mA/cm², the
-                peak current is ~1.4 mA — well within the 100 mA compliance limit.</li>
-            <li>Run the software from a terminal (<code>python main.py</code>) to see the
-                full Python traceback in case of an exception.</li>
+            <li>Run from terminal (<code>python main.py</code>) to see the full Python traceback.</li>
+            <li>Check PyVISA version: <code>pip show pyvisa</code> — should be ≥ 1.12.</li>
+            <li>Verify GPIB address on the Keithley front panel matches the VISA resource address.</li>
+            <li>Use Instrument → Disconnect and reconnect to reset the session.</li>
           </ol>
         </div>
       </div>
     </div>
-
-    <div class="trouble-block">
-      <div class="trouble-problem">❌ Large asymmetry in J<sub>sc</sub> between forward and reverse scans</div>
-      <div class="trouble-inner">
-        <div class="trouble-cause"><strong>Possible causes:</strong>
-          Illumination instability (lamp flicker, shutter not fully open); charge trapping
-          transients at high scan speeds causing the current at V=0 to differ between scan
-          directions; contact artefact at the starting voltage.
-        </div>
-        <div class="trouble-solution"><strong>Solutions:</strong>
-          <ul>
-            <li>Allow the solar simulator lamp more warm-up time (≥30 min).</li>
-            <li>Increase delay per point to 200–500 ms to let the current stabilise at each
-                voltage step.</li>
-            <li>Start the forward scan slightly below 0 V (default −0.1 V) to ensure the
-                current plateau near J<sub>sc</sub> is properly captured before the curve rises.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
   </section>
 
-  <!-- ══════════════════════════════════════════════════════════════════ -->
-  <!-- 16. REFERENCES                                                     -->
-  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- ════════════════════════════════════════════════════════════════════
+       23. REFERENCES
+  ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="references">
-    <h2>16. References</h2>
+    <h2>23. References</h2>
 
     <ol class="ref-list">
       <li data-ref="[1]">
-        J.A. Christians, J.S. Manser, P.V. Kamat, Best Practices in Perovskite Solar Cell
-        Efficiency Measurements. Avoiding the Error of Making Bad Cells Look Good,
-        <em>J. Phys. Chem. Lett.</em> 6 (2015) 3808–3814.
-        <a href="https://doi.org/10.1021/acs.jpclett.5b00289">https://doi.org/10.1021/acs.jpclett.5b00289</a>
+        H.-S. Kim, N.-G. Park, Parameters Affecting I–V Hysteresis of CH<sub>3</sub>NH<sub>3</sub>PbI<sub>3</sub>
+        Perovskite Solar Cells: Effects of Perovskite Crystal Size and Mesoporous TiO<sub>2</sub> Layer,
+        <em>J. Phys. Chem. Lett.</em> 5 (2014) 2927–2934.
+        <a href="https://doi.org/10.1021/jz501392m">https://doi.org/10.1021/jz501392m</a>
+        <br><em>— Source of the Hysteresis Index (HI) formula used in this software.</em>
       </li>
       <li data-ref="[2]">
-        G.A. Nemnes, C. Besleaga, A.G. Tomulescu, I. Pintilie, L. Pintilie, K. Torfason,
-        A. Manolescu, Normal and Inverted Hysteresis in Perovskite Solar Cells,
-        <em>J. Phys. Chem. C</em> 121 (2017) 11207–11214.
-        <a href="https://doi.org/10.1021/acs.jpcc.7b04248">https://doi.org/10.1021/acs.jpcc.7b04248</a>
+        J.A. Christians, J.S. Manser, P.V. Kamat, Best Practices in Perovskite Solar Cell Efficiency
+        Measurements. Avoiding the Error of Making Bad Cells Look Good,
+        <em>J. Phys. Chem. Lett.</em> 6 (2015) 3808–3814.
+        <a href="https://doi.org/10.1021/acs.jpclett.5b00289">https://doi.org/10.1021/acs.jpclett.5b00289</a>
+        <br><em>— Basis for pre-bias conditioning protocol, stabilized PCE measurement recommendation,
+        and best-practice scan parameters.</em>
       </li>
       <li data-ref="[3]">
-        M.V. Khenkin, E.A. Katz, A. Abate, et al., Consensus statement for stability assessment
-        and reporting for perovskite photovoltaics based on ISOS procedures,
-        <em>Nat. Energy</em> 5 (2020) 35–49.
-        <a href="https://doi.org/10.1038/s41560-019-0529-5">https://doi.org/10.1038/s41560-019-0529-5</a>
+        H.J. Snaith, A. Abate, J.M. Ball, G.E. Eperon, T. Leijtens, N.K. Noel, S.D. Stranks,
+        J.T.-W. Wang, K. Wojciechowski, W. Zhang, Anomalous Hysteresis in Perovskite Solar Cells,
+        <em>J. Phys. Chem. Lett.</em> 5 (2014) 1511–1515.
+        <a href="https://doi.org/10.1021/jz500113x">https://doi.org/10.1021/jz500113x</a>
+        <br><em>— First systematic report of J-V hysteresis in perovskite cells; motivates
+        stabilized power output (SPO) measurement.</em>
       </li>
       <li data-ref="[4]">
         W. Tress, N. Marinova, T. Moehl, S.M. Zakeeruddin, M.K. Nazeeruddin, M. Grätzel,
         Understanding the rate-dependent J–V hysteresis, slow time component, and aging in
-        CH<sub>3</sub>NH<sub>3</sub>PbI<sub>3</sub> perovskite solar cells: the role of a
-        compensated electric field,
+        CH<sub>3</sub>NH<sub>3</sub>PbI<sub>3</sub> perovskite solar cells: the role of a compensated
+        electric field,
         <em>Energy Environ. Sci.</em> 8 (2015) 995–1004.
         <a href="https://doi.org/10.1039/C4EE03664F">https://doi.org/10.1039/C4EE03664F</a>
+        <br><em>— Physical model for ionic-origin hysteresis; basis for scan-rate-dependent
+        HI discussion and recommended delay times.</em>
       </li>
       <li data-ref="[5]">
-        M.A. Green, <em>Solar Cells: Operating Principles, Technology and System Applications</em>,
-        Prentice-Hall, Englewood Cliffs, NJ, 1982. ISBN: 0-13-822270-3.
+        M.V. Khenkin, E.A. Katz, A. Abate, et al., Consensus statement for stability assessment
+        and reporting for perovskite photovoltaics based on ISOS procedures,
+        <em>Nat. Energy</em> 5 (2020) 35–49.
+        <a href="https://doi.org/10.1038/s41560-019-0529-5">https://doi.org/10.1038/s41560-019-0529-5</a>
+        <br><em>— ISOS international consensus on stability testing protocols; basis for
+        stabilized efficiency reporting requirements used in this software.</em>
       </li>
       <li data-ref="[6]">
-        PVEducation.org, Shunt Resistance.
-        <a href="https://www.pveducation.org/pvcdrom/solar-cell-operation/shunt-resistance">https://www.pveducation.org/pvcdrom/solar-cell-operation/shunt-resistance</a>
+        G.A. Nemnes, C. Besleaga, A.G. Tomulescu, I. Pintilie, L. Pintilie, K. Torfason,
+        A. Manolescu, Normal and Inverted Hysteresis in Perovskite Solar Cells,
+        <em>J. Phys. Chem. C</em> 121 (2017) 11207–11214.
+        <a href="https://doi.org/10.1021/acs.jpcc.7b04248">https://doi.org/10.1021/acs.jpcc.7b04248</a>
+        <br><em>— Classification and physical interpretation of normal vs. inverted hysteresis.</em>
+      </li>
+      <li data-ref="[7]">
+        D.P. Hohm, M.E. Ropp, Comparative study of maximum power point tracking algorithms,
+        <em>Progress in Photovoltaics: Research and Applications</em> 11 (2003) 47–62.
+        <a href="https://doi.org/10.1002/pip.459">https://doi.org/10.1002/pip.459</a>
+        <br><em>— Systematic comparison of MPPT algorithms including Perturb-and-Observe;
+        theoretical basis for the P&amp;O implementation in the Pure MPP Tracking mode.</em>
+      </li>
+      <li data-ref="[8]">
+        M.A. Green, <em>Solar Cells: Operating Principles, Technology and System Applications</em>,
+        Prentice-Hall, Englewood Cliffs, NJ, 1982.
+        <br><em>— Foundational reference for the single-diode equivalent circuit model and
+        definitions of J<sub>sc</sub>, V<sub>oc</sub>, FF, R<sub>s</sub>, R<sub>sh</sub>.</em>
+      </li>
+      <li data-ref="[9]">
+        PVEducation.org, Shunt Resistance and Series Resistance.
+        <a href="https://www.pveducation.org/pvcdrom/solar-cell-operation/shunt-resistance">https://www.pveducation.org</a>
+        <br><em>— Online reference for parameter extraction methods and device physics.</em>
       </li>
     </ol>
   </section>
 
-</main><!-- /#content -->
+</main>
 
 <script>
-  // ── Active sidebar link on scroll ──────────────────────────────────────────
   (function () {
     const sections = Array.from(document.querySelectorAll('.section'));
     const links    = Array.from(document.querySelectorAll('#sidebar nav a'));
 
     function getActiveId() {
       const scrollY = window.scrollY + 80;
-      let activeId  = sections[0].id;
+      let activeId  = sections[0] ? sections[0].id : '';
       for (const sec of sections) {
-        if (sec.offsetTop <= scrollY) {
-          activeId = sec.id;
-        }
+        if (sec.offsetTop <= scrollY) activeId = sec.id;
       }
       return activeId;
     }
@@ -1569,16 +1712,12 @@
       const id = getActiveId();
       links.forEach(function (link) {
         const href = link.getAttribute('href').replace('#', '');
-        if (href === id) {
-          link.classList.add('active');
-        } else {
-          link.classList.remove('active');
-        }
+        link.classList.toggle('active', href === id);
       });
     }
 
     window.addEventListener('scroll', updateActive, { passive: true });
-    updateActive(); // run once on load
+    updateActive();
   })();
 </script>
 
