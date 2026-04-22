@@ -7,9 +7,10 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import (
     ttk, Menu, filedialog, Label, Entry, Button,
-    StringVar, DoubleVar, Text, messagebox,
+    StringVar, DoubleVar, IntVar, Text, messagebox,
     Frame, LabelFrame, Checkbutton, BooleanVar, Radiobutton,
-    LEFT, RIGHT, BOTH, X, Y, W, END, DISABLED, NORMAL,
+    Listbox, Scrollbar,
+    LEFT, RIGHT, BOTH, X, Y, W, E, END, DISABLED, NORMAL, BOTTOM,
 )
 from datetime import datetime
 import pyvisa
@@ -448,12 +449,14 @@ class JVMeasurementApp:
         self._build_mpp_panel(left, plot_frame)
         self._build_stab_panel(left, plot_frame)
         self._build_pure_mpp_panel(left, plot_frame)
+        self._build_curation_panel(left, plot_frame)
 
         # ── Keyboard shortcuts for mode switching ─────────────────────────────
         self.root.bind("<Alt-F2>", lambda e: self.switch_mode("jv"))
         self.root.bind("<Alt-F3>", lambda e: self.switch_mode("mpp"))
         self.root.bind("<Alt-F5>", lambda e: self.switch_mode("stab"))
         self.root.bind("<Alt-F6>", lambda e: self.switch_mode("pure_mpp"))
+        self.root.bind("<Alt-F7>", lambda e: self.switch_mode("curation"))
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -507,6 +510,11 @@ class JVMeasurementApp:
             label="  Pure MPP Tracking",
             accelerator="Alt+F6",
             command=lambda: self.switch_mode("pure_mpp"))
+        self.window_menu.add_separator()
+        self.window_menu.add_command(
+            label="  Data Curation",
+            accelerator="Alt+F7",
+            command=lambda: self.switch_mode("curation"))
         menubar.add_cascade(label="Window", menu=self.window_menu)
 
         help_menu = Menu(menubar, tearoff=0)
@@ -538,10 +546,12 @@ class JVMeasurementApp:
         self.mpp_panel.pack_forget()
         self.stab_panel.pack_forget()
         self.pmpp_panel.pack_forget()
+        self.curation_panel.pack_forget()
         self.jv_plot_frame.pack_forget()
         self.mpp_plot_frame.pack_forget()
         self.stab_plot_frame.pack_forget()
         self.pmpp_plot_frame.pack_forget()
+        self.curation_plot_frame.pack_forget()
 
         if mode == "jv":
             self.jv_panel.pack(fill=BOTH, expand=True)
@@ -555,27 +565,25 @@ class JVMeasurementApp:
         elif mode == "pure_mpp":
             self.pmpp_panel.pack(fill=BOTH, expand=True)
             self.pmpp_plot_frame.pack(fill=BOTH, expand=True)
+        elif mode == "curation":
+            self.curation_panel.pack(fill=BOTH, expand=True)
+            self.curation_plot_frame.pack(fill=BOTH, expand=True)
 
         self.current_mode = mode
         self._update_window_menu_checkmark(mode)
 
     def _update_window_menu_checkmark(self, active_mode):
-        all_labels = [
-            "  J-V Measurement",
-            "  MPP Tracking",
-            "  Stabilized Current",
-            "  Pure MPP Tracking",
+        # Entry indices: 0=J-V, 1=MPP, 2=Stab, 3=PureMPP, 4=separator, 5=Curation
+        all_entries = [
+            (0, "  J-V Measurement",    "jv"),
+            (1, "  MPP Tracking",       "mpp"),
+            (2, "  Stabilized Current", "stab"),
+            (3, "  Pure MPP Tracking",  "pure_mpp"),
+            (5, "  Data Curation",      "curation"),
         ]
-        checks = {
-            "jv":       0,
-            "mpp":      1,
-            "stab":     2,
-            "pure_mpp": 3,
-        }
-        active_idx = checks.get(active_mode, -1)
-        for i, label in enumerate(all_labels):
-            display = ("\u2713" + label[1:]) if i == active_idx else label
-            self.window_menu.entryconfig(i, label=display)
+        for menu_i, label, mode_key in all_entries:
+            display = ("✓" + label[1:]) if mode_key == active_mode else label
+            self.window_menu.entryconfig(menu_i, label=display)
 
     # ── Instrument connection management ──────────────────────────────────────
 
@@ -1818,6 +1826,433 @@ class JVMeasurementApp:
             var.set(folder)
 
     # ══════════════════════════════════════════════════════════════════════════
+    # ════════════════════════════════════════════════════════════════════════════
+    # DATA CURATION — panel builder, helpers, runner
+    # ════════════════════════════════════════════════════════════════════════════
+
+    def _build_curation_panel(self, left_container, right_container):
+        """Build Data Curation left panel and right preview area."""
+        self.curation_files = []
+
+        self.curation_panel = Frame(left_container, bg="#ececec")
+
+        nb = ttk.Notebook(self.curation_panel)
+        nb.pack(fill=BOTH, expand=True, padx=6, pady=(6, 4))
+
+        # ── Tab 1: Files ───────────────────────────────────────────────
+        tab_files = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_files, text="  Files  ")
+
+        ff = LabelFrame(tab_files, text="Input Files", padx=6, pady=4)
+        ff.pack(fill=BOTH, expand=True, pady=(0, 6))
+
+        btn_row = Frame(ff)
+        btn_row.pack(fill=X, pady=(0, 4))
+        Button(btn_row, text="Add Files", font=("Arial", 8),
+               command=self._curation_add_files).pack(side=LEFT, padx=2)
+        Button(btn_row, text="Add Folder", font=("Arial", 8),
+               command=self._curation_add_folder).pack(side=LEFT, padx=2)
+        Button(btn_row, text="Clear All", font=("Arial", 8),
+               command=self._curation_clear_files).pack(side=LEFT, padx=2)
+
+        list_frame = Frame(ff)
+        list_frame.pack(fill=BOTH, expand=True)
+        sb_y = Scrollbar(list_frame, orient="vertical")
+        sb_y.pack(side=RIGHT, fill=Y)
+        self.curation_listbox = Listbox(
+            list_frame, yscrollcommand=sb_y.set,
+            height=12, selectmode="extended",
+            font=("Arial", 8))
+        self.curation_listbox.pack(side=LEFT, fill=BOTH, expand=True)
+        sb_y.config(command=self.curation_listbox.yview)
+
+        bottom_row = Frame(ff)
+        bottom_row.pack(fill=X, pady=(4, 0))
+        Button(bottom_row, text="Remove Selected", font=("Arial", 8),
+               command=self._curation_remove_selected).pack(side=LEFT, padx=2)
+        self.curation_file_count_var = StringVar(value="0 files")
+        Label(bottom_row, textvariable=self.curation_file_count_var,
+              font=("Arial", 8), fg="#555555").pack(side=RIGHT, padx=4)
+
+        sf = LabelFrame(tab_files, text="Substrate Settings", padx=6, pady=4)
+        sf.pack(fill=X, pady=(0, 4))
+
+        spin_row = Frame(sf)
+        spin_row.pack(fill=X, pady=(0, 4))
+        Label(spin_row, text="Cells per substrate:").pack(side=LEFT)
+        self.curation_cells_per_substrate = IntVar(value=4)
+        sp = ttk.Spinbox(spin_row, from_=1, to=20,
+                         textvariable=self.curation_cells_per_substrate, width=5)
+        sp.pack(side=LEFT, padx=6)
+        ToolTip(sp, "Number of cells per substrate.\nUsed for Average/Std Dev rows.")
+
+        self.curation_group_mode = StringVar(value="auto")
+        Radiobutton(sf, text="Auto-detect from filename prefix",
+                    variable=self.curation_group_mode, value="auto",
+                    bg="#ececec").pack(anchor=W, padx=4)
+        Radiobutton(sf, text="Manual (use number above)",
+                    variable=self.curation_group_mode, value="manual",
+                    bg="#ececec").pack(anchor=W, padx=4, pady=(0, 2))
+
+        # ── Tab 2: Thresholds ───────────────────────────────────────────
+        tab_thresh = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_thresh, text="  Thresholds  ")
+
+        tf = LabelFrame(tab_thresh, text="Filter Parameters", padx=6, pady=4)
+        tf.pack(fill=X, pady=(0, 6))
+
+        self.threshold_params = {}
+        self._thresh_min_entries = {}
+        self._thresh_max_entries = {}
+
+        param_defaults = [
+            ("PCE",   0.0,    100.0,   True),
+            ("Voc",   0.0,      2.0,  False),
+            ("Jsc",   0.0,     50.0,  False),
+            ("FF",    0.0,    100.0,  False),
+            ("HI",  -100.0,  100.0,  False),
+            ("Rs",    0.0,   1000.0,  False),
+            ("Rsh",   0.0, 1000000.0, False),
+        ]
+        param_units = {
+            "PCE": "(%)", "Voc": "(V)", "Jsc": "(mA/cm²)",
+            "FF": "(%)", "HI": "(%)",
+            "Rs": "(Ω·cm²)", "Rsh": "(Ω·cm²)",
+        }
+
+        for row_idx, (param, mn_def, mx_def, en_def) in enumerate(param_defaults):
+            enabled = BooleanVar(value=en_def)
+            min_var = DoubleVar(value=mn_def)
+            max_var = DoubleVar(value=mx_def)
+            self.threshold_params[param] = {
+                "enabled": enabled, "min": min_var, "max": max_var}
+
+            cb = Checkbutton(tf, text=f"{param} {param_units[param]}",
+                             variable=enabled, width=14, anchor=W,
+                             command=lambda p=param: self._toggle_threshold(p))
+            cb.grid(row=row_idx, column=0, sticky=W, padx=4, pady=2)
+
+            Label(tf, text="Min:").grid(row=row_idx, column=1, sticky=E, padx=(8, 2))
+            min_e = Entry(tf, textvariable=min_var, width=8)
+            min_e.grid(row=row_idx, column=2, sticky=W, padx=2)
+            self._thresh_min_entries[param] = min_e
+
+            Label(tf, text="Max:").grid(row=row_idx, column=3, sticky=E, padx=(8, 2))
+            max_e = Entry(tf, textvariable=max_var, width=8)
+            max_e.grid(row=row_idx, column=4, sticky=W, padx=2)
+            self._thresh_max_entries[param] = max_e
+
+            if not en_def:
+                min_e.config(state=DISABLED)
+                max_e.config(state=DISABLED)
+
+            min_var.trace("w", lambda *a, p=param: self._validate_threshold(p))
+            max_var.trace("w", lambda *a, p=param: self._validate_threshold(p))
+
+        scan_f = LabelFrame(tab_thresh, text="Apply threshold to", padx=6, pady=4)
+        scan_f.pack(fill=X, pady=(0, 4))
+        self.threshold_scan_mode = StringVar(value="rev")
+        Radiobutton(scan_f, text="Reverse scan only (recommended)",
+                    variable=self.threshold_scan_mode, value="rev",
+                    bg="#ececec").pack(anchor=W)
+        Radiobutton(scan_f, text="Both scans independently",
+                    variable=self.threshold_scan_mode, value="both",
+                    bg="#ececec").pack(anchor=W)
+
+        # ── Tab 3: Output ───────────────────────────────────────────────
+        tab_out = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_out, text="  Output  ")
+
+        out_f = LabelFrame(tab_out, text="Export Settings", padx=6, pady=4)
+        out_f.pack(fill=X, pady=(0, 6))
+        out_f.columnconfigure(0, weight=1)
+
+        Label(out_f, text="Save to folder:").grid(
+            row=0, column=0, sticky=W, padx=4, pady=(4, 2))
+        self.curation_output_folder = StringVar()
+        Entry(out_f, textvariable=self.curation_output_folder, width=22).grid(
+            row=1, column=0, sticky="we", padx=4, pady=2)
+        Button(out_f, text="Browse…", font=("Arial", 8),
+               command=lambda: self.curation_output_folder.set(
+                   filedialog.askdirectory() or self.curation_output_folder.get())
+               ).grid(row=1, column=1, padx=(2, 4), pady=2)
+
+        Label(out_f, text="Filename:").grid(
+            row=2, column=0, sticky=W, padx=4, pady=(8, 2))
+        ts_now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.curation_filename_var = StringVar(
+            value=f"data_curation_{ts_now}.xlsx")
+        Entry(out_f, textvariable=self.curation_filename_var, width=28).grid(
+            row=3, column=0, columnspan=2, sticky="we", padx=4, pady=2)
+
+        # ── Action buttons ──────────────────────────────────────────────────
+        btn_frame = Frame(self.curation_panel, bg="#ececec")
+        btn_frame.pack(fill=X, padx=6, pady=(4, 4))
+
+        self.curation_preview_btn = Button(
+            btn_frame, text="Preview", font=("Arial", 9, "bold"),
+            command=lambda: self._run_curation(preview_only=True), width=12)
+        self.curation_preview_btn.pack(side=LEFT, padx=4)
+
+        self.curation_run_btn = Button(
+            btn_frame, text="Run & Export", font=("Arial", 9, "bold"),
+            command=lambda: self._run_curation(preview_only=False),
+            width=14, bg="#1565C0", fg="white")
+        self.curation_run_btn.pack(side=LEFT, padx=4)
+
+        # ── Status bar ────────────────────────────────────────────────────────────────────
+        sb = Frame(self.curation_panel, bg="#37474F", height=24)
+        sb.pack(fill=X, side="bottom")
+        sb.pack_propagate(False)
+        self.curation_status_var = StringVar(value="Ready — add files to begin.")
+        Label(sb, textvariable=self.curation_status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
+
+        # ── Right preview frame ───────────────────────────────────────────────────────────
+        self.curation_plot_frame = Frame(right_container, bg="#f8f8f8")
+
+        inner = LabelFrame(self.curation_plot_frame,
+                           text="Data Preview", padx=4, pady=4)
+        inner.pack(fill=BOTH, expand=True, padx=8, pady=8)
+
+        self.curation_tree_frame = Frame(inner)
+        self.curation_tree_frame.pack(fill=BOTH, expand=True)
+
+        self.curation_summary_var = StringVar(value="No data loaded.")
+        Label(inner, textvariable=self.curation_summary_var,
+              font=("Arial", 9), anchor=W, fg="#37474F"
+              ).pack(fill=X, pady=(4, 0))
+
+        Label(self.curation_tree_frame,
+              text="Run Preview to load data files.",
+              font=("Arial", 11), fg="#9E9E9E").pack(expand=True)
+
+    # ── Curation file management helpers ──────────────────────────────────────────────────────
+
+    def _curation_add_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Select J-V measurement files",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
+        for p in paths:
+            if p not in self.curation_files:
+                self.curation_files.append(p)
+                self.curation_listbox.insert(END, os.path.basename(p))
+        self._curation_update_count()
+
+    def _curation_add_folder(self):
+        folder = filedialog.askdirectory(
+            title="Select folder containing xlsx files")
+        if not folder:
+            return
+        import glob as _glob
+        for p in sorted(_glob.glob(os.path.join(folder, "*.xlsx"))):
+            if p not in self.curation_files:
+                self.curation_files.append(p)
+                self.curation_listbox.insert(END, os.path.basename(p))
+        self._curation_update_count()
+
+    def _curation_clear_files(self):
+        self.curation_files.clear()
+        self.curation_listbox.delete(0, END)
+        self._curation_update_count()
+
+    def _curation_remove_selected(self):
+        for i in reversed(self.curation_listbox.curselection()):
+            self.curation_listbox.delete(i)
+            del self.curation_files[i]
+        self._curation_update_count()
+
+    def _curation_update_count(self):
+        n = len(self.curation_files)
+        self.curation_file_count_var.set(f"{n} file{'s' if n != 1 else ''}")
+
+    def _toggle_threshold(self, param):
+        enabled = self.threshold_params[param]["enabled"].get()
+        state = NORMAL if enabled else DISABLED
+        self._thresh_min_entries[param].config(state=state)
+        self._thresh_max_entries[param].config(state=state)
+        if enabled:
+            self._validate_threshold(param)
+        else:
+            self._thresh_min_entries[param].config(bg="white")
+            self._thresh_max_entries[param].config(bg="white")
+
+    def _validate_threshold(self, param):
+        try:
+            mn = self.threshold_params[param]["min"].get()
+            mx = self.threshold_params[param]["max"].get()
+            invalid = mn > mx
+        except Exception:
+            invalid = True
+        color = "#FFCDD2" if invalid else "white"
+        self._thresh_min_entries[param].config(bg=color)
+        self._thresh_max_entries[param].config(bg=color)
+
+    # ── Curation runner ────────────────────────────────────────────────────────────────────────────────
+
+    def _run_curation(self, preview_only=False):
+        """Load files, apply thresholds, update treeview; optionally export."""
+        from app.io.data_curator import (
+            load_cell_data, group_by_substrate, export_curated_excel)
+
+        if not self.curation_files:
+            messagebox.showwarning("No Files", "Please add Excel files first.")
+            return
+
+        thresholds = {}
+        for param, cfg in self.threshold_params.items():
+            if cfg["enabled"].get():
+                mn = cfg["min"].get()
+                mx = cfg["max"].get()
+                if mn > mx:
+                    messagebox.showerror(
+                        "Invalid Threshold",
+                        f"For {param}: Min ({mn}) cannot be greater than Max ({mx}).")
+                    return
+                thresholds[param] = (mn, mx)
+
+        if not thresholds:
+            messagebox.showwarning(
+                "No Threshold",
+                "Please enable at least one threshold parameter.")
+            return
+
+        files     = list(self.curation_files)
+        mode      = self.curation_group_mode.get()
+        n_per_sub = self.curation_cells_per_substrate.get()
+        scan_mode = self.threshold_scan_mode.get()
+        out_dir   = self.curation_output_folder.get()
+        out_file  = self.curation_filename_var.get()
+
+        def _worker():
+            cells = []
+            for i, fp in enumerate(files):
+                self.root.after(0, self.curation_status_var.set,
+                                f"Loading ({i+1}/{len(files)}): {os.path.basename(fp)}")
+                cell = load_cell_data(fp)
+                if cell:
+                    cells.append(cell)
+
+            if not cells:
+                self.root.after(0, messagebox.showerror, "Error",
+                    "No valid J-V data files could be loaded.\n"
+                    "Only illuminated MeasurementData files are supported.")
+                self.root.after(0, self.curation_status_var.set, "Load failed.")
+                return
+
+            groups = group_by_substrate(cells, mode=mode, n_per_substrate=n_per_sub)
+            self.root.after(0, self._update_curation_treeview, cells, thresholds)
+
+            if not preview_only:
+                if not out_dir:
+                    self.root.after(0, messagebox.showerror, "No Output Folder",
+                        "Please select an output folder in the Output tab.")
+                    return
+                out_path = os.path.join(out_dir, out_file)
+                if os.path.exists(out_path):
+                    stem = out_file.replace(".xlsx", "")
+                    out_path = os.path.join(
+                        out_dir,
+                        f"{stem}_{datetime.now().strftime('%H%M%S')}.xlsx")
+                try:
+                    export_curated_excel(
+                        cells, thresholds, scan_mode, groups, out_path,
+                        progress_callback=lambda msg: self.root.after(
+                            0, self.curation_status_var.set, msg))
+                    self.root.after(0, messagebox.showinfo, "Done",
+                        f"Exported to:\n{out_path}")
+                    self.root.after(0, self.curation_status_var.set,
+                        f"Saved: {os.path.basename(out_path)}")
+                except Exception as exc:
+                    self.root.after(0, messagebox.showerror, "Export Error", str(exc))
+                    self.root.after(0, self.curation_status_var.set, "Export failed.")
+            else:
+                n_pass_all = sum(
+                    1 for c in cells
+                    if all(c.passes(p, mn, mx, scan=scan_mode)
+                           for p, (mn, mx) in thresholds.items()))
+                self.root.after(0, self.curation_status_var.set,
+                    f"Preview: {len(cells)} cells loaded, "
+                    f"{n_pass_all} pass all thresholds.")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _update_curation_treeview(self, cells, thresholds):
+        """Rebuild the treeview with loaded cell data and pass/fail columns."""
+        for w in self.curation_tree_frame.winfo_children():
+            w.destroy()
+
+        PARAMS     = ["Voc", "Jsc", "FF", "PCE", "HI", "Rs", "Rsh"]
+        param_hdrs = {
+            "Voc": "Voc (V)",         "Jsc": "Jsc (mA/cm²)",
+            "FF":  "FF (%)",           "PCE": "PCE (%)",
+            "HI":  "HI (%)",           "Rs":  "Rs (Ω·cm²)",
+            "Rsh": "Rsh (Ω·cm²)",
+        }
+        pass_keys = list(thresholds.keys())
+        pass_cols = [f"Pass_{p}" for p in pass_keys]
+        cols      = ("file", "device", "scan") + tuple(PARAMS) + tuple(pass_cols)
+
+        tree = ttk.Treeview(self.curation_tree_frame, columns=cols,
+                            show="headings")
+        tree.heading("file",   text="File");   tree.column("file",   width=140, minwidth=80)
+        tree.heading("device", text="Device"); tree.column("device", width=75,  minwidth=50)
+        tree.heading("scan",   text="Scan");   tree.column("scan",   width=45,  minwidth=40)
+        for p in PARAMS:
+            tree.heading(p, text=param_hdrs[p])
+            tree.column(p, width=85, minwidth=60, anchor="center")
+        for pc in pass_cols:
+            tree.heading(pc, text=pc)
+            tree.column(pc, width=65, minwidth=50, anchor="center")
+
+        sb_y = ttk.Scrollbar(self.curation_tree_frame,
+                             orient="vertical", command=tree.yview)
+        sb_x = ttk.Scrollbar(self.curation_tree_frame,
+                             orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.pack(side=RIGHT, fill=Y)
+        sb_x.pack(side=BOTTOM, fill=X)
+        tree.pack(fill=BOTH, expand=True)
+
+        tree.tag_configure("pass",     background="#C8E6C9")
+        tree.tag_configure("row_alt",  background="#F5F5F5")
+        tree.tag_configure("row_norm", background="#FFFFFF")
+
+        scan_mode   = self.threshold_scan_mode.get()
+        pass_counts = {p: 0 for p in pass_keys}
+
+        for i, cell in enumerate(cells):
+            alt = i % 2 == 1
+            for scan in ("fwd", "rev"):
+                vals      = [cell.get_val(p, scan) for p in PARAMS]
+                pass_syms = []
+                all_pass  = True
+                for param, (mn, mx) in thresholds.items():
+                    scan_chk = scan if scan_mode == "both" else "rev"
+                    passed   = cell.passes(param, mn, mx, scan=scan_chk)
+                    pass_syms.append("✓" if passed else "✗")
+                    if not passed:
+                        all_pass = False
+                    if scan == "rev" and passed:
+                        pass_counts[param] += 1
+
+                row_vals = (
+                    os.path.basename(cell.filepath)[:35],
+                    cell.device,
+                    "Fwd" if scan == "fwd" else "Rev",
+                ) + tuple(f"{v:.4g}" for v in vals) + tuple(pass_syms)
+
+                tag = ("pass" if (all_pass and thresholds)
+                       else ("row_alt" if alt else "row_norm"))
+                tree.insert("", END, values=row_vals, tags=(tag,))
+
+        parts = [f"Loaded: {len(cells)} cells"]
+        for param, (mn, mx) in thresholds.items():
+            parts.append(f"Pass {param}: {pass_counts[param]}/{len(cells)}")
+        self.curation_summary_var.set("  |  ".join(parts))
+
     # PURE MPP TRACKING — panel builder
     # ══════════════════════════════════════════════════════════════════════════
 
