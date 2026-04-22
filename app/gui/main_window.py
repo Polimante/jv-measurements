@@ -1832,7 +1832,8 @@ class JVMeasurementApp:
 
     def _build_curation_panel(self, left_container, right_container):
         """Build Data Curation left panel and right preview area."""
-        self.curation_files = []
+        self.curation_files  = []
+        self.curation_groups = []
 
         self.curation_panel = Frame(left_container, bg="#ececec")
 
@@ -1865,6 +1866,7 @@ class JVMeasurementApp:
             font=("Arial", 8))
         self.curation_listbox.pack(side=LEFT, fill=BOTH, expand=True)
         sb_y.config(command=self.curation_listbox.yview)
+        self.curation_listbox.bind("<<ListboxSelect>>", self._on_curation_file_select)
 
         bottom_row = Frame(ff)
         bottom_row.pack(fill=X, pady=(4, 0))
@@ -1874,86 +1876,121 @@ class JVMeasurementApp:
         Label(bottom_row, textvariable=self.curation_file_count_var,
               font=("Arial", 8), fg="#555555").pack(side=RIGHT, padx=4)
 
-        sf = LabelFrame(tab_files, text="Substrate Settings", padx=6, pady=4)
+        sf = LabelFrame(tab_files, text="Grouping by Prefix", padx=6, pady=4)
         sf.pack(fill=X, pady=(0, 4))
 
-        Label(sf, text="Cells per substrate (used for grouping and statistics):",
-              anchor=W).pack(fill=X, pady=(0, 2))
-        spin_row = Frame(sf)
-        spin_row.pack(fill=X, pady=(0, 4))
-        self.curation_cells_per_substrate = IntVar(value=4)
-        sp = ttk.Spinbox(spin_row, from_=1, to=20,
-                         textvariable=self.curation_cells_per_substrate, width=5)
-        sp.pack(side=LEFT, padx=(0, 6))
-        ToolTip(sp, "Files are grouped sequentially: files 1-N = Substrate 1,\n"
-                    "N+1 to 2N = Substrate 2, etc.")
+        tip = (
+            "Files are grouped by the first letter+digit prefix in the filename.\n\n"
+            "Recommended naming:\n"
+            "  D1C1_<timestamp>.xlsx  →  group D1\n"
+            "  D1C2_<timestamp>.xlsx  →  group D1\n"
+            "  D2C1_<timestamp>.xlsx  →  group D2\n\n"
+            "The prefix is detected automatically — no underscores required.\n"
+            "'D1C1' and 'D1_C1' both yield prefix 'D1'."
+        )
+        lbl = Label(sf, text="\u24d8  Name files as D1C1_..., D1C2_..., D2C1_...\n"
+                             "   to group cells by device prefix automatically.",
+                    anchor=W, justify=LEFT, fg="#37474F", font=("Arial", 8))
+        lbl.pack(fill=X, pady=(0, 4))
+        ToolTip(lbl, tip)
 
-        # ── Tab 2: Thresholds ───────────────────────────────────────────
+        # ── Tab 2: Groups ────────────────────────────────────────────────
+        tab_groups = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_groups, text="  Groups  ")
+
+        gf = LabelFrame(tab_groups, text="Composition Groups", padx=6, pady=4)
+        gf.pack(fill=BOTH, expand=True, pady=(0, 4))
+
+        grp_tree_frame = Frame(gf)
+        grp_tree_frame.pack(fill=BOTH, expand=True)
+        sb_grp = Scrollbar(grp_tree_frame, orient="vertical")
+        sb_grp.pack(side=RIGHT, fill=Y)
+        self.groups_tree = ttk.Treeview(
+            grp_tree_frame, columns=("name", "prefixes"),
+            show="headings", height=6, yscrollcommand=sb_grp.set)
+        self.groups_tree.heading("name",     text="Group Name")
+        self.groups_tree.heading("prefixes", text="Prefixes (comma-sep.)")
+        self.groups_tree.column("name",     width=90,  minwidth=60)
+        self.groups_tree.column("prefixes", width=140, minwidth=80)
+        self.groups_tree.pack(side=LEFT, fill=BOTH, expand=True)
+        sb_grp.config(command=self.groups_tree.yview)
+
+        add_row = Frame(gf, bg="#ececec")
+        add_row.pack(fill=X, pady=(6, 2))
+        Label(add_row, text="Name:",     font=("Arial", 8), bg="#ececec").grid(row=0, column=0, sticky=W, padx=(0, 2))
+        self.new_group_name_var = StringVar()
+        Entry(add_row, textvariable=self.new_group_name_var, width=11).grid(row=0, column=1, padx=2)
+        Label(add_row, text="Prefixes:", font=("Arial", 8), bg="#ececec").grid(row=0, column=2, sticky=W, padx=(6, 2))
+        self.new_group_prefixes_var = StringVar()
+        Entry(add_row, textvariable=self.new_group_prefixes_var, width=14).grid(row=0, column=3, padx=2)
+        Button(add_row, text="Add", font=("Arial", 8),
+               command=self._curation_add_group).grid(row=0, column=4, padx=(4, 0))
+
+        grp_btn_row = Frame(gf, bg="#ececec")
+        grp_btn_row.pack(fill=X, pady=(2, 4))
+        Button(grp_btn_row, text="Remove Selected", font=("Arial", 8),
+               command=self._curation_remove_group).pack(side=LEFT, padx=2)
+        Button(grp_btn_row, text="Auto-detect from files", font=("Arial", 8),
+               command=self._curation_autodetect_groups).pack(side=LEFT, padx=4)
+
+        Label(gf, text="\u24d8  Groups generate statistical comparison sheets in the export.\n"
+                       "   Prefixes: e.g. D1, D2, D3  (one prefix per device).",
+              font=("Arial", 8), fg="#555555", anchor=W, justify=LEFT,
+              bg="#ececec").pack(anchor=W)
+
+        # ── Tab 3: Thresholds ───────────────────────────────────────────
         tab_thresh = Frame(nb, padx=6, pady=4, bg="#ececec")
         nb.add(tab_thresh, text="  Thresholds  ")
 
         tf = LabelFrame(tab_thresh, text="Filter Parameters", padx=6, pady=4)
         tf.pack(fill=X, pady=(0, 6))
 
-        self.threshold_params = {}
+        self.threshold_params    = {}
         self._thresh_min_entries = {}
-        self._thresh_max_entries = {}
 
         param_defaults = [
-            ("PCE",   0.0,    100.0,   True),
-            ("Voc",   0.0,      2.0,  False),
-            ("Jsc",   0.0,     50.0,  False),
-            ("FF",    0.0,    100.0,  False),
-            ("HI",  -100.0,  100.0,  False),
-            ("Rs",    0.0,   1000.0,  False),
-            ("Rsh",   0.0, 1000000.0, False),
+            ("PCE",  5.0,  True),
+            ("Voc",  0.8, False),
+            ("Jsc", 10.0, False),
+            ("FF",  40.0, False),
+            ("HI",   0.0, False),
+            ("Rs",   0.0, False),
+            ("Rsh",  0.0, False),
         ]
         param_units = {
             "PCE": "(%)", "Voc": "(V)", "Jsc": "(mA/cm²)",
-            "FF": "(%)", "HI": "(%)",
-            "Rs": "(Ω·cm²)", "Rsh": "(Ω·cm²)",
+            "FF": "(%)", "HI": "(%)", "Rs": "(Ω·cm²)", "Rsh": "(Ω·cm²)",
         }
 
-        for row_idx, (param, mn_def, mx_def, en_def) in enumerate(param_defaults):
+        for row_idx, (param, mn_def, en_def) in enumerate(param_defaults):
             enabled = BooleanVar(value=en_def)
             min_var = DoubleVar(value=mn_def)
-            max_var = DoubleVar(value=mx_def)
-            self.threshold_params[param] = {
-                "enabled": enabled, "min": min_var, "max": max_var}
+            self.threshold_params[param] = {"enabled": enabled, "min": min_var}
 
             cb = Checkbutton(tf, text=f"{param} {param_units[param]}",
                              variable=enabled, width=14, anchor=W,
                              command=lambda p=param: self._toggle_threshold(p))
             cb.grid(row=row_idx, column=0, sticky=W, padx=4, pady=2)
 
-            Label(tf, text="Min:").grid(row=row_idx, column=1, sticky=E, padx=(8, 2))
+            Label(tf, text="Min ≥").grid(row=row_idx, column=1, sticky=E, padx=(8, 2))
             min_e = Entry(tf, textvariable=min_var, width=8)
             min_e.grid(row=row_idx, column=2, sticky=W, padx=2)
             self._thresh_min_entries[param] = min_e
 
-            Label(tf, text="Max:").grid(row=row_idx, column=3, sticky=E, padx=(8, 2))
-            max_e = Entry(tf, textvariable=max_var, width=8)
-            max_e.grid(row=row_idx, column=4, sticky=W, padx=2)
-            self._thresh_max_entries[param] = max_e
-
             if not en_def:
                 min_e.config(state=DISABLED)
-                max_e.config(state=DISABLED)
-
-            min_var.trace("w", lambda *a, p=param: self._validate_threshold(p))
-            max_var.trace("w", lambda *a, p=param: self._validate_threshold(p))
 
         scan_f = LabelFrame(tab_thresh, text="Apply threshold to", padx=6, pady=4)
         scan_f.pack(fill=X, pady=(0, 4))
-        self.threshold_scan_mode = StringVar(value="rev")
-        Radiobutton(scan_f, text="Reverse scan only (recommended)",
-                    variable=self.threshold_scan_mode, value="rev",
-                    bg="#ececec").pack(anchor=W)
+        self.threshold_scan_mode = StringVar(value="both")
         Radiobutton(scan_f, text="Both scans independently",
                     variable=self.threshold_scan_mode, value="both",
                     bg="#ececec").pack(anchor=W)
+        Radiobutton(scan_f, text="Reverse scan only",
+                    variable=self.threshold_scan_mode, value="rev",
+                    bg="#ececec").pack(anchor=W)
 
-        # ── Tab 3: Output ───────────────────────────────────────────────
+        # ── Tab 4: Output ───────────────────────────────────────────────
         tab_out = Frame(nb, padx=6, pady=4, bg="#ececec")
         nb.add(tab_out, text="  Output  ")
 
@@ -2007,15 +2044,28 @@ class JVMeasurementApp:
         # ── Right preview frame ───────────────────────────────────────────────────────────
         self.curation_plot_frame = Frame(right_container, bg="#f8f8f8")
 
-        inner = LabelFrame(self.curation_plot_frame,
-                           text="Data Preview", padx=4, pady=4)
-        inner.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        right_nb = ttk.Notebook(self.curation_plot_frame)
+        right_nb.pack(fill=BOTH, expand=True, padx=8, pady=8)
 
-        self.curation_tree_frame = Frame(inner)
+        # Tab 1 — Raw Data Preview (click a file to inspect)
+        tab_raw_prev = Frame(right_nb, bg="#f8f8f8")
+        right_nb.add(tab_raw_prev, text="  Raw Data Preview  ")
+
+        self.curation_raw_frame = Frame(tab_raw_prev, bg="#f8f8f8")
+        self.curation_raw_frame.pack(fill=BOTH, expand=True)
+        Label(self.curation_raw_frame,
+              text="Click a file in Input Files to preview its parameters.",
+              font=("Arial", 11), fg="#9E9E9E").pack(expand=True)
+
+        # Tab 2 — Data Preview (populated after clicking Preview)
+        tab_data_prev = Frame(right_nb, bg="#f8f8f8")
+        right_nb.add(tab_data_prev, text="  Data Preview  ")
+
+        self.curation_tree_frame = Frame(tab_data_prev, bg="#f8f8f8")
         self.curation_tree_frame.pack(fill=BOTH, expand=True)
 
         self.curation_summary_var = StringVar(value="No data loaded.")
-        Label(inner, textvariable=self.curation_summary_var,
+        Label(tab_data_prev, textvariable=self.curation_summary_var,
               font=("Arial", 9), anchor=W, fg="#37474F"
               ).pack(fill=X, pady=(4, 0))
 
@@ -2062,27 +2112,108 @@ class JVMeasurementApp:
         n = len(self.curation_files)
         self.curation_file_count_var.set(f"{n} file{'s' if n != 1 else ''}")
 
+    def _curation_add_group(self):
+        name = self.new_group_name_var.get().strip()
+        prefixes_raw = self.new_group_prefixes_var.get().strip()
+        if not name or not prefixes_raw:
+            return
+        prefixes = [p.strip() for p in prefixes_raw.split(",") if p.strip()]
+        if not prefixes:
+            return
+        self.curation_groups.append({"name": name, "prefixes": prefixes})
+        self.groups_tree.insert("", END, values=(name, ", ".join(prefixes)))
+        self.new_group_name_var.set("")
+        self.new_group_prefixes_var.set("")
+
+    def _curation_remove_group(self):
+        for iid in reversed(self.groups_tree.selection()):
+            idx = self.groups_tree.index(iid)
+            self.groups_tree.delete(iid)
+            if idx < len(self.curation_groups):
+                del self.curation_groups[idx]
+
+    def _curation_autodetect_groups(self):
+        if not self.curation_files:
+            messagebox.showwarning("No Files",
+                "Add input files first — prefixes are detected from filenames.")
+            return
+        from app.io.data_curator import _extract_prefix
+        seen = {}
+        for fp in self.curation_files:
+            prefix = _extract_prefix(fp)
+            seen.setdefault(prefix, prefix)
+        self.curation_groups.clear()
+        for iid in self.groups_tree.get_children():
+            self.groups_tree.delete(iid)
+        for prefix in sorted(seen.keys()):
+            self.curation_groups.append({"name": prefix, "prefixes": [prefix]})
+            self.groups_tree.insert("", END, values=(prefix, prefix))
+
+    def _on_curation_file_select(self, event=None):
+        sel = self.curation_listbox.curselection()
+        if len(sel) != 1:
+            return
+        idx = sel[0]
+        if idx >= len(self.curation_files):
+            return
+        fp = self.curation_files[idx]
+
+        def _load():
+            from app.io.data_curator import load_cell_data
+            cell = load_cell_data(fp)
+            self.root.after(0, self._show_raw_preview, cell, fp)
+
+        threading.Thread(target=_load, daemon=True).start()
+
+    def _show_raw_preview(self, cell, filepath):
+        for w in self.curation_raw_frame.winfo_children():
+            w.destroy()
+
+        if cell is None:
+            Label(self.curation_raw_frame,
+                  text="Could not load file — not a valid J-V data file.",
+                  font=("Arial", 9), fg="#B71C1C").pack(padx=8, pady=8)
+            return
+
+        Label(self.curation_raw_frame,
+              text=os.path.basename(filepath),
+              font=("Arial", 9, "bold")).pack(anchor=W, padx=8, pady=(6, 2))
+
+        PARAMS = ["Voc", "Jsc", "FF", "PCE", "HI", "Rs", "Rsh"]
+        headers = {
+            "Voc": "Voc (V)", "Jsc": "Jsc (mA/cm²)", "FF": "FF (%)",
+            "PCE": "PCE (%)", "HI": "HI (%)", "Rs": "Rs (Ω·cm²)", "Rsh": "Rsh (Ω·cm²)",
+        }
+        cols = ("param", "fwd", "rev")
+        tree = ttk.Treeview(self.curation_raw_frame, columns=cols,
+                            show="headings", height=len(PARAMS))
+        tree.heading("param", text="Parameter"); tree.column("param", width=110, anchor=W)
+        tree.heading("fwd",   text="Forward");   tree.column("fwd",   width=90, anchor="center")
+        tree.heading("rev",   text="Reverse");   tree.column("rev",   width=90, anchor="center")
+
+        for p in PARAMS:
+            fv = cell.get_val(p, "fwd")
+            rv = cell.get_val(p, "rev")
+            fmt = lambda v: f"{v:.4g}" if v is not None and v == v else "—"
+            tree.insert("", END, values=(headers[p], fmt(fv), fmt(rv)))
+
+        tree.pack(fill=BOTH, expand=True, padx=6, pady=(0, 6))
+
     def _toggle_threshold(self, param):
         enabled = self.threshold_params[param]["enabled"].get()
         state = NORMAL if enabled else DISABLED
         self._thresh_min_entries[param].config(state=state)
-        self._thresh_max_entries[param].config(state=state)
-        if enabled:
-            self._validate_threshold(param)
-        else:
+        if not enabled:
             self._thresh_min_entries[param].config(bg="white")
-            self._thresh_max_entries[param].config(bg="white")
 
     def _validate_threshold(self, param):
         try:
-            mn = self.threshold_params[param]["min"].get()
-            mx = self.threshold_params[param]["max"].get()
-            invalid = mn > mx
+            self.threshold_params[param]["min"].get()
+            invalid = False
         except Exception:
             invalid = True
         color = "#FFCDD2" if invalid else "white"
         self._thresh_min_entries[param].config(bg=color)
-        self._thresh_max_entries[param].config(bg=color)
 
     # ── Curation runner ────────────────────────────────────────────────────────────────────────────────
 
@@ -2099,13 +2230,7 @@ class JVMeasurementApp:
         for param, cfg in self.threshold_params.items():
             if cfg["enabled"].get():
                 mn = cfg["min"].get()
-                mx = cfg["max"].get()
-                if mn > mx:
-                    messagebox.showerror(
-                        "Invalid Threshold",
-                        f"For {param}: Min ({mn}) cannot be greater than Max ({mx}).")
-                    return
-                thresholds[param] = (mn, mx)
+                thresholds[param] = mn
 
         if not thresholds:
             messagebox.showwarning(
@@ -2113,11 +2238,11 @@ class JVMeasurementApp:
                 "Please enable at least one threshold parameter.")
             return
 
-        files     = list(self.curation_files)
-        n_per_sub = self.curation_cells_per_substrate.get()
-        scan_mode = self.threshold_scan_mode.get()
-        out_dir   = self.curation_output_folder.get()
-        out_file  = self.curation_filename_var.get()
+        files      = list(self.curation_files)
+        comp_groups = list(self.curation_groups)
+        scan_mode  = self.threshold_scan_mode.get()
+        out_dir    = self.curation_output_folder.get()
+        out_file   = self.curation_filename_var.get()
 
         def _worker():
             cells = []
@@ -2135,7 +2260,7 @@ class JVMeasurementApp:
                 self.root.after(0, self.curation_status_var.set, "Load failed.")
                 return
 
-            groups = group_by_substrate(cells, n_per_substrate=n_per_sub)
+            groups = group_by_substrate(cells)
             self.root.after(0, self._update_curation_treeview, cells, thresholds)
 
             if not preview_only:
@@ -2152,6 +2277,7 @@ class JVMeasurementApp:
                 try:
                     export_curated_excel(
                         cells, thresholds, scan_mode, groups, out_path,
+                        composition_groups=comp_groups,
                         progress_callback=lambda msg: self.root.after(
                             0, self.curation_status_var.set, msg))
                     self.root.after(0, messagebox.showinfo, "Done",
@@ -2164,8 +2290,8 @@ class JVMeasurementApp:
             else:
                 n_pass_all = sum(
                     1 for c in cells
-                    if all(c.passes(p, mn, mx, scan=scan_mode)
-                           for p, (mn, mx) in thresholds.items()))
+                    if all(c.passes(p, mn, scan=scan_mode)
+                           for p, mn in thresholds.items()))
                 self.root.after(0, self.curation_status_var.set,
                     f"Preview: {len(cells)} cells loaded, "
                     f"{n_pass_all} pass all thresholds.")
@@ -2222,9 +2348,9 @@ class JVMeasurementApp:
                 vals      = [cell.get_val(p, scan) for p in PARAMS]
                 pass_syms = []
                 all_pass  = True
-                for param, (mn, mx) in thresholds.items():
+                for param, mn in thresholds.items():
                     scan_chk = scan if scan_mode == "both" else "rev"
-                    passed   = cell.passes(param, mn, mx, scan=scan_chk)
+                    passed   = cell.passes(param, mn, scan=scan_chk)
                     pass_syms.append("✓" if passed else "✗")
                     if not passed:
                         all_pass = False
@@ -2242,7 +2368,7 @@ class JVMeasurementApp:
                 tree.insert("", END, values=row_vals, tags=(tag,))
 
         parts = [f"Loaded: {len(cells)} cells"]
-        for param, (mn, mx) in thresholds.items():
+        for param in thresholds:
             parts.append(f"Pass {param}: {pass_counts[param]}/{len(cells)}")
         self.curation_summary_var.set("  |  ".join(parts))
 
