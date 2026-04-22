@@ -1877,22 +1877,16 @@ class JVMeasurementApp:
         sf = LabelFrame(tab_files, text="Substrate Settings", padx=6, pady=4)
         sf.pack(fill=X, pady=(0, 4))
 
+        Label(sf, text="Cells per substrate (used for grouping and statistics):",
+              anchor=W).pack(fill=X, pady=(0, 2))
         spin_row = Frame(sf)
         spin_row.pack(fill=X, pady=(0, 4))
-        Label(spin_row, text="Cells per substrate:").pack(side=LEFT)
         self.curation_cells_per_substrate = IntVar(value=4)
         sp = ttk.Spinbox(spin_row, from_=1, to=20,
                          textvariable=self.curation_cells_per_substrate, width=5)
-        sp.pack(side=LEFT, padx=6)
-        ToolTip(sp, "Number of cells per substrate.\nUsed for Average/Std Dev rows.")
-
-        self.curation_group_mode = StringVar(value="auto")
-        Radiobutton(sf, text="Auto-detect from filename prefix",
-                    variable=self.curation_group_mode, value="auto",
-                    bg="#ececec").pack(anchor=W, padx=4)
-        Radiobutton(sf, text="Manual (use number above)",
-                    variable=self.curation_group_mode, value="manual",
-                    bg="#ececec").pack(anchor=W, padx=4, pady=(0, 2))
+        sp.pack(side=LEFT, padx=(0, 6))
+        ToolTip(sp, "Files are grouped sequentially: files 1-N = Substrate 1,\n"
+                    "N+1 to 2N = Substrate 2, etc.")
 
         # ── Tab 2: Thresholds ───────────────────────────────────────────
         tab_thresh = Frame(nb, padx=6, pady=4, bg="#ececec")
@@ -2120,7 +2114,6 @@ class JVMeasurementApp:
             return
 
         files     = list(self.curation_files)
-        mode      = self.curation_group_mode.get()
         n_per_sub = self.curation_cells_per_substrate.get()
         scan_mode = self.threshold_scan_mode.get()
         out_dir   = self.curation_output_folder.get()
@@ -2142,7 +2135,7 @@ class JVMeasurementApp:
                 self.root.after(0, self.curation_status_var.set, "Load failed.")
                 return
 
-            groups = group_by_substrate(cells, mode=mode, n_per_substrate=n_per_sub)
+            groups = group_by_substrate(cells, n_per_substrate=n_per_sub)
             self.root.after(0, self._update_curation_treeview, cells, thresholds)
 
             if not preview_only:
