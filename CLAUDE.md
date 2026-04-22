@@ -13,7 +13,7 @@ There are no tests and no build step. The application is Windows-only (`winsound
 ## Dependencies
 
 ```bash
-pip install pyvisa matplotlib numpy xlsxwriter mplcursors openpyxl
+pip install -r requirements.txt
 ```
 
 `playsound` is optional (falls back to `winsound.Beep`). The MP3 path in `app/utils/sound.py` is hardcoded to a specific machine path — update it when deploying on a new computer.
@@ -39,8 +39,12 @@ app/
   utils/
     constants.py               # APP_NAME, APP_VERSION, global stop_event (threading.Event)
     sound.py                   # play_completion_sound() with playsound / winsound fallback
+    updater.py                 # check_for_updates() — fetches version.json from GitHub
 docs/
   help.html                    # Standalone HTML help opened via webbrowser.open()
+build_installer/
+  setup.iss                    # Inno Setup 6 script → dist/JV-Measurements-Setup-vX.X.X.exe
+version.json                   # Machine-readable version + release notes (read by updater.py)
 ```
 
 ### Key architectural patterns
@@ -83,10 +87,11 @@ Column mapping is documented in `data_viewer.py::_read_illuminated()` and `_read
 
 | Mode | Shortcut | Class / entry point |
 |---|---|---|
-| J-V Measurement | Alt+F3 | `run_measurement()` in `main_window.py` |
-| MPP Tracking (JV-SPO) | Alt+F5 | `MPPTracker` in `mpp_tracker.py` |
-| Stabilized Current | Alt+F4 | inline in `main_window.py` |
+| J-V Measurement | Alt+F2 | `run_measurement()` in `main_window.py` |
+| MPP Tracking (JV-SPO) | Alt+F3 | `MPPTracker` in `mpp_tracker.py` |
+| Stabilized Current | Alt+F5 | inline in `main_window.py` |
 | Pure MPP Tracking (P&O) | Alt+F6 | `PureMPPTracker` in `pure_mpp_tracker.py` |
+| Data Curation | Alt+F7 | `switch_mode("curation")` in `main_window.py` |
 
 Mode panels are shown/hidden by `switch_mode()` using `pack()`/`pack_forget()`. The active panel name is stored in `self._current_mode` (`"jv"`, `"mpp"`, `"stab"`, `"pure_mpp"`).
 
@@ -108,3 +113,34 @@ Runs one initial reverse J-V scan (using `scan_start_v`, `scan_end_v`, `scan_ste
 ```
 
 Pre-bias is applied **between** the forward and reverse illuminated scans only.
+
+### Scan rate mode
+
+The Instrument Settings tab has a toggle between two modes:
+- **Advanced** (default): delay entered manually; scan rate is a read-only calculated field.
+- **Scan rate**: user enters target mV/s; delay is auto-calculated as `(step_mV / rate × 1000) − NPLC × 16.7 − 50 ms` (clamped ≥ 0). `⚠` is appended to the displayed rate when delay was clamped to 0.
+
+Both modes use 50 ms as the GPIB overhead constant so they round-trip consistently.
+
+### Auto-update system
+
+`app/utils/updater.py` fetches `version.json` from the GitHub raw URL in a background daemon thread. Called silently 3 s after startup (`root.after(3000, ...)`), and explicitly via **Help → Check for Updates**. Network/import failures are silenced in the background check and reported in the explicit check.
+
+### Distribution
+
+- `launcher.vbs` — runs `pythonw.exe main.py` with window style 0 (no CMD window). Used by installer shortcuts.
+- `launcher.bat` — runs with a visible CMD window; kept for developer use.
+- `install.bat` — runs `pip install -r requirements.txt`; executed post-install by the Inno Setup wizard.
+- To build the installer: open `build_installer/setup.iss` in Inno Setup 6 and compile. Output goes to `dist/`.
+
+### Releasing a new version
+
+1. Update `version.json` (version, release_date, release_notes)
+2. Update `CHANGELOG.md`
+3. Update `APP_VERSION` in `app/utils/constants.py`
+4. Commit, push, create a GitHub Release tagged `vX.Y.Z`
+5. Optionally attach the compiled installer `.exe` to the release
+
+### Matplotlib layout note
+
+`mpp_fig` and `pmpp_fig` use `constrained_layout=True` (set at figure creation) because they contain `GridSpec` subplots with column-spanning axes. Do **not** call `tight_layout()` on these figures — it conflicts with `constrained_layout` and produces warnings. `stab_fig` does not use `constrained_layout` and still uses `tight_layout()` normally.
