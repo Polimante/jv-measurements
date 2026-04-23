@@ -2949,7 +2949,7 @@ class JVMeasurementApp:
 
         self.mpp_canvas.draw_idle()
 
-    def _mpp_on_complete(self, cycles, spo_time, spo_j, spo_pce):
+    def _mpp_on_complete(self, cycles, spo_time, spo_j, spo_pce, spo_cycle_idx=None):
         self._measurement_running = False
         self.mpp_start_btn.config(state=NORMAL)
         self.mpp_stop_btn.config(state=DISABLED)
@@ -2961,7 +2961,7 @@ class JVMeasurementApp:
                 self.mpp_export_folder_var.get(),
                 self.mpp_sample_name_var.get() or "sample",
                 cycles, spo_time, spo_j, spo_pce,
-                spo_cycle_idx=getattr(self, "_mpp_spo_cycle_idx", []) or [],
+                spo_cycle_idx=spo_cycle_idx or [],
                 cell_area=self.mpp_cell_area_var.get(),
                 illumination=float(self.mpp_illumination_var.get()),
                 nplc=self.mpp_nplc_var.get(),

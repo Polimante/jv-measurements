@@ -157,7 +157,8 @@ class MPPTracker:
                 pass
             self.callbacks["on_status"]("MPP Tracking complete.")
             self.callbacks["on_complete"](
-                self.cycles, self.spo_time, self.spo_j, self.spo_pce)
+                self.cycles, self.spo_time, self.spo_j, self.spo_pce,
+                self.spo_cycle_idx)
 
     # ── Instrument helpers ────────────────────────────────────────────────────
 
