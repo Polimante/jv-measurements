@@ -1,8 +1,9 @@
 {
-    "version": "2.5.0",
-    "release_date": "2025-04-17",
-    "release_notes": "Initial public release. Features: J-V measurement with forward/reverse scan, MPP Tracking (JV-SPO cycling protocol), Pure MPP Tracking (Perturb-and-Observe), Stabilized Current measurement, interactive plot with session history, scan rate direct input mode.",
+    "version": "2.6.0",
+    "release_date": "2026-04-23",
+    "release_notes": "Data Curation overhaul: composition groups for per-group statistical comparison, Raw Data Preview tab, redesigned Statistics sheet (per-group Mean/Std/CV%, champion cells per group, per-group hysteresis summary). Auto-update now applies in-place without reinstalling.",
     "minimum_python": "3.9",
-    "download_url": "https://github.com/Polimante/jv-measurements/releases/latest",
+    "zip_url": "https://github.com/Polimante/jv-measurements/archive/refs/tags/v2.6.0.zip",
+    "download_url": "https://github.com/Polimante/jv-measurements/releases/tag/v2.6.0",
     "changelog_url": "https://github.com/Polimante/jv-measurements/blob/main/CHANGELOG.md"
 }
