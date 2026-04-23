@@ -1,7 +1,7 @@
 # JV Measurements
 
 Solar cell J-V characterization software for perovskite photovoltaics research.
-Developed at UFABC — Universidade Federal do ABC, Santo André, SP, Brazil.
+Developed by Lucas Polimante for PoloGroup at UFABC — Universidade Federal do ABC.
 
 ## Installation (lab users)
 
