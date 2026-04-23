@@ -3,14 +3,14 @@
 ; Build: Open this file in Inno Setup Compiler and click Build â†’ Compile
 
 #define AppName "JV Measurements"
-#define AppVersion "2.5.0"
+#define AppVersion "2.6.0"
 #define AppPublisher "UFABC â€” Lucas Polimante"
 #define AppURL "https://github.com/Polimante/jv-measurements"
 
 [Setup]
 AppId={{8F3A2B1C-4D5E-6F7A-8B9C-0D1E2F3A4B5C}
 AppName=JV Measurements
-AppVersion=2.5.0
+AppVersion=2.6.0
 AppPublisher=UFABC - Lucas Polimante
 AppPublisherURL=https://github.com/Polimante/jv-measurements
 DefaultDirName={autopf}\JV Measurements
