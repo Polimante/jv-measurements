@@ -16,7 +16,8 @@ AppPublisherURL=https://github.com/Polimante/jv-measurements
 DefaultDirName={autopf}\JV Measurements
 DefaultGroupName=JV Measurements
 OutputDir=..\dist
-OutputBaseFilename=JV-Measurements-Setup-v2.5.0
+OutputBaseFilename=JV-Measurements-Setup-v2.6.0
+SetupIconFile=..\assets\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -32,16 +33,18 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "..\*.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs
+Source: "..\assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\version.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\launcher.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\install.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\JV Measurements"; Filename: "{app}\launcher.bat"; WorkingDir: "{app}"
+Name: "{group}\JV Measurements"; Filename: "{app}\launcher.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\icon.ico"
 Name: "{group}\Uninstall JV Measurements"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\JV Measurements"; Filename: "{app}\launcher.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{commondesktop}\JV Measurements"; Filename: "{app}\launcher.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\icon.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\install.bat"; Description: "Install Python dependencies"; Flags: postinstall shellexec skipifsilent
