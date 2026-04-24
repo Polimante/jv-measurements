@@ -238,10 +238,14 @@
       margin-left: 6px;
       vertical-align: middle;
     }
-    .mode-badge.jv     { background: #1565C0; }
-    .mode-badge.stab   { background: #1B5E20; }
-    .mode-badge.mpp    { background: #006064; }
-    .mode-badge.pmpp   { background: #4A148C; }
+    .mode-badge.jv       { background: #1565C0; }
+    .mode-badge.stab     { background: #1B5E20; }
+    .mode-badge.mpp      { background: #006064; }
+    .mode-badge.pmpp     { background: #4A148C; }
+    .mode-badge.curation { background: #6d4c41; }
+
+    /* ── SVG Flowcharts ─────────────────────────────────────────────────── */
+    .flow-svg { display: block; margin: 18px auto; max-width: 100%; overflow: visible; }
 
     /* ── Sequence flow ──────────────────────────────────────────────────── */
     .seq-flow {
@@ -275,7 +279,7 @@
 <aside id="sidebar">
   <div class="sidebar-header">
     <h3>User Documentation</h3>
-    <p>JV Measurement v3.0</p>
+    <p>JV Measurement v2.6.0</p>
   </div>
   <nav>
     <ul>
@@ -299,16 +303,17 @@
       <li><a href="#dark-jv">15. Dark J-V Measurement</a></li>
 
       <div class="sidebar-group">Data &amp; Analysis</div>
-      <li><a href="#data-viewer">16. Data Viewer</a></li>
-      <li><a href="#excel-format">17. Excel File Format</a></li>
-      <li><a href="#results">18. Understanding J-V Results</a></li>
-      <li><a href="#pv-parameters">19. Photovoltaic Parameters</a></li>
-      <li><a href="#circuit-model">20. Equivalent Circuit Model</a></li>
-      <li><a href="#hysteresis">21. Hysteresis in Perovskites</a></li>
+      <li><a href="#data-curation">16. Data Curation</a></li>
+      <li><a href="#data-viewer">17. Data Viewer</a></li>
+      <li><a href="#excel-format">18. Excel File Format</a></li>
+      <li><a href="#results">19. Understanding J-V Results</a></li>
+      <li><a href="#pv-parameters">20. Photovoltaic Parameters</a></li>
+      <li><a href="#circuit-model">21. Equivalent Circuit Model</a></li>
+      <li><a href="#hysteresis">22. Hysteresis in Perovskites</a></li>
 
       <div class="sidebar-group">Support</div>
-      <li><a href="#troubleshooting">22. Troubleshooting</a></li>
-      <li><a href="#references">23. References</a></li>
+      <li><a href="#troubleshooting">23. Troubleshooting</a></li>
+      <li><a href="#references">24. References</a></li>
     </ul>
   </nav>
 </aside>
@@ -320,7 +325,7 @@
 
   <div id="page-header">
     <h1>JV Measurement Software — User Documentation</h1>
-    <p class="subtitle">Version 3.0 | Open-source characterization tool for perovskite solar cells</p>
+    <p class="subtitle">Version 2.6.0 | Open-source characterization tool for perovskite solar cells</p>
     <p class="author-line">Developed by Lucas Polimante — Universidade Federal do ABC (UFABC)</p>
   </div>
 
@@ -345,27 +350,33 @@
       <tbody>
         <tr>
           <td><strong>J-V Measurement</strong></td>
-          <td><code>Alt+F3</code></td>
+          <td><code>Alt+F2</code></td>
           <td>Forward and reverse voltage sweeps; extracts V<sub>oc</sub>, J<sub>sc</sub>,
               FF, PCE, R<sub>s</sub>, R<sub>sh</sub>, and Hysteresis Index (HI)</td>
         </tr>
         <tr>
-          <td><strong>Stabilized Current</strong></td>
-          <td><code>Alt+F4</code></td>
-          <td>Holds cell at a fixed voltage and records current density over time; reports
-              quasi-steady-state PCE and detects the stabilization point</td>
-        </tr>
-        <tr>
           <td><strong>MPP Tracking (JV-SPO)</strong></td>
-          <td><code>Alt+F5</code></td>
+          <td><code>Alt+F3</code></td>
           <td>Cyclic J-V scans followed by Stabilized Power Output (SPO) phases at V<sub>mpp</sub>;
               tracks efficiency evolution over time with periodic J-V diagnostics</td>
+        </tr>
+        <tr>
+          <td><strong>Stabilized Current</strong></td>
+          <td><code>Alt+F5</code></td>
+          <td>Holds cell at a fixed voltage and records current density over time; reports
+              quasi-steady-state PCE and detects the stabilization point</td>
         </tr>
         <tr>
           <td><strong>Pure MPP Tracking (P&amp;O)</strong></td>
           <td><code>Alt+F6</code></td>
           <td>Continuous Perturb-and-Observe maximum power point tracking; records V<sub>mpp</sub>,
               J, and PCE at every time step with no interruptions for J-V scans</td>
+        </tr>
+        <tr>
+          <td><strong>Data Curation</strong></td>
+          <td><code>Alt+F7</code></td>
+          <td>Batch analysis of multiple saved J-V files; applies quality thresholds, groups
+              devices by composition, and exports curated statistics ready for Origin box plots</td>
         </tr>
       </tbody>
     </table>
@@ -384,10 +395,15 @@
           diagnostics) and pure P&amp;O continuous tracking</li>
       <li><strong>Data Viewer</strong> window for opening and plotting any previously saved
           Excel file, with metadata panel and interactive legend</li>
+      <li><strong>Data Curation</strong> (Alt+F7) — batch analysis of multiple J-V files with
+          composition grouping, configurable pass/fail thresholds, per-group statistics, champion
+          cell identification, and hysteresis summary; exports multi-sheet Excel ready for Origin</li>
       <li>All data exported to <strong>Excel (.xlsx)</strong> using a unified
           row1=headers / row2=metadata / row3+=data layout compatible with downstream analysis</li>
-      <li><strong>Scan rate display</strong> (mV/s) calculated in real time from the
-          configured delay, NPLC, and step voltage</li>
+      <li><strong>Scan rate input</strong> — toggle between Advanced mode (enter delay directly)
+          and Scan Rate mode (enter mV/s target, delay auto-calculated)</li>
+      <li><strong>Auto-update</strong> via Help → Check for Updates — downloads and applies the
+          latest release in place without reinstalling</li>
       <li>Built with <strong>Python/Tkinter</strong> — runs on Windows 10/11 without MATLAB or LabVIEW</li>
     </ul>
 
@@ -526,6 +542,21 @@
       The software stores no data outside the project folder and makes no registry entries.
       To uninstall, simply delete the project folder.
     </div>
+
+    <h3>Automatic updates</h3>
+    <p>The software checks for a newer version automatically 3 seconds after startup (silently, in
+       the background) and can also be triggered manually via <strong>Help → Check for Updates</strong>.</p>
+    <p>When a newer version is available, a dialog offers to download and apply it automatically.
+       The update is downloaded as a ZIP archive from GitHub Releases and extracted directly over
+       the installation directory — no reinstallation or re-running of <code>install.bat</code>
+       required. Only updated files are overwritten; measurement output files saved in custom
+       folders are never affected.</p>
+    <div class="info-box">
+      <div class="box-label">ℹ Requires internet connection</div>
+      The update check and download require a working internet connection.
+      If the check fails (no internet or GitHub unreachable), the background check is silently
+      skipped. An error message is shown only when triggered manually via Help → Check for Updates.
+    </div>
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
@@ -575,26 +606,33 @@
        buttons are disabled. White text = instrument identified; measurement can proceed.</p>
 
     <h3>Mode switching</h3>
-    <p>Four modes are accessible from the <strong>Mode</strong> menu or via keyboard shortcuts
-       (Alt+F3 through Alt+F6). Each mode reveals its own panel of controls in the left pane.
+    <p>Five modes are accessible from the <strong>Mode</strong> menu or via keyboard shortcuts
+       (Alt+F2, F3, F5, F6, F7). Each mode reveals its own panel of controls in the left pane.
        Only one mode can be active at a time. Switching mode does not disconnect the instrument.</p>
 
-    <h3>J-V mode panel (<code>Alt+F3</code>)</h3>
+    <h3>J-V mode panel (<code>Alt+F2</code>)</h3>
     <p>Sample name, export folder, voltage sweep parameters, cell area, instrument settings,
        illumination input, pre-bias conditioning, and dark J-V option. Contains the main
        J-V plot area and measurement log.</p>
 
-    <h3>Stabilized Current panel (<code>Alt+F4</code>)</h3>
-    <p>Sample name, export folder, cell area, applied voltage, illumination, duration, reading
-       interval, and stabilization threshold. Contains a live dual-axis plot (J and PCE vs time).</p>
-
-    <h3>MPP Tracking panel (<code>Alt+F5</code>)</h3>
+    <h3>MPP Tracking panel (<code>Alt+F3</code>)</h3>
     <p>Sample name, export folder, cell area, scan parameters, pre-bias option, illumination,
        total duration, SPO duration per cycle. Contains SPO plot and J-V per cycle overlay.</p>
+
+    <h3>Stabilized Current panel (<code>Alt+F5</code>)</h3>
+    <p>Sample name, export folder, cell area, applied voltage, illumination, duration, reading
+       interval, and stabilization threshold. Contains a live dual-axis plot (J and PCE vs time).</p>
 
     <h3>Pure MPP Tracking panel (<code>Alt+F6</code>)</h3>
     <p>Sample name, export folder, cell area, perturbation step, interval, NPLC, delay,
        illumination, and initial scan parameters. Contains dual-axis plot (PCE and V<sub>mpp</sub>).</p>
+
+    <h3>Data Curation panel (<code>Alt+F7</code>)</h3>
+    <p>Multi-file batch analysis tool. Four tabs: <strong>Files</strong> (load .xlsx files),
+       <strong>Groups</strong> (define composition groups), <strong>Thresholds</strong> (set
+       minimum quality thresholds), and <strong>Output</strong> (export filename and folder).
+       The right panel shows a Raw Data Preview for the selected file and a summary table of all
+       loaded cells with pass/fail coloring.</p>
 
     <h3>File menu</h3>
     <ul>
@@ -647,6 +685,13 @@
           <td>Continuous PCE and V<sub>mpp</sub> vs time</td>
           <td>Certified stabilized efficiency reporting; no J-V scan interruptions</td>
         </tr>
+        <tr>
+          <td><strong>Data Curation</strong></td>
+          <td>seconds</td>
+          <td>Multi-sheet Excel with per-group statistics and composition comparisons</td>
+          <td>After collecting data from multiple devices; batch parameter extraction and statistical
+              comparison between compositions; preparation of Origin-ready data for publication</td>
+        </tr>
       </tbody>
     </table>
 
@@ -662,7 +707,7 @@
        8. J-V MEASUREMENT PARAMETERS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="jv-params">
-    <h2>8. J-V Measurement Parameters <span class="mode-badge jv">Alt+F3</span></h2>
+    <h2>8. J-V Measurement Parameters <span class="mode-badge jv">Alt+F2</span></h2>
 
     <div class="param-block">
       <div class="param-name">Start Voltage (V)</div>
@@ -759,11 +804,29 @@
     </div>
 
     <div class="param-block">
-      <div class="param-name">Scan Rate (mV/s) — read-only display</div>
-      <p style="margin-top:8px;">Calculated automatically from Step, Delay, and NPLC and displayed
-         in the panel. Updates in real time as parameters are changed. This value is written to
-         column AA of the Excel output and is shown in the Data Viewer metadata panel.
-         Use it to ensure consistent scan rates across a measurement series.</p>
+      <div class="param-name">Scan Rate Input Mode</div>
+      <p style="margin-top:8px;">The Instrument Settings panel provides two complementary ways to
+         control measurement timing:</p>
+      <ul style="margin-top:8px;">
+        <li><strong>Advanced mode (default):</strong> enter <em>Delay per point</em> directly
+            (milliseconds). The <em>Scan Rate (mV/s)</em> field is computed automatically and
+            shown read-only, so you can verify the effective rate at a glance without arithmetic.</li>
+        <li><strong>Scan Rate mode:</strong> click the <strong>Scan Rate →</strong> toggle button
+            to switch. Enter a target scan rate in mV/s; the software back-calculates the delay as:
+            <pre>delay = (step_mV / rate_mV_s × 1000) − NPLC × 16.7 − 50 ms</pre>
+            The 50 ms constant accounts for GPIB overhead. The result is clamped to 0 ms when the
+            formula yields a negative value. A <code>⚠</code> symbol is appended to the displayed
+            scan rate when the delay was clamped, indicating the hardware cannot sustain the
+            requested rate and the actual effective rate will be slightly slower.</li>
+      </ul>
+      <p style="margin-top:8px;">Both modes write the same parameters to the Excel output:
+         Delay per point → column U; Scan Rate → column AA.</p>
+      <div class="tip-box">
+        <div class="box-label">Tip — scan rate consistency</div>
+        When comparing hysteresis across multiple cells or experiments, always use the same scan
+        rate. Enter the target rate in Scan Rate mode to guarantee identical effective rates
+        regardless of which step size you choose.
+      </div>
     </div>
   </section>
 
@@ -820,7 +883,7 @@
        11. RUNNING A J-V MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="running-jv">
-    <h2>11. Running a J-V Measurement <span class="mode-badge jv">Alt+F3</span></h2>
+    <h2>11. Running a J-V Measurement <span class="mode-badge jv">Alt+F2</span></h2>
 
     <h3>Measurement sequence (automated)</h3>
     <div class="seq-flow">
@@ -838,12 +901,63 @@
     </div>
     <p style="margin-top:8px;">Steps in grey are optional (can be enabled/disabled independently).</p>
 
+    <h3>Measurement flowchart</h3>
+    <svg class="flow-svg" width="700" height="310" viewBox="0 0 700 310" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr-jv" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 Z" fill="#555"/>
+        </marker>
+      </defs>
+      <!-- Row 1: Start and Dark J-V -->
+      <rect x="10" y="10" width="90" height="34" rx="17" fill="#1565C0"/>
+      <text x="55" y="27" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">START</text>
+      <line x1="100" y1="27" x2="124" y2="27" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="124" y="10" width="130" height="34" rx="4" fill="#7f8c8d"/>
+      <text x="189" y="27" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Dark J-V fwd+rev</text>
+      <text x="189" y="52" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#555">(optional)</text>
+      <line x1="254" y1="27" x2="278" y2="27" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="278" y="10" width="130" height="34" rx="4" fill="#34495e"/>
+      <text x="343" y="27" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Open shutter</text>
+      <line x1="408" y1="27" x2="432" y2="27" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="432" y="10" width="130" height="34" rx="4" fill="#7f8c8d"/>
+      <text x="497" y="27" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Light soaking</text>
+      <text x="497" y="52" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#555">(optional)</text>
+      <!-- Connector down-right -->
+      <line x1="562" y1="27" x2="620" y2="27" stroke="#555" stroke-width="1.5"/>
+      <line x1="620" y1="27" x2="620" y2="100" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <!-- Row 2: Fwd scan -->
+      <rect x="490" y="100" width="130" height="34" rx="4" fill="#34495e"/>
+      <text x="555" y="117" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Fwd scan</text>
+      <line x1="490" y1="117" x2="466" y2="117" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="336" y="100" width="130" height="34" rx="4" fill="#7f8c8d"/>
+      <text x="401" y="117" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Pre-bias hold</text>
+      <text x="401" y="142" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#555">(optional)</text>
+      <line x1="336" y1="117" x2="312" y2="117" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="182" y="100" width="130" height="34" rx="4" fill="#34495e"/>
+      <text x="247" y="117" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Rev scan</text>
+      <!-- Arrow down to extract -->
+      <line x1="247" y1="134" x2="247" y2="158" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="140" y="158" width="215" height="34" rx="4" fill="#1565C0"/>
+      <text x="247" y="175" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Extract Voc, Jsc, FF, PCE, Rs, Rsh, HI</text>
+      <line x1="247" y1="192" x2="247" y2="216" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="140" y="216" width="215" height="34" rx="4" fill="#34495e"/>
+      <text x="247" y="233" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Save Excel + update plot</text>
+      <line x1="247" y1="250" x2="247" y2="274" stroke="#555" stroke-width="1.5" marker-end="url(#arr-jv)"/>
+      <rect x="197" y="274" width="100" height="34" rx="17" fill="#1565C0"/>
+      <text x="247" y="291" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">END</text>
+      <!-- Legend -->
+      <rect x="10" y="240" width="14" height="14" rx="2" fill="#34495e"/>
+      <text x="28" y="252" font-family="Segoe UI,Arial,sans-serif" font-size="11" fill="#333">Required step</text>
+      <rect x="10" y="262" width="14" height="14" rx="2" fill="#7f8c8d"/>
+      <text x="28" y="274" font-family="Segoe UI,Arial,sans-serif" font-size="11" fill="#333">Optional step</text>
+    </svg>
+
     <h3>Step-by-step procedure</h3>
     <ol>
       <li>Turn on the Keithley 2400 and solar simulator. Allow the lamp to warm up
           <strong>≥15–30 minutes</strong> before taking measurements.</li>
       <li>Connect the instrument: <strong>Instrument → Connect…</strong></li>
-      <li>Select mode <strong>J-V Measurement</strong> (Alt+F3) if not already active.</li>
+      <li>Select mode <strong>J-V Measurement</strong> (Alt+F2) if not already active.</li>
       <li>Enter <strong>Sample Name</strong> and select <strong>Export Folder</strong>.</li>
       <li>Place the reference detector at the sample position and measure optical power.
           Enter the reading in <strong>Detector Power (mW)</strong>. Verify
@@ -865,7 +979,7 @@
        12. STABILIZED CURRENT MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="stab">
-    <h2>12. Stabilized Current Measurement <span class="mode-badge stab">Alt+F4</span></h2>
+    <h2>12. Stabilized Current Measurement <span class="mode-badge stab">Alt+F5</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -914,18 +1028,55 @@
        vs time in seconds. A vertical dashed green line is drawn at the detected stabilization time.
        The plot updates in real time during the measurement.</p>
 
-    <h3>Measurement sequence</h3>
-    <div class="seq-flow">
-      <div class="seq-step">Apply voltage</div>
-      <div class="seq-arrow">→</div>
-      <div class="seq-step">Read J every interval</div>
-      <div class="seq-arrow">→</div>
-      <div class="seq-step">Detect stabilization</div>
-      <div class="seq-arrow">→</div>
-      <div class="seq-step">Complete at duration</div>
-      <div class="seq-arrow">→</div>
-      <div class="seq-step">Output OFF, save Excel</div>
-    </div>
+    <h3>Measurement flowchart</h3>
+    <svg class="flow-svg" width="680" height="360" viewBox="0 0 680 360" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr-stab" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 Z" fill="#555"/>
+        </marker>
+      </defs>
+      <!-- START -->
+      <rect x="270" y="10" width="100" height="34" rx="17" fill="#1B5E20"/>
+      <text x="320" y="27" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">START</text>
+      <line x1="320" y1="44" x2="320" y2="64" stroke="#555" stroke-width="1.5" marker-end="url(#arr-stab)"/>
+      <!-- Apply voltage -->
+      <rect x="200" y="64" width="240" height="34" rx="4" fill="#34495e"/>
+      <text x="320" y="81" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Apply constant voltage V</text>
+      <line x1="320" y1="98" x2="320" y2="118" stroke="#555" stroke-width="1.5" marker-end="url(#arr-stab)"/>
+      <!-- Read J -->
+      <rect x="200" y="118" width="240" height="34" rx="4" fill="#34495e"/>
+      <text x="320" y="135" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Read J  →  PCE = J × V / P_in</text>
+      <line x1="320" y1="152" x2="320" y2="172" stroke="#555" stroke-width="1.5" marker-end="url(#arr-stab)"/>
+      <!-- Decision: stabilized? -->
+      <polygon points="320,172 440,200 320,228 200,200" fill="#1B5E20"/>
+      <text x="320" y="196" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Stabilized?</text>
+      <text x="320" y="212" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="9">(ΔJ/Δt &lt; threshold)</text>
+      <!-- YES → mark on plot -->
+      <line x1="440" y1="200" x2="530" y2="200" stroke="#555" stroke-width="1.5" marker-end="url(#arr-stab)"/>
+      <text x="484" y="192" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#27ae60" font-weight="700">YES</text>
+      <rect x="530" y="183" width="140" height="34" rx="4" fill="#27ae60"/>
+      <text x="600" y="200" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Mark stabilization</text>
+      <!-- NO → continues -->
+      <line x1="320" y1="228" x2="320" y2="256" stroke="#555" stroke-width="1.5" marker-end="url(#arr-stab)"/>
+      <text x="330" y="245" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#c0392b" font-weight="700">NO</text>
+      <!-- Decision: time done? -->
+      <polygon points="320,256 440,284 320,312 200,284" fill="#006064"/>
+      <text x="320" y="280" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Time ≥ duration?</text>
+      <text x="320" y="296" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="9">(elapsed ≥ total_s)</text>
+      <!-- YES → stop -->
+      <line x1="440" y1="284" x2="530" y2="284" stroke="#555" stroke-width="1.5" marker-end="url(#arr-stab)"/>
+      <text x="484" y="276" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#27ae60" font-weight="700">YES</text>
+      <rect x="530" y="267" width="140" height="34" rx="4" fill="#1B5E20"/>
+      <text x="600" y="284" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Output OFF, save</text>
+      <!-- NO → loop back to Read J -->
+      <line x1="320" y1="312" x2="320" y2="330" stroke="#555" stroke-width="1.5"/>
+      <line x1="320" y1="330" x2="150" y2="330" stroke="#555" stroke-width="1.5"/>
+      <line x1="150" y1="330" x2="150" y2="135" stroke="#555" stroke-width="1.5"/>
+      <line x1="150" y1="135" x2="200" y2="135" stroke="#555" stroke-width="1.5" marker-end="url(#arr-stab)"/>
+      <text x="90" y="235" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#c0392b" font-weight="700">NO</text>
+      <text x="90" y="248" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#555">wait</text>
+      <text x="90" y="261" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#555">interval</text>
+    </svg>
 
     <div class="tip-box">
       <div class="box-label">Tip</div>
@@ -939,7 +1090,7 @@
        13. MPP TRACKING — JV-SPO CYCLING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="mpp">
-    <h2>13. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F5</span></h2>
+    <h2>13. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F3</span></h2>
 
     <h3>Protocol overview</h3>
     <p>
@@ -1010,7 +1161,56 @@
        Use <strong>Pure MPP (P&amp;O)</strong> when you need continuous uninterrupted tracking
        without the perturbation of J-V scans.</p>
 
-    <div class="img-placeholder">INSERT IMAGE: MPP Tracking plot showing SPO PCE over time with cycle boundaries</div>
+    <h3>Cycling flowchart</h3>
+    <svg class="flow-svg" width="680" height="380" viewBox="0 0 680 380" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr-mpp" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 Z" fill="#555"/>
+        </marker>
+      </defs>
+      <!-- START -->
+      <rect x="270" y="10" width="100" height="34" rx="17" fill="#006064"/>
+      <text x="320" y="27" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">START</text>
+      <line x1="320" y1="44" x2="320" y2="64" stroke="#555" stroke-width="1.5" marker-end="url(#arr-mpp)"/>
+      <!-- Fwd scan (optional) -->
+      <rect x="200" y="64" width="240" height="34" rx="4" fill="#7f8c8d"/>
+      <text x="320" y="81" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Fwd J-V scan (optional)</text>
+      <line x1="320" y1="98" x2="320" y2="118" stroke="#555" stroke-width="1.5" marker-end="url(#arr-mpp)"/>
+      <!-- Pre-bias (optional) -->
+      <rect x="200" y="118" width="240" height="34" rx="4" fill="#7f8c8d"/>
+      <text x="320" y="135" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Pre-bias hold (optional)</text>
+      <line x1="320" y1="152" x2="320" y2="172" stroke="#555" stroke-width="1.5" marker-end="url(#arr-mpp)"/>
+      <!-- Rev scan -->
+      <rect x="200" y="172" width="240" height="34" rx="4" fill="#34495e"/>
+      <text x="320" y="189" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Rev J-V scan → extract V_mpp</text>
+      <line x1="320" y1="206" x2="320" y2="226" stroke="#555" stroke-width="1.5" marker-end="url(#arr-mpp)"/>
+      <!-- SPO phase -->
+      <rect x="200" y="226" width="240" height="34" rx="4" fill="#006064"/>
+      <text x="320" y="243" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">SPO phase at V_mpp (SPO duration)</text>
+      <line x1="320" y1="260" x2="320" y2="284" stroke="#555" stroke-width="1.5" marker-end="url(#arr-mpp)"/>
+      <!-- Decision: time done? -->
+      <polygon points="320,284 430,312 320,340 210,312" fill="#34495e"/>
+      <text x="320" y="312" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Total time done?</text>
+      <!-- YES → END -->
+      <line x1="430" y1="312" x2="540" y2="312" stroke="#555" stroke-width="1.5" marker-end="url(#arr-mpp)"/>
+      <text x="484" y="304" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#27ae60" font-weight="700">YES</text>
+      <rect x="540" y="296" width="130" height="34" rx="4" fill="#006064"/>
+      <text x="605" y="313" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Output OFF, save</text>
+      <!-- NO → next cycle -->
+      <line x1="320" y1="340" x2="320" y2="358" stroke="#555" stroke-width="1.5"/>
+      <line x1="320" y1="358" x2="110" y2="358" stroke="#555" stroke-width="1.5"/>
+      <line x1="110" y1="358" x2="110" y2="81" stroke="#555" stroke-width="1.5"/>
+      <line x1="110" y1="81" x2="200" y2="81" stroke="#555" stroke-width="1.5" marker-end="url(#arr-mpp)"/>
+      <text x="65" y="225" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#c0392b" font-weight="700">NO</text>
+      <text x="65" y="240" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#555">next cycle</text>
+      <!-- Legend -->
+      <rect x="10" y="290" width="14" height="14" rx="2" fill="#34495e"/>
+      <text x="28" y="302" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#333">Required</text>
+      <rect x="10" y="310" width="14" height="14" rx="2" fill="#7f8c8d"/>
+      <text x="28" y="322" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#333">Optional</text>
+      <rect x="10" y="330" width="14" height="14" rx="2" fill="#006064"/>
+      <text x="28" y="342" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#333">SPO phase</text>
+    </svg>
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
@@ -1086,14 +1286,83 @@
       stabilized power conversion efficiency [Khenkin et al., 2020].
     </div>
 
-    <div class="img-placeholder">INSERT IMAGE: Pure MPP plot showing PCE and Vmpp tracking over time</div>
+    <h3>P&amp;O algorithm flowchart</h3>
+    <svg class="flow-svg" width="700" height="500" viewBox="0 0 700 500" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr-po" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 Z" fill="#555"/>
+        </marker>
+      </defs>
+      <!-- START -->
+      <rect x="265" y="10" width="110" height="34" rx="17" fill="#4A148C"/>
+      <text x="320" y="27" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="700">START</text>
+      <line x1="320" y1="44" x2="320" y2="64" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <!-- Init Rev scan -->
+      <rect x="185" y="64" width="270" height="34" rx="4" fill="#34495e"/>
+      <text x="320" y="81" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Initial reverse J-V scan</text>
+      <line x1="320" y1="98" x2="320" y2="118" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <!-- Find Vmpp -->
+      <rect x="185" y="118" width="270" height="34" rx="4" fill="#34495e"/>
+      <text x="320" y="135" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Find V_mpp  (argmax P = V × J)</text>
+      <line x1="320" y1="152" x2="320" y2="172" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <!-- Apply Vmpp -->
+      <rect x="185" y="172" width="270" height="34" rx="4" fill="#34495e"/>
+      <text x="320" y="189" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Apply V_mpp,  wait 200 ms  (t = 0)</text>
+      <!-- P&O loop box border -->
+      <rect x="20" y="215" width="650" height="215" rx="6" fill="none" stroke="#4A148C" stroke-width="1.5" stroke-dasharray="5,3"/>
+      <text x="35" y="232" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#4A148C" font-weight="700">P&amp;O LOOP</text>
+      <line x1="320" y1="206" x2="320" y2="240" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <!-- Read J + P -->
+      <rect x="185" y="240" width="270" height="34" rx="4" fill="#4A148C"/>
+      <text x="320" y="257" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Read J  →  P = V × J  →  record PCE</text>
+      <line x1="320" y1="274" x2="320" y2="298" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <!-- Decision diamond: P > Pprev? -->
+      <polygon points="320,298 440,326 320,354 200,326" fill="#006064"/>
+      <text x="320" y="322" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">P &gt; P_prev?</text>
+      <text x="320" y="338" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="9">(first step skips)</text>
+      <!-- YES → keep direction -->
+      <line x1="440" y1="326" x2="530" y2="326" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <text x="484" y="318" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#27ae60" font-weight="700">YES</text>
+      <rect x="530" y="309" width="120" height="34" rx="4" fill="#34495e"/>
+      <text x="590" y="326" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Keep direction</text>
+      <!-- NO → reverse -->
+      <line x1="200" y1="326" x2="110" y2="326" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <text x="156" y="318" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#c0392b" font-weight="700">NO</text>
+      <rect x="30" y="309" width="120" height="34" rx="4" fill="#34495e"/>
+      <text x="90" y="326" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Reverse direction</text>
+      <!-- Both paths → Apply V+step -->
+      <line x1="90" y1="343" x2="90" y2="390" stroke="#555" stroke-width="1.5"/>
+      <line x1="590" y1="343" x2="590" y2="390" stroke="#555" stroke-width="1.5"/>
+      <line x1="90" y1="390" x2="220" y2="390" stroke="#555" stroke-width="1.5"/>
+      <line x1="590" y1="390" x2="420" y2="390" stroke="#555" stroke-width="1.5"/>
+      <line x1="320" y1="354" x2="320" y2="390" stroke="#555" stroke-width="1.5"/>
+      <line x1="220" y1="390" x2="265" y2="390" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <rect x="185" y="374" width="270" height="34" rx="4" fill="#34495e"/>
+      <text x="320" y="391" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">V = clamp(V + dir × step,  v_min, v_max)</text>
+      <line x1="320" y1="408" x2="320" y2="425" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <!-- End of loop box -->
+      <!-- Decision: time done? -->
+      <polygon points="320,425 430,453 320,481 210,453" fill="#34495e"/>
+      <text x="320" y="453" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Total time done?</text>
+      <!-- YES → save -->
+      <line x1="430" y1="453" x2="540" y2="453" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <text x="484" y="445" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#27ae60" font-weight="700">YES</text>
+      <rect x="540" y="437" width="130" height="34" rx="4" fill="#4A148C"/>
+      <text x="605" y="454" text-anchor="middle" dominant-baseline="middle" fill="white" font-family="Segoe UI,Arial,sans-serif" font-size="11" font-weight="600">Output OFF, save</text>
+      <!-- NO → loop back (wait interval) -->
+      <line x1="210" y1="453" x2="145" y2="453" stroke="#555" stroke-width="1.5"/>
+      <line x1="145" y1="453" x2="145" y2="257" stroke="#555" stroke-width="1.5"/>
+      <line x1="145" y1="257" x2="185" y2="257" stroke="#555" stroke-width="1.5" marker-end="url(#arr-po)"/>
+      <text x="90" y="358" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="10" fill="#c0392b" font-weight="700">NO</text>
+      <text x="90" y="372" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="9" fill="#555">wait interval</text>
+    </svg>
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
        15. DARK J-V MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="dark-jv">
-    <h2>15. Dark J-V Measurement <span class="mode-badge jv">Alt+F3 (within J-V mode)</span></h2>
+    <h2>15. Dark J-V Measurement <span class="mode-badge jv">Alt+F2 (within J-V mode)</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -1136,10 +1405,152 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       16. DATA VIEWER
+       16. DATA CURATION
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="data-curation">
+    <h2>16. Data Curation <span class="mode-badge curation">Alt+F7</span></h2>
+
+    <p>
+      Data Curation is a post-processing tool for batch analysis of multiple J-V measurement files.
+      It loads any number of previously saved <code>.xlsx</code> files, applies configurable quality
+      thresholds to exclude underperforming devices, organises cells into named composition groups
+      for comparative statistics, and exports a curated multi-sheet Excel workbook ready for
+      analysis in Origin or Excel.
+    </p>
+
+    <h3>Panel layout (four tabs)</h3>
+
+    <div class="param-block">
+      <div class="param-name">Tab 1 — Files</div>
+      <p style="margin-top:8px;">
+        Add individual <code>.xlsx</code> files (created by this software) or load an entire
+        folder at once. Files are listed in a scrollable list. Click any file to preview its raw
+        PV parameters instantly in the <strong>Raw Data Preview</strong> tab on the right.
+        Remove files individually with <strong>Remove Selected</strong>.
+      </p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Tab 2 — Groups</div>
+      <p style="margin-top:8px;">
+        Define named <strong>composition groups</strong> to organize devices by composition,
+        treatment, or processing condition. Each group has a name (e.g., "Control", "Cs-doped")
+        and one or more device prefixes (e.g., "D1", "D2"). Prefixes are matched against the
+        filename stem using the pattern <code>[A-Za-z]+\d+</code>, so "D1_C1.xlsx", "D1C1.xlsx",
+        and "D1_2.xlsx" all match prefix "D1".
+      </p>
+      <p style="margin-top:8px;">
+        Click <strong>Auto-detect Groups</strong> to automatically create groups from the prefixes
+        found in the loaded filenames — useful when files are already named consistently
+        (e.g., A1_001.xlsx, A1_002.xlsx, B1_001.xlsx → groups "A1" and "B1").
+      </p>
+      <p style="margin-top:8px;">
+        If no groups are defined, all loaded cells are treated as a single group in the statistics.
+      </p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Tab 3 — Thresholds</div>
+      <p style="margin-top:8px;">
+        Set <strong>minimum value thresholds</strong> for each PV parameter to exclude
+        low-performing cells from the filtered analysis. Each threshold can be enabled or disabled
+        independently. Cells failing any enabled threshold are highlighted in red in the preview
+        table and excluded from the filtered export sheets.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Parameter</th><th>Threshold type</th><th>Typical value</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PCE (%)</td><td>minimum</td><td>5–10%</td></tr>
+          <tr><td>V<sub>oc</sub> (V)</td><td>minimum</td><td>0.8–1.0 V</td></tr>
+          <tr><td>J<sub>sc</sub> (mA/cm²)</td><td>minimum</td><td>10–15 mA/cm²</td></tr>
+          <tr><td>FF (%)</td><td>minimum</td><td>50–60%</td></tr>
+          <tr><td>R<sub>s</sub> (Ω·cm²)</td><td>minimum (cells below threshold pass)</td><td>e.g. 20</td></tr>
+          <tr><td>R<sub>sh</sub> (Ω·cm²)</td><td>minimum</td><td>100–200</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:8px;">
+        The scan direction to which thresholds are applied can be set to
+        <strong>Forward scan</strong>, <strong>Reverse scan</strong>, or
+        <strong>Both scans independently</strong>.
+      </p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Tab 4 — Output</div>
+      <p style="margin-top:8px;">Enter a base filename and select the export folder, then click
+         <strong>Export Curated Data</strong> to generate the Excel workbook.</p>
+    </div>
+
+    <h3>Output Excel workbook structure</h3>
+    <table>
+      <thead>
+        <tr><th>Sheet</th><th>Contents</th><th>Filter applied</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>Summary</code></td>
+          <td>All loaded cells — V<sub>oc</sub>, J<sub>sc</sub>, FF, PCE, R<sub>s</sub>,
+              R<sub>sh</sub>, HI for both Fwd and Rev scans</td>
+          <td>None — all cells</td>
+        </tr>
+        <tr>
+          <td><code>Filtered</code></td>
+          <td>Same layout as Summary; only cells passing all active thresholds</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td><code>Statistics</code></td>
+          <td>Per-group Mean / Std Dev / CV% / Max tables for Rev and Fwd scans (All and Filtered);
+              champion cell per group (highest Rev PCE); per-group hysteresis summary
+              (N, Mean HI, Std, CV%, % cells with HI &lt;10%, % cells with HI &lt;5%);
+              threshold yield table</td>
+          <td>Both</td>
+        </tr>
+        <tr>
+          <td><code>Rev_All</code>, <code>Rev_Filtered</code></td>
+          <td>One block per PV parameter; one column per composition group. Each column contains
+              the raw values for all cells in that group — reverse scan data.
+              Ready for direct import into Origin for box plots or statistical tests.</td>
+          <td>All / Filtered</td>
+        </tr>
+        <tr>
+          <td><code>Fwd_All</code>, <code>Fwd_Filtered</code></td>
+          <td>Same layout as Rev sheets — forward scan data.</td>
+          <td>All / Filtered</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="tip-box">
+      <div class="box-label">Tip — Origin box plots</div>
+      The Rev_All / Fwd_All sheets are formatted so that one block = one PV parameter, and each
+      column within that block = one composition group. To create a box plot in Origin:
+      select the columns for one parameter block, then <strong>Plot → Statistical → Box Chart</strong>.
+      Each column becomes one box, labeled by group name.
+    </div>
+
+    <h3>Typical workflow</h3>
+    <div class="seq-flow">
+      <div class="seq-step">Load files (Tab 1)</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step optional">Define groups (Tab 2)</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step optional">Set thresholds (Tab 3)</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Set output (Tab 4)</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Export Curated Data</div>
+    </div>
+
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       17. DATA VIEWER
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="data-viewer">
-    <h2>16. Data Viewer</h2>
+    <h2>17. Data Viewer</h2>
 
     <h3>Opening the Data Viewer</h3>
     <p>Go to <strong>File → Open Data File…</strong>. A file dialog opens; select any
@@ -1220,10 +1631,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       17. EXCEL FILE FORMAT
+       18. EXCEL FILE FORMAT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="excel-format">
-    <h2>17. Excel File Format</h2>
+    <h2>18. Excel File Format</h2>
 
     <p>All files use a unified three-row layout for easy programmatic parsing:</p>
     <ul>
@@ -1290,10 +1701,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       18. UNDERSTANDING J-V RESULTS
+       19. UNDERSTANDING J-V RESULTS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="results">
-    <h2>18. Understanding J-V Results</h2>
+    <h2>19. Understanding J-V Results</h2>
 
     <h3>Indicators of a good cell</h3>
     <ul>
@@ -1340,10 +1751,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       19. PHOTOVOLTAIC PARAMETERS
+       20. PHOTOVOLTAIC PARAMETERS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="pv-parameters">
-    <h2>19. Photovoltaic Parameters</h2>
+    <h2>20. Photovoltaic Parameters</h2>
 
     <div class="param-block">
       <div class="param-name">Short-circuit Current Density — J<sub>sc</sub></div>
@@ -1407,10 +1818,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       20. EQUIVALENT CIRCUIT MODEL
+       21. EQUIVALENT CIRCUIT MODEL
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="circuit-model">
-    <h2>20. Equivalent Circuit Model</h2>
+    <h2>21. Equivalent Circuit Model</h2>
 
     <p>The single-diode model represents a solar cell as a photocurrent source in parallel with
        a diode, a shunt resistance, and a series resistance.</p>
@@ -1439,10 +1850,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       21. HYSTERESIS IN PEROVSKITES
+       22. HYSTERESIS IN PEROVSKITES
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="hysteresis">
-    <h2>21. Hysteresis in Perovskite Solar Cells</h2>
+    <h2>22. Hysteresis in Perovskite Solar Cells</h2>
 
     <h3>Physical origin</h3>
     <p>Perovskite absorbers are <strong>mixed ionic-electronic conductors</strong>. Mobile ionic
@@ -1485,10 +1896,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       22. TROUBLESHOOTING
+       23. TROUBLESHOOTING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="troubleshooting">
-    <h2>22. Troubleshooting</h2>
+    <h2>23. Troubleshooting</h2>
 
     <div class="trouble-block">
       <div class="trouble-problem">❌ "No instruments found" in the connection dialog</div>
@@ -1620,7 +2031,7 @@
        23. REFERENCES
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="references">
-    <h2>23. References</h2>
+    <h2>24. References</h2>
 
     <ol class="ref-list">
       <li data-ref="[1]">
