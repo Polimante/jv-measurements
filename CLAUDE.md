@@ -8,7 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python main.py
 ```
 
-There are no tests and no build step. The application is Windows-only (`winsound`, VISA drivers).
+Tests live in `tests/` and run hardware-free. The application itself is Windows-only (`winsound`, VISA drivers).
+
+```bash
+python -m pytest tests/          # run all tests
+python -m pytest tests/test_isos_exporter.py -v   # example: single file
+```
 
 ## Dependencies
 
@@ -36,6 +41,7 @@ app/
     pure_mpp_tracker.py        # PureMPPTracker — Perturb-and-Observe continuous tracking (Alt+F6)
   io/
     exporter.py                # save_data() and save_dark_jv_data() → xlsxwriter
+    isos_exporter.py           # ISOS-D-1 tracking workbook (create / append / read)
   utils/
     constants.py               # APP_NAME, APP_VERSION, global stop_event (threading.Event)
     sound.py                   # play_completion_sound() with playsound / winsound fallback
@@ -92,6 +98,7 @@ Column mapping is documented in `data_viewer.py::_read_illuminated()` and `_read
 | Stabilized Current | Alt+F5 | inline in `main_window.py` |
 | Pure MPP Tracking (P&O) | Alt+F6 | `PureMPPTracker` in `pure_mpp_tracker.py` |
 | Data Curation | Alt+F7 | `switch_mode("curation")` in `main_window.py` |
+| ISOS Protocols (D-1) | Alt+F8 | `run_isos_d1_measurement()` in `main_window.py` |
 
 Mode panels are shown/hidden by `switch_mode()` using `pack()`/`pack_forget()`. The active panel name is stored in `self._current_mode` (`"jv"`, `"mpp"`, `"stab"`, `"pure_mpp"`).
 
@@ -104,6 +111,19 @@ SPO plot uses **accumulated SPO-only time** on the X-axis (J-V scan time is excl
 ### Pure MPP Tracking (P&O) — `pure_mpp_tracker.py`
 
 Runs one initial reverse J-V scan (using `scan_start_v`, `scan_end_v`, `scan_step_v`) to find the real Vmpp, then enters a continuous P&O loop. `t_start` is set after the initial scan so t=0 on the plot corresponds to the start of P&O. Direction reverses whenever power drops. The inter-step sleep is broken into 50 ms chunks so `stop_event` is checked frequently. Callbacks: `on_status`, `on_update(t, v, j, pce)`, `on_jv_done(v_arr, j_arr, vmpp)`, `on_complete`.
+
+### ISOS Protocols (D-1) — `isos_exporter.py` + `main_window.py`
+
+ISOS-D-1 is a light-stability protocol: the cell is measured periodically under illumination while kept at open-circuit between measurements. Each run performs the same sequence as J-V mode (optional dark J-V → shutter prompt → light soaking → fwd scan → pre-bias → rev scan) and then appends one row to a cumulative tracking workbook.
+
+**Tracking file layout** (openpyxl):
+- `ISOS_D1_Config` — experiment metadata (one header row + one data row)
+- `ISOS_D1_Log` — one row per measurement; columns defined in `_LOG_HEADERS`
+- `JV_Fwd_#NNN_tXXXXh` / `JV_Rev_#NNN_tXXXXh` — raw V/J data per measurement
+
+`PCE_fwd_norm` and `PCE_rev_norm` are always relative to the **first** measurement (`t₀`). `elapsed_h` is wall-clock time since `t0_timestamp` stored in the config sheet. Individual backup files are also saved via `save_data()` (standard illuminated J-V format).
+
+The GUI panel (Alt+F8) has three tabs: Experiment (sample name, folder, "New / Load"), Measurement Parameters (voltage range, illumination, scan settings), and Conditions (pre-bias, light soaking). The panel shows a live treeview of the log and two plots: PCE stability (normalized, top) and the latest J-V curves (bottom).
 
 ### Measurement sequence (J-V mode)
 

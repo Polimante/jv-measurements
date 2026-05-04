@@ -45,6 +45,13 @@ from app.io.exporter import (
     save_data, save_dark_jv_data,
     save_stab_current_data, save_pure_mpp_data, save_mpp_data,
 )
+from app.io.isos_exporter import (
+    create_isos_d1_tracking_file,
+    append_isos_d1_measurement,
+    read_isos_d1_config,
+    read_isos_d1_log,
+    read_isos_d1_jv_curves,
+)
 from app.gui.data_viewer import DataViewerWindow
 
 
@@ -63,6 +70,7 @@ class JVMeasurementApp:
         self.instrument_idn  = None
         self.current_mode         = "jv"
         self._measurement_running = False
+        self.isos_tracking_file   = None
 
         self.setup_gui()
         # J-V traces
@@ -450,6 +458,7 @@ class JVMeasurementApp:
         self._build_stab_panel(left, plot_frame)
         self._build_pure_mpp_panel(left, plot_frame)
         self._build_curation_panel(left, plot_frame)
+        self._build_isos_panel(left, plot_frame)
 
         # ── Keyboard shortcuts for mode switching ─────────────────────────────
         self.root.bind("<Alt-F2>", lambda e: self.switch_mode("jv"))
@@ -457,6 +466,7 @@ class JVMeasurementApp:
         self.root.bind("<Alt-F5>", lambda e: self.switch_mode("stab"))
         self.root.bind("<Alt-F6>", lambda e: self.switch_mode("pure_mpp"))
         self.root.bind("<Alt-F7>", lambda e: self.switch_mode("curation"))
+        self.root.bind("<Alt-F8>", lambda e: self.switch_mode("isos"))
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -493,29 +503,34 @@ class JVMeasurementApp:
             state=DISABLED)
         menubar.add_cascade(label="Instrument", menu=self.instrument_menu)
 
-        self.window_menu = Menu(menubar, tearoff=0)
-        self.window_menu.add_command(
+        self.procedures_menu = Menu(menubar, tearoff=0)
+        self.procedures_menu.add_command(
             label="\u2713 J-V Measurement",
             accelerator="Alt+F2",
             command=lambda: self.switch_mode("jv"))
-        self.window_menu.add_command(
+        self.procedures_menu.add_command(
             label="  MPP Tracking",
             accelerator="Alt+F3",
             command=lambda: self.switch_mode("mpp"))
-        self.window_menu.add_command(
+        self.procedures_menu.add_command(
             label="  Stabilized Current",
             accelerator="Alt+F5",
             command=lambda: self.switch_mode("stab"))
-        self.window_menu.add_command(
+        self.procedures_menu.add_command(
             label="  Pure MPP Tracking",
             accelerator="Alt+F6",
             command=lambda: self.switch_mode("pure_mpp"))
-        self.window_menu.add_separator()
-        self.window_menu.add_command(
+        self.procedures_menu.add_separator()
+        self.procedures_menu.add_command(
             label="  Data Curation",
             accelerator="Alt+F7",
             command=lambda: self.switch_mode("curation"))
-        menubar.add_cascade(label="Window", menu=self.window_menu)
+        self.procedures_menu.add_separator()
+        self.procedures_menu.add_command(
+            label="  ISOS Protocols",
+            accelerator="Alt+F8",
+            command=lambda: self.switch_mode("isos"))
+        menubar.add_cascade(label="Procedures", menu=self.procedures_menu)
 
         help_menu = Menu(menubar, tearoff=0)
         help_menu.add_command(label="Documentation", command=self._show_help)
@@ -547,11 +562,13 @@ class JVMeasurementApp:
         self.stab_panel.pack_forget()
         self.pmpp_panel.pack_forget()
         self.curation_panel.pack_forget()
+        self.isos_panel.pack_forget()
         self.jv_plot_frame.pack_forget()
         self.mpp_plot_frame.pack_forget()
         self.stab_plot_frame.pack_forget()
         self.pmpp_plot_frame.pack_forget()
         self.curation_plot_frame.pack_forget()
+        self.isos_plot_frame.pack_forget()
 
         if mode == "jv":
             self.jv_panel.pack(fill=BOTH, expand=True)
@@ -568,22 +585,26 @@ class JVMeasurementApp:
         elif mode == "curation":
             self.curation_panel.pack(fill=BOTH, expand=True)
             self.curation_plot_frame.pack(fill=BOTH, expand=True)
+        elif mode == "isos":
+            self.isos_panel.pack(fill=BOTH, expand=True)
+            self.isos_plot_frame.pack(fill=BOTH, expand=True)
 
         self.current_mode = mode
         self._update_window_menu_checkmark(mode)
 
     def _update_window_menu_checkmark(self, active_mode):
-        # Entry indices: 0=J-V, 1=MPP, 2=Stab, 3=PureMPP, 4=separator, 5=Curation
+        # Entry indices: 0=J-V, 1=MPP, 2=Stab, 3=PureMPP, 4=sep, 5=Curation, 6=sep, 7=ISOS
         all_entries = [
             (0, "  J-V Measurement",    "jv"),
             (1, "  MPP Tracking",       "mpp"),
             (2, "  Stabilized Current", "stab"),
             (3, "  Pure MPP Tracking",  "pure_mpp"),
             (5, "  Data Curation",      "curation"),
+            (7, "  ISOS Protocols",     "isos"),
         ]
         for menu_i, label, mode_key in all_entries:
             display = ("✓" + label[1:]) if mode_key == active_mode else label
-            self.window_menu.entryconfig(menu_i, label=display)
+            self.procedures_menu.entryconfig(menu_i, label=display)
 
     # ── Instrument connection management ──────────────────────────────────────
 
@@ -619,6 +640,7 @@ class JVMeasurementApp:
         self.mpp_start_btn.config(state=NORMAL)
         self.stab_start_btn.config(state=NORMAL)
         self.pmpp_start_btn.config(state=NORMAL)
+        self.isos_start_btn.config(state=NORMAL)
 
         self.instrument_menu.entryconfig("Connect\u2026",        state=NORMAL)
         self.instrument_menu.entryconfig("Disconnect",            state=NORMAL)
@@ -632,6 +654,7 @@ class JVMeasurementApp:
         self.start_btn.config(state=DISABLED)
         self.mpp_start_btn.config(state=DISABLED)
         self.stab_start_btn.config(state=DISABLED)
+        self.isos_start_btn.config(state=DISABLED)
         self.instrument_menu.entryconfig("Disconnect",        state=DISABLED)
         self.instrument_menu.entryconfig("Send *IDN? query",  state=DISABLED)
 
@@ -3166,3 +3189,857 @@ class JVMeasurementApp:
         self.stab_log_text.insert(END, msg + "\n")
         self.stab_log_text.see(END)
         self.stab_log_text.config(state=DISABLED)
+
+    # ── ISOS Protocols panel ──────────────────────────────────────────────────
+
+    def _build_isos_panel(self, left_container, right_container):
+        self.isos_panel      = Frame(left_container, bg="#ececec")
+        self.isos_plot_frame = Frame(right_container, bg="#ffffff")
+
+        # ── Notebook tabs ─────────────────────────────────────────────────────
+        nb = ttk.Notebook(self.isos_panel)
+        nb.pack(fill=X, padx=6, pady=(6, 4))
+
+        # Tab 1: Experiment
+        tab_exp = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_exp, text="  Experiment  ")
+
+        exp_f = LabelFrame(tab_exp, text="Experiment", padx=6, pady=4)
+        exp_f.pack(fill=X, pady=(0, 6))
+
+        Label(exp_f, text="Protocol:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.isos_protocol_var = StringVar(value="ISOS-D-1")
+        proto_cb = ttk.Combobox(exp_f, textvariable=self.isos_protocol_var,
+                                values=["ISOS-D-1"], state="readonly", width=12)
+        proto_cb.grid(row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
+        proto_cb.bind("<<ComboboxSelected>>", self._isos_on_protocol_change)
+
+        Label(exp_f, text="Sample Name:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.isos_sample_name_var = StringVar()
+        isos_sample_entry = Entry(exp_f, textvariable=self.isos_sample_name_var, width=20)
+        isos_sample_entry.grid(row=1, column=1, columnspan=2, sticky=W, padx=4, pady=3)
+        ToolTip(isos_sample_entry, "Sample identifier used for file naming")
+
+        Label(exp_f, text="Export Folder:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.isos_export_folder_var = StringVar()
+        isos_folder_entry = Entry(exp_f, textvariable=self.isos_export_folder_var, width=14)
+        isos_folder_entry.grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        Button(exp_f, text="Browse…", font=("Arial", 8), pady=1,
+               command=self._isos_browse_folder
+               ).grid(row=2, column=2, padx=(2, 4), pady=3)
+
+        Label(exp_f, text="Electrical Load:").grid(row=3, column=0, sticky=W, padx=4, pady=3)
+        self.isos_load_var = StringVar(value="OC")
+        load_frame = Frame(exp_f, bg="#ececec")
+        load_frame.grid(row=3, column=1, columnspan=2, sticky=W, padx=4, pady=2)
+        self.isos_load_rb_oc = Radiobutton(load_frame, text="OC", variable=self.isos_load_var,
+                                           value="OC", bg="#ececec")
+        self.isos_load_rb_oc.pack(side=LEFT)
+        self.isos_load_rb_mpp = Radiobutton(load_frame, text="MPP", variable=self.isos_load_var,
+                                            value="MPP", bg="#ececec")
+        self.isos_load_rb_mpp.pack(side=LEFT, padx=(8, 0))
+        ToolTip(load_frame, "ISOS-D-1 is measured at Open Circuit (OC) only.\n"
+                            "Other protocols (L-1, V-1) may use MPP.")
+
+        btn_frame = Frame(tab_exp, bg="#ececec")
+        btn_frame.pack(fill=X, pady=(2, 4))
+        Button(btn_frame, text="New Experiment", font=("Arial", 9),
+               command=self._isos_new_experiment
+               ).pack(side=LEFT, padx=(0, 6))
+        Button(btn_frame, text="Load Experiment…", font=("Arial", 9),
+               command=self._isos_load_experiment
+               ).pack(side=LEFT)
+
+        self.isos_t0_var = StringVar(value="No experiment loaded")
+        Label(tab_exp, textvariable=self.isos_t0_var,
+              font=("Arial", 8), fg="#555555", bg="#ececec"
+              ).pack(fill=X, padx=4, pady=(0, 4))
+
+        # Tab 2: Scan
+        tab_scan = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_scan, text="  Scan  ")
+
+        scan_f = LabelFrame(tab_scan, text="Scan Parameters", padx=6, pady=4)
+        scan_f.pack(fill=X, pady=(0, 6))
+
+        for row, (label, attr, default, unit) in enumerate([
+            ("Start Voltage:", "isos_start_v",  -0.1,  "V"),
+            ("End Voltage:",   "isos_end_v",     1.05,  "V"),
+            ("Step Voltage:",  "isos_step_v",    0.025, "V"),
+            ("Cell Area:",     "isos_cell_area", 0.07,  "cm²"),
+        ]):
+            Label(scan_f, text=label).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var   = DoubleVar(value=default)
+            entry = Entry(scan_f, textvariable=var, width=10)
+            entry.grid(row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(scan_f, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+            setattr(self, f"{attr}_var", var)
+
+        ilf = LabelFrame(tab_scan, text="Illumination", padx=6, pady=4)
+        ilf.pack(fill=X, pady=(0, 4))
+
+        Label(ilf, text="Detector Power:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.isos_detector_power_var = DoubleVar(value=0)
+        Entry(ilf, textvariable=self.isos_detector_power_var, width=10
+              ).grid(row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW", fg="#666666").grid(row=0, column=2, sticky=W)
+
+        Label(ilf, text="Detector Area:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.isos_detector_area_var = DoubleVar(value=1.13)
+        Entry(ilf, textvariable=self.isos_detector_area_var, width=10
+              ).grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="cm²", fg="#666666").grid(row=1, column=2, sticky=W)
+
+        Label(ilf, text="Illumination:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.isos_illumination_var = StringVar(value="0.00")
+        Label(ilf, textvariable=self.isos_illumination_var,
+              font=("Arial", 9, "bold"), fg="#1565C0"
+              ).grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW/cm²", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        self.isos_detector_power_var.trace("w", self._isos_update_illumination)
+        self.isos_detector_area_var.trace("w",  self._isos_update_illumination)
+
+        # Tab 3: Instrument
+        tab_inst = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_inst, text="  Instrument  ")
+
+        inst_f = LabelFrame(tab_inst, text="Keithley 2400 Settings", padx=6, pady=4)
+        inst_f.pack(fill=X, pady=(0, 6))
+
+        # ── Scan rate input mode toggle ───────────────────────────────────────
+        self.isos_scan_rate_mode = StringVar(value="advanced")
+        isos_mode_frame = Frame(inst_f)
+        isos_mode_frame.grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=(4, 2))
+        Radiobutton(isos_mode_frame, text="Advanced (manual delay)",
+                    variable=self.isos_scan_rate_mode, value="advanced",
+                    command=self._isos_on_scan_mode_change,
+                    ).pack(side=LEFT)
+        Radiobutton(isos_mode_frame, text="Scan rate (mV/s)",
+                    variable=self.isos_scan_rate_mode, value="scan_rate",
+                    command=self._isos_on_scan_mode_change,
+                    ).pack(side=LEFT, padx=(12, 0))
+
+        Label(inst_f, text="Delay per point:").grid(
+            row=1, column=0, sticky=W, padx=4, pady=4)
+        self.isos_delay_ms_var = DoubleVar(value=100.0)
+        self.isos_delay_entry = Entry(inst_f, textvariable=self.isos_delay_ms_var, width=10)
+        self.isos_delay_entry.grid(row=1, column=1, sticky=W, padx=4, pady=4)
+        Label(inst_f, text="ms", fg="#666666").grid(row=1, column=2, sticky=W)
+        ToolTip(self.isos_delay_entry,
+                "Wait time (ms) between applying each voltage step and reading current.")
+
+        Label(inst_f, text="NPLC:").grid(row=2, column=0, sticky=W, padx=4, pady=4)
+        self.isos_nplc_var = DoubleVar(value=1.0)
+        Entry(inst_f, textvariable=self.isos_nplc_var, width=10).grid(
+            row=2, column=1, sticky=W, padx=4, pady=4)
+        Label(inst_f, text="(0.01–25)", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        # ── Target scan rate row (hidden in advanced mode) ────────────────────
+        self.isos_target_scan_rate_var = DoubleVar(value=100.0)
+        self._isos_sr_label = Label(inst_f, text="Target scan rate:")
+        self._isos_sr_entry = Entry(inst_f, textvariable=self.isos_target_scan_rate_var,
+                                    width=10, state=DISABLED)
+        self._isos_sr_unit  = Label(inst_f, text="mV/s", fg="#666666")
+        self._isos_sr_label.grid(row=3, column=0, sticky=W, padx=4, pady=4)
+        self._isos_sr_entry.grid(row=3, column=1, sticky=W, padx=4, pady=4)
+        self._isos_sr_unit.grid( row=3, column=2, sticky=W)
+        self._isos_sr_label.grid_remove()
+        self._isos_sr_entry.grid_remove()
+        self._isos_sr_unit.grid_remove()
+        ToolTip(self._isos_sr_entry,
+                "Target voltage sweep rate in mV/s.\n"
+                "Delay is calculated automatically:\n"
+                "  delay = (step_mV / scan_rate × 1000) − NPLC × 16.7 − 50 ms\n"
+                "If the result would be negative, delay is clamped to 0 ms.")
+
+        self.isos_four_wire_var = BooleanVar(value=False)
+        Checkbutton(inst_f, text="4-Wire (Kelvin) sensing",
+                    variable=self.isos_four_wire_var,
+                    ).grid(row=4, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+
+        isos_srf = LabelFrame(tab_inst, text="Calculated Scan Rate", padx=6, pady=4)
+        isos_srf.pack(fill=X, pady=(0, 4))
+
+        self.isos_scan_rate_var = StringVar(value="—")
+        isos_sr_lbl = Label(isos_srf, textvariable=self.isos_scan_rate_var,
+                            font=("Arial", 11, "bold"), fg="#1565C0")
+        isos_sr_lbl.grid(row=0, column=0, sticky=W, padx=4, pady=4)
+        Label(isos_srf, text="mV/s", fg="#666666").grid(row=0, column=1, sticky=W)
+        ToolTip(isos_sr_lbl,
+                "Effective voltage sweep rate.\n"
+                "Scan rate (mV/s) = Step Voltage (mV) ÷ Time per point (s)\n"
+                "Time per point = Delay + NPLC × 16.7 ms + 50 ms (GPIB overhead)")
+
+        self.isos_step_v_var.trace("w",           self._isos_on_measurement_params_change)
+        self.isos_delay_ms_var.trace("w",         self._isos_on_measurement_params_change)
+        self.isos_nplc_var.trace("w",             self._isos_on_measurement_params_change)
+        self.isos_target_scan_rate_var.trace("w", self._isos_recalculate_delay_from_scan_rate)
+
+        # Tab 4: Conditioning
+        tab_cond = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_cond, text="  Conditioning  ")
+
+        dark_f = LabelFrame(tab_cond, text="Dark J-V (optional)", padx=6, pady=4)
+        dark_f.pack(fill=X, pady=(0, 6))
+        self.isos_dark_jv_var = BooleanVar(value=False)
+        Checkbutton(dark_f, text="Measure dark J-V before illuminated scan",
+                    variable=self.isos_dark_jv_var, bg="#ececec"
+                    ).pack(anchor=W)
+
+        pb_f = LabelFrame(tab_cond, text="Pre-bias", padx=6, pady=4)
+        pb_f.pack(fill=X, pady=(0, 6))
+        self.isos_prebias_enabled_var = BooleanVar(value=False)
+        Checkbutton(pb_f, text="Enable pre-bias",
+                    variable=self.isos_prebias_enabled_var, bg="#ececec"
+                    ).grid(row=0, column=0, columnspan=3, sticky=W)
+        Label(pb_f, text="Voltage:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.isos_prebias_voltage_var = DoubleVar(value=1.2)
+        Entry(pb_f, textvariable=self.isos_prebias_voltage_var, width=10
+              ).grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(pb_f, text="V", fg="#666666").grid(row=1, column=2, sticky=W)
+        Label(pb_f, text="Duration:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.isos_prebias_duration_var = DoubleVar(value=2.0)
+        Entry(pb_f, textvariable=self.isos_prebias_duration_var, width=10
+              ).grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(pb_f, text="s", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        ls_f = LabelFrame(tab_cond, text="Light Soaking", padx=6, pady=4)
+        ls_f.pack(fill=X, pady=(0, 4))
+        self.isos_ls_enabled_var = BooleanVar(value=False)
+        Checkbutton(ls_f, text="Enable light soaking",
+                    variable=self.isos_ls_enabled_var, bg="#ececec"
+                    ).grid(row=0, column=0, columnspan=3, sticky=W)
+        Label(ls_f, text="Duration:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.isos_ls_duration_var = DoubleVar(value=300.0)
+        Entry(ls_f, textvariable=self.isos_ls_duration_var, width=10
+              ).grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(ls_f, text="s", fg="#666666").grid(row=1, column=2, sticky=W)
+
+        # ── History Treeview ──────────────────────────────────────────────────
+        hist_f = LabelFrame(self.isos_panel, text="Measurement History", padx=4, pady=4)
+        hist_f.pack(fill=X, padx=6, pady=(0, 4))
+
+        cols = ("#", "Date", "Elapsed_h", "PCE_rev", "PCE_norm")
+        self.isos_tree = ttk.Treeview(hist_f, columns=cols, show="headings", height=5)
+        for col, width in zip(cols, [30, 140, 70, 70, 70]):
+            self.isos_tree.heading(col, text=col)
+            self.isos_tree.column(col, width=width, anchor="center")
+        vsb = ttk.Scrollbar(hist_f, orient="vertical", command=self.isos_tree.yview)
+        self.isos_tree.configure(yscrollcommand=vsb.set)
+        self.isos_tree.pack(side=LEFT, fill=BOTH, expand=True)
+        vsb.pack(side=RIGHT, fill=Y)
+
+        # ── Run/Stop buttons ──────────────────────────────────────────────────
+        btn_ctrl = Frame(self.isos_panel, bg="#ececec")
+        btn_ctrl.pack(fill=X, padx=8, pady=6)
+
+        self.isos_start_btn = Button(btn_ctrl, text="Run ISOS",
+                                     command=self.start_isos_measurement,
+                                     bg="#388E3C", fg="white",
+                                     font=("Arial", 9, "bold"),
+                                     width=12, pady=4, state=DISABLED)
+        self.isos_start_btn.pack(side=LEFT, padx=(0, 6))
+
+        self.isos_stop_btn = Button(btn_ctrl, text="Stop Measurement",
+                                    command=self.stop_isos_measurement,
+                                    bg="#C62828", fg="white",
+                                    font=("Arial", 9, "bold"),
+                                    width=16, pady=4, state=DISABLED)
+        self.isos_stop_btn.pack(side=LEFT)
+
+        # ── Measurement Log ───────────────────────────────────────────────────
+        isos_log_frame = LabelFrame(self.isos_panel, text="Measurement Log", padx=4, pady=4)
+        isos_log_frame.pack(fill=BOTH, expand=True, padx=6, pady=(0, 0))
+
+        isos_hsb = ttk.Scrollbar(isos_log_frame, orient="horizontal")
+        isos_vsb = ttk.Scrollbar(isos_log_frame, orient="vertical")
+        self.isos_log_text = Text(isos_log_frame, wrap="none", state=DISABLED,
+                                  font=("Consolas", 9),
+                                  yscrollcommand=isos_vsb.set,
+                                  xscrollcommand=isos_hsb.set)
+        isos_vsb.config(command=self.isos_log_text.yview)
+        isos_hsb.config(command=self.isos_log_text.xview)
+        isos_vsb.grid(row=0, column=1, sticky="ns")
+        isos_hsb.grid(row=1, column=0, sticky="ew")
+        self.isos_log_text.grid(row=0, column=0, sticky="nsew")
+        self.isos_log_text.tag_configure("header",
+                                         foreground="#1565C0",
+                                         font=("Consolas", 9, "bold"))
+        self.isos_log_text.tag_configure("separator", foreground="#aaaaaa")
+        isos_log_frame.grid_rowconfigure(0, weight=1)
+        isos_log_frame.grid_columnconfigure(0, weight=1)
+
+        # ── Status bar ────────────────────────────────────────────────────────
+        isos_sb = Frame(self.isos_panel, bg="#37474F", height=24)
+        isos_sb.pack(fill=X, side="bottom")
+        isos_sb.pack_propagate(False)
+        self.isos_status_var = StringVar(value="Ready")
+        Label(isos_sb, textvariable=self.isos_status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
+
+        # ── Matplotlib figure: PCE stability (top) + latest J-V (bottom) ───────
+        self.isos_fig, (self.isos_ax_pce, self.isos_ax_jv) = plt.subplots(
+            2, 1, figsize=(7, 7), gridspec_kw={"height_ratios": [1, 1]})
+        self.isos_fig.patch.set_facecolor("#ffffff")
+        self.isos_ax_pce.set_xlabel("Time (h)", fontsize=11)
+        self.isos_ax_pce.set_ylabel("Normalized PCE (%)", fontsize=11)
+        self.isos_ax_pce.set_title("PCE Stability (ISOS-D-1)",
+                                   fontsize=12, fontweight="bold")
+        self.isos_ax_pce.grid(True)
+        self.isos_ax_jv.set_xlabel("Voltage (V)", fontsize=11)
+        self.isos_ax_jv.set_ylabel("Current Density (mA/cm²)", fontsize=11)
+        self.isos_ax_jv.set_title("Latest J-V Measurement",
+                                  fontsize=12, fontweight="bold")
+        self.isos_ax_jv.grid(True)
+        self.isos_fig.tight_layout()
+        self.isos_canvas = FigureCanvasTkAgg(self.isos_fig, self.isos_plot_frame)
+        self.isos_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+
+        self._isos_update_scan_rate()
+        self._isos_on_protocol_change()
+
+    # ── ISOS helper methods ───────────────────────────────────────────────────
+
+    def _isos_on_protocol_change(self, *_):
+        protocol = self.isos_protocol_var.get()
+        # ISOS-D-1 is OC-only; disable load selection and lock to OC
+        if protocol == "ISOS-D-1":
+            self.isos_load_var.set("OC")
+            self.isos_load_rb_oc.config(state=DISABLED)
+            self.isos_load_rb_mpp.config(state=DISABLED)
+        else:
+            self.isos_load_rb_oc.config(state=NORMAL)
+            self.isos_load_rb_mpp.config(state=NORMAL)
+
+    def _isos_add_to_log(self, text: str):
+        self.isos_log_text.config(state=NORMAL)
+        if self.isos_log_text.get("1.0", "end-1c"):
+            self.isos_log_text.insert(END, "\n" + "─" * 60 + "\n", "separator")
+        self.isos_log_text.insert(
+            END,
+            f"Measurement Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+            "header",
+        )
+        self.isos_log_text.insert(END, text)
+        self.isos_log_text.see(END)
+        self.isos_log_text.config(state=DISABLED)
+
+    def _isos_browse_folder(self):
+        folder = filedialog.askdirectory(title="Select ISOS Export Folder")
+        if folder:
+            self.isos_export_folder_var.set(folder)
+
+    def _isos_update_illumination(self, *_):
+        try:
+            p = self.isos_detector_power_var.get()
+            a = self.isos_detector_area_var.get()
+            self.isos_illumination_var.set(f"{p / a:.2f}" if a else "0.00")
+        except Exception:
+            self.isos_illumination_var.set("0.00")
+
+    def _isos_update_scan_rate(self, *_):
+        try:
+            step_mv     = abs(self.isos_step_v_var.get()) * 1000.0
+            nplc_ms     = self.isos_nplc_var.get() * (1000.0 / 60.0)
+            delay_ms    = self.isos_delay_ms_var.get()
+            t_per_point = (delay_ms + nplc_ms + 50.0) / 1000.0
+            if t_per_point <= 0 or step_mv <= 0:
+                self.isos_scan_rate_var.set("—")
+                return
+            self.isos_scan_rate_var.set(f"{step_mv / t_per_point:.1f}")
+        except Exception:
+            self.isos_scan_rate_var.set("—")
+
+    def _isos_on_measurement_params_change(self, *_):
+        if self.isos_scan_rate_mode.get() == "scan_rate":
+            self._isos_recalculate_delay_from_scan_rate()
+        else:
+            self._isos_update_scan_rate()
+
+    def _isos_on_scan_mode_change(self):
+        mode = self.isos_scan_rate_mode.get()
+        if mode == "advanced":
+            self.isos_delay_entry.config(state=NORMAL)
+            self._isos_sr_entry.config(state=DISABLED)
+            self._isos_sr_label.grid_remove()
+            self._isos_sr_entry.grid_remove()
+            self._isos_sr_unit.grid_remove()
+            self._isos_update_scan_rate()
+        else:
+            self.isos_delay_entry.config(state="readonly")
+            self._isos_sr_entry.config(state=NORMAL)
+            self._isos_sr_label.grid()
+            self._isos_sr_entry.grid()
+            self._isos_sr_unit.grid()
+            self._isos_recalculate_delay_from_scan_rate()
+
+    def _isos_recalculate_delay_from_scan_rate(self, *_):
+        if self.isos_scan_rate_mode.get() != "scan_rate":
+            return
+        try:
+            step_mv     = abs(self.isos_step_v_var.get()) * 1000.0
+            target_rate = self.isos_target_scan_rate_var.get()
+            nplc_ms     = self.isos_nplc_var.get() * (1000.0 / 60.0)
+            if step_mv <= 0 or target_rate <= 0:
+                return
+            time_per_point_ms = (step_mv / target_rate) * 1000.0
+            delay_ms          = max(0.0, time_per_point_ms - nplc_ms - 50.0)
+            self.isos_delay_ms_var.set(round(delay_ms, 1))
+            actual_time_ms = delay_ms + nplc_ms + 50.0
+            actual_rate    = step_mv / (actual_time_ms / 1000.0)
+            warning        = " ⚠" if delay_ms == 0.0 else ""
+            self.isos_scan_rate_var.set(f"{actual_rate:.1f}{warning}")
+        except Exception:
+            pass
+
+    def _isos_new_experiment(self):
+        folder = self.isos_export_folder_var.get()
+        if not folder:
+            messagebox.showwarning("No Folder", "Please select an export folder first.")
+            return
+        if not os.path.isdir(folder):
+            messagebox.showwarning("Invalid Folder", f"Folder does not exist:\n{folder}")
+            return
+        name = self.isos_sample_name_var.get().strip() or "Sample"
+        if not messagebox.askyesno("New Experiment",
+                                   f"Create a new ISOS-D-1 tracking file for '{name}'?\n\n"
+                                   "A new file will be created — it will NOT overwrite "
+                                   "any existing tracking file."):
+            return
+        config = self._isos_build_config()
+        try:
+            path = create_isos_d1_tracking_file(folder, config)
+        except Exception as exc:
+            messagebox.showerror("Error", f"Could not create tracking file:\n{exc}")
+            return
+        self.isos_tracking_file = path
+        self.isos_t0_var.set(
+            f"Tracking file: {os.path.basename(path)}\nt₀: {config.get('t0_timestamp', '')}")
+        self.isos_status_var.set(f"New experiment: {os.path.basename(path)}")
+        self._isos_update_treeview([])
+
+    def _isos_load_experiment(self):
+        path = filedialog.askopenfilename(
+            title="Load ISOS-D-1 Tracking File",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        cfg = read_isos_d1_config(path)
+        if not cfg:
+            messagebox.showerror("Error", "Could not read config from this file.\n"
+                                 "Make sure it is a valid ISOS-D-1 tracking file.")
+            return
+        self.isos_tracking_file = path
+        self.isos_export_folder_var.set(os.path.dirname(path))
+        self._isos_populate_from_config(cfg)
+        self.root.update_idletasks()
+        rows = read_isos_d1_log(path)
+        self._isos_update_treeview(rows)
+        t0 = cfg.get("t0_timestamp", "")
+        self.isos_t0_var.set(
+            f"Tracking file: {os.path.basename(path)}\nt₀: {t0}")
+        self.isos_status_var.set(
+            f"Loaded: {os.path.basename(path)}  ({len(rows)} measurements)")
+        try:
+            self._isos_redraw_curves(path)
+        except Exception:
+            pass
+
+    def _isos_populate_from_config(self, cfg: dict):
+        def _set(var, key, cast=str):
+            val = cfg.get(key)
+            if val is not None:
+                try:
+                    var.set(cast(val))
+                except Exception:
+                    pass
+        _set(self.isos_sample_name_var,          "sample_name")
+        _set(self.isos_cell_area_var,            "cell_area",               float)
+        _set(self.isos_detector_power_var,       "detector_power",          float)
+        _set(self.isos_detector_area_var,        "detector_area",           float)
+        _set(self.isos_start_v_var,              "start_voltage",           float)
+        _set(self.isos_end_v_var,                "end_voltage",             float)
+        _set(self.isos_step_v_var,               "step_voltage",            float)
+        _set(self.isos_delay_ms_var,             "delay_ms",                float)
+        _set(self.isos_nplc_var,                 "nplc",                    float)
+        _set(self.isos_prebias_voltage_var,      "prebias_voltage",         float)
+        _set(self.isos_prebias_duration_var,     "prebias_duration",        float)
+        _set(self.isos_ls_duration_var,          "light_soaking_duration",  float)
+        _set(self.isos_target_scan_rate_var,     "target_scan_rate",        float)
+        # Booleans stored as True/False or 1/0
+        for var, key in [
+            (self.isos_four_wire_var,        "four_wire"),
+            (self.isos_prebias_enabled_var,  "prebias_enabled"),
+            (self.isos_ls_enabled_var,       "light_soaking_enabled"),
+            (self.isos_dark_jv_var,          "dark_jv"),
+        ]:
+            val = cfg.get(key)
+            if val is not None:
+                try:
+                    var.set(bool(val))
+                except Exception:
+                    pass
+        if cfg.get("electrical_load"):
+            self.isos_load_var.set(str(cfg["electrical_load"]))
+        # Restore scan rate mode last — triggers show/hide of the scan rate row
+        mode = cfg.get("scan_rate_mode")
+        if mode in ("advanced", "scan_rate"):
+            try:
+                self.isos_scan_rate_mode.set(mode)
+                self._isos_on_scan_mode_change()
+            except Exception:
+                pass
+
+    def _isos_build_config(self) -> dict:
+        try:
+            pin = float(self.isos_detector_power_var.get()) / float(self.isos_detector_area_var.get())
+        except Exception:
+            pin = 0.0
+        return {
+            "sample_name":             self.isos_sample_name_var.get().strip() or "Sample",
+            "cell_area":               self.isos_cell_area_var.get(),
+            "detector_power":          self.isos_detector_power_var.get(),
+            "detector_area":           self.isos_detector_area_var.get(),
+            "start_voltage":           self.isos_start_v_var.get(),
+            "end_voltage":             self.isos_end_v_var.get(),
+            "step_voltage":            self.isos_step_v_var.get(),
+            "delay_ms":                self.isos_delay_ms_var.get(),
+            "nplc":                    self.isos_nplc_var.get(),
+            "four_wire":               self.isos_four_wire_var.get(),
+            "prebias_enabled":         self.isos_prebias_enabled_var.get(),
+            "prebias_voltage":         self.isos_prebias_voltage_var.get(),
+            "prebias_duration":        self.isos_prebias_duration_var.get(),
+            "light_soaking_enabled":   self.isos_ls_enabled_var.get(),
+            "light_soaking_duration":  self.isos_ls_duration_var.get(),
+            "dark_jv":                 self.isos_dark_jv_var.get(),
+            "electrical_load":         self.isos_load_var.get(),
+            "scan_rate_mode":          self.isos_scan_rate_mode.get(),
+            "target_scan_rate":        self.isos_target_scan_rate_var.get(),
+        }
+
+    def _isos_update_treeview(self, rows: list):
+        for item in self.isos_tree.get_children():
+            self.isos_tree.delete(item)
+        for row in rows:
+            self.isos_tree.insert("", END, values=(
+                row.get("#", ""),
+                row.get("Timestamp", ""),
+                row.get("Elapsed_h", ""),
+                row.get("PCE_rev (%)", ""),
+                row.get("PCE_rev_norm", ""),
+            ))
+        if rows:
+            last = self.isos_tree.get_children()[-1]
+            self.isos_tree.see(last)
+
+    def _isos_redraw_curves(self, tracking_path: str, new_measurement: bool = False):
+        # ── Top: PCE_norm vs time ─────────────────────────────────────────────
+        self.isos_ax_pce.cla()
+        self.isos_ax_pce.set_xlabel("Time (h)", fontsize=11)
+        self.isos_ax_pce.set_ylabel("Normalized PCE (ratio to t₀)", fontsize=11)
+        self.isos_ax_pce.set_title("PCE Stability (ISOS-D-1)",
+                                   fontsize=12, fontweight="bold")
+        self.isos_ax_pce.grid(True)
+
+        rows = read_isos_d1_log(tracking_path)
+        if rows:
+            elapsed = [float(r.get("Elapsed_h") or 0) for r in rows]
+            fwd_norm = [r.get("PCE_fwd_norm") for r in rows]
+            rev_norm = [r.get("PCE_rev_norm") for r in rows]
+
+            valid_f = [(t, p) for t, p in zip(elapsed, fwd_norm) if p is not None]
+            if valid_f:
+                tf, pf = zip(*valid_f)
+                self.isos_ax_pce.plot(tf, pf, "o--", color="#1565C0",
+                                      linewidth=1.2, markersize=5, label="Fwd")
+
+            valid_r = [(t, p) for t, p in zip(elapsed, rev_norm) if p is not None]
+            if valid_r:
+                tr, pr = zip(*valid_r)
+                self.isos_ax_pce.plot(tr, pr, "o-", color="#B71C1C",
+                                      linewidth=1.5, markersize=6, label="Rev")
+
+            self.isos_ax_pce.axhline(y=1, color="#aaaaaa", linestyle=":", linewidth=1)
+            if valid_f or valid_r:
+                self.isos_ax_pce.legend(fontsize=9, loc="lower left")
+
+        # ── Bottom: J-V curves ────────────────────────────────────────────────
+        self.isos_ax_jv.cla()
+        self.isos_ax_jv.set_xlabel("Voltage (V)", fontsize=11)
+        self.isos_ax_jv.set_ylabel("Current Density (mA/cm²)", fontsize=11)
+        self.isos_ax_jv.set_title("Latest J-V Measurement",
+                                  fontsize=12, fontweight="bold")
+        self.isos_ax_jv.grid(True)
+        self.isos_ax_jv.axhline(y=0, color="#aaaaaa", linewidth=0.7)
+
+        curves = read_isos_d1_jv_curves(tracking_path)
+        fwd_curves = [c for c in curves if c["direction"] == "Fwd"]
+        rev_curves = [c for c in curves if c["direction"] == "Rev"]
+
+        if new_measurement:
+            # After a new measurement: previous in grey, new (latest) in blue/red
+            if len(fwd_curves) >= 2:
+                p = fwd_curves[-2]
+                self.isos_ax_jv.plot(p["v"], p["j"], "--", color="#aaaaaa",
+                                     linewidth=1.0, alpha=0.7,
+                                     label=f"Fwd  t = {p['elapsed_h']} h (prev)")
+            if len(rev_curves) >= 2:
+                p = rev_curves[-2]
+                self.isos_ax_jv.plot(p["v"], p["j"], "-", color="#aaaaaa",
+                                     linewidth=1.0, alpha=0.7,
+                                     label=f"Rev  t = {p['elapsed_h']} h (prev)")
+            if fwd_curves:
+                c = fwd_curves[-1]
+                self.isos_ax_jv.plot(c["v"], c["j"], "--", color="#1565C0",
+                                     linewidth=1.5,
+                                     label=f"Fwd  t = {c['elapsed_h']} h")
+            if rev_curves:
+                c = rev_curves[-1]
+                self.isos_ax_jv.plot(c["v"], c["j"], "-", color="#B71C1C",
+                                     linewidth=1.8,
+                                     label=f"Rev  t = {c['elapsed_h']} h")
+        else:
+            # On load: show only the latest historical measurement in grey
+            if fwd_curves:
+                c = fwd_curves[-1]
+                self.isos_ax_jv.plot(c["v"], c["j"], "--", color="#aaaaaa",
+                                     linewidth=1.5,
+                                     label=f"Fwd  t = {c['elapsed_h']} h")
+            if rev_curves:
+                c = rev_curves[-1]
+                self.isos_ax_jv.plot(c["v"], c["j"], "-", color="#aaaaaa",
+                                     linewidth=1.8,
+                                     label=f"Rev  t = {c['elapsed_h']} h")
+
+        if fwd_curves or rev_curves:
+            self.isos_ax_jv.legend(fontsize=9, loc="lower left")
+
+        # Fixed axes — same as J-V Measurement mode
+        self.isos_ax_jv.set_xlim(0.0, 1.2)
+        self.isos_ax_jv.set_ylim(0.0, 30.0)
+
+        self.isos_fig.tight_layout()
+        self.isos_canvas.draw_idle()
+
+    # ── ISOS measurement methods ──────────────────────────────────────────────
+
+    def start_isos_measurement(self):
+        if self.isos_tracking_file is None:
+            messagebox.showwarning(
+                "No Experiment",
+                "Please create or load an ISOS-D-1 tracking file first.\n"
+                "Use 'New Experiment' or 'Load Experiment…' in the Experiment tab.")
+            return
+        if not os.path.isfile(self.isos_tracking_file):
+            messagebox.showerror("Missing File",
+                                 f"Tracking file not found:\n{self.isos_tracking_file}")
+            return
+        if self._measurement_running:
+            return
+        self._measurement_running = True
+        stop_event.clear()
+        self.isos_start_btn.config(state=DISABLED)
+        self.isos_stop_btn.config(state=NORMAL)
+        t = threading.Thread(target=self.run_isos_d1_measurement, daemon=True)
+        t.start()
+
+    def stop_isos_measurement(self):
+        stop_event.set()
+        self.isos_status_var.set("Stopping…")
+
+    def run_isos_d1_measurement(self):
+        import numpy as np
+
+        def log(msg):
+            self.root.after(0, lambda m=msg: self.isos_status_var.set(m))
+
+        def _wait_shutter(title, body):
+            ev = threading.Event()
+            self.root.after(0, lambda: (messagebox.showinfo(title, body), ev.set()))
+            ev.wait()
+
+        try:
+            inst      = self.instrument
+            folder    = self.isos_export_folder_var.get() or tempfile.gettempdir()
+            name      = self.isos_sample_name_var.get().strip() or "Sample"
+            cell_area = self.isos_cell_area_var.get()
+            delay_ms  = self.isos_delay_ms_var.get()
+            nplc      = self.isos_nplc_var.get()
+            four_wire = self.isos_four_wire_var.get()
+            start_v   = self.isos_start_v_var.get()
+            end_v     = self.isos_end_v_var.get()
+            step_v    = self.isos_step_v_var.get()
+            pb_en     = self.isos_prebias_enabled_var.get()
+            pb_v      = self.isos_prebias_voltage_var.get()
+            pb_t      = self.isos_prebias_duration_var.get()
+            ls_en     = self.isos_ls_enabled_var.get()
+            ls_t      = self.isos_ls_duration_var.get()
+            do_dark   = self.isos_dark_jv_var.get()
+            try:
+                pin = self.isos_detector_power_var.get() / self.isos_detector_area_var.get()
+            except Exception:
+                pin = 0.0
+
+            # ── Optional dark J-V (instrument on during dark scans) ───────────
+            if do_dark:
+                init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
+                log("Dark J-V: forward scan…")
+                v_df, j_df = measure_scan(inst, start_v, end_v, step_v, cell_area, stop_event)
+                if stop_event.is_set():
+                    return
+                log("Dark J-V: reverse scan…")
+                v_dr, j_dr = measure_scan(inst, end_v, start_v, -step_v, cell_area, stop_event)
+                if stop_event.is_set():
+                    return
+                try:
+                    inst.write(":SOUR:VOLT 0")
+                    inst.write(":OUTP OFF")
+                except Exception:
+                    pass
+                save_dark_jv_data(
+                    folder, name,
+                    v_df, j_df, v_dr, j_dr,
+                    cell_area, delay_ms, nplc, four_wire,
+                    self.instrument_idn or "",
+                )
+                log("Dark J-V complete — waiting for shutter…")
+                _wait_shutter(
+                    "Dark J-V Complete — Open Shutter",
+                    "Dark J-V measurement complete.\n\n"
+                    "Please open the solar simulator shutter, then click OK\n"
+                    "to begin the illuminated J-V measurement.",
+                )
+                if stop_event.is_set():
+                    return
+                init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
+            else:
+                # No dark J-V: confirm shutter BEFORE turning on the instrument
+                _wait_shutter(
+                    "Open Shutter",
+                    "Please open the solar simulator shutter, then click OK\n"
+                    "to begin the illuminated J-V measurement.",
+                )
+                if stop_event.is_set():
+                    return
+                init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
+
+            # ── Light soaking ─────────────────────────────────────────────────
+            if ls_en and not stop_event.is_set():
+                apply_light_soaking(inst, ls_t, stop_event, self.isos_status_var.set)
+                if stop_event.is_set():
+                    return
+
+            # ── Forward illuminated scan ──────────────────────────────────────
+            log("Forward scan…")
+            v_f, j_f = measure_scan(inst, start_v, end_v, step_v, cell_area, stop_event)
+            if stop_event.is_set():
+                return
+
+            # ── Pre-bias between fwd and rev ──────────────────────────────────
+            if pb_en and not stop_event.is_set():
+                apply_prebias(inst, pb_v, pb_t, stop_event, self.isos_status_var.set)
+                if stop_event.is_set():
+                    return
+
+            # ── Reverse illuminated scan ──────────────────────────────────────
+            log("Reverse scan…")
+            v_r, j_r = measure_scan(inst, end_v, start_v, -step_v, cell_area, stop_event)
+            if stop_event.is_set():
+                return
+
+            inst.write(":OUTP OFF")
+
+            # ── PV parameter extraction ───────────────────────────────────────
+            log("Calculating parameters…")
+            Voc_f, Jsc_f, FF_f, PCE_f = calculate_jv_parameters(v_f, j_f, pin)
+            Voc_r, Jsc_r, FF_r, PCE_r = calculate_jv_parameters(v_r, j_r, pin)
+            Rs_f,  Rsh_f               = calculate_resistances(v_f, j_f, Voc_f)
+            Rs_r,  Rsh_r               = calculate_resistances(v_r, j_r, Voc_r)
+            hi                         = calculate_hysteresis_index(PCE_f, PCE_r)
+
+            nplc_ms       = nplc * (1000.0 / 60.0)
+            t_per_point   = (delay_ms + nplc_ms + 50.0) / 1000.0
+            scan_rate_val = (abs(step_v) * 1000.0) / t_per_point if t_per_point > 0 else 0.0
+
+            # ── Save individual backup file ───────────────────────────────────
+            log("Saving backup file…")
+            save_data(
+                folder, name,
+                v_f, j_f, v_r, j_r, pin,
+                Voc_f, Jsc_f, FF_f, PCE_f, Rs_f, Rsh_f,
+                Voc_r, Jsc_r, FF_r, PCE_r, Rs_r, Rsh_r,
+                hi,
+                cell_area, delay_ms, nplc, four_wire,
+                pb_en, pb_v, pb_t,
+                self.instrument_idn or "",
+                scan_rate=scan_rate_val,
+            )
+
+            # ── Append to cumulative tracking file ────────────────────────────
+            log("Updating tracking file…")
+            append_isos_d1_measurement(self.isos_tracking_file, {
+                "v_fwd":   v_f,    "j_fwd":   j_f,
+                "v_rev":   v_r,    "j_rev":   j_r,
+                "Voc_fwd": Voc_f,  "Jsc_fwd": Jsc_f,
+                "FF_fwd":  FF_f,   "PCE_fwd": PCE_f,
+                "Rs_fwd":  Rs_f,   "Rsh_fwd": Rsh_f,
+                "Voc_rev": Voc_r,  "Jsc_rev": Jsc_r,
+                "FF_rev":  FF_r,   "PCE_rev": PCE_r,
+                "Rs_rev":  Rs_r,   "Rsh_rev": Rsh_r,
+                "HI":              hi,
+                "illumination":    pin,
+                "scan_rate":       scan_rate_val,
+                "cell_area":       cell_area,
+                "delay_ms":        delay_ms,
+                "nplc":            nplc,
+                "four_wire":       four_wire,
+                "prebias_enabled": pb_en,
+                "prebias_voltage": pb_v,
+                "prebias_duration": pb_t,
+                "instrument_idn":  self.instrument_idn or "",
+            })
+
+            # ── Refresh UI ────────────────────────────────────────────────────
+            pb_str   = f"Pre-bias: {pb_v:.2f} V for {pb_t:.0f} s\n" if pb_en else ""
+            log_text = (
+                f"Sample: {name}\n"
+                f"Instrument: {self.instrument_idn or 'unknown'}\n"
+                f"Illumination: {pin:.2f} mW/cm²\n"
+                f"Delay/pt: {delay_ms:.0f} ms  |  NPLC: {nplc:.2f}  |  "
+                f"4-Wire: {'ON' if four_wire else 'OFF'}\n"
+                f"{pb_str}"
+                f"\nForward Scan:\n"
+                f"  Voc:  {Voc_f:.3f} V\n  Jsc:  {Jsc_f:.3f} mA/cm²\n"
+                f"  FF:   {FF_f:.2f} %\n  PCE:  {PCE_f:.2f} %\n"
+                f"  Rs:   {Rs_f:.2f} Ω·cm²\n  Rsh:  {Rsh_f:.2f} Ω·cm²\n"
+                f"\nReverse Scan:\n"
+                f"  Voc:  {Voc_r:.3f} V\n  Jsc:  {Jsc_r:.3f} mA/cm²\n"
+                f"  FF:   {FF_r:.2f} %\n  PCE:  {PCE_r:.2f} %\n"
+                f"  Rs:   {Rs_r:.2f} Ω·cm²\n  Rsh:  {Rsh_r:.2f} Ω·cm²\n"
+                f"\nHysteresis Index (HI): {hi:.2f} %\n"
+            )
+
+            def _refresh(lt=log_text):
+                rows  = read_isos_d1_log(self.isos_tracking_file)
+                last  = rows[-1] if rows else {}
+                pce_r = last.get("PCE_rev (%)", "?")
+                self._isos_update_treeview(rows)
+                self._isos_redraw_curves(self.isos_tracking_file, new_measurement=True)
+                self._isos_add_to_log(lt)
+                self.isos_status_var.set(f"Done — PCE_rev = {pce_r}%")
+            self.root.after(0, _refresh)
+            play_completion_sound()
+
+        except Exception as exc:
+            self.root.after(0, lambda e=exc: messagebox.showerror(
+                "ISOS Measurement Error", str(e)))
+            self.root.after(0, lambda: self.isos_status_var.set(f"Error: {exc}"))
+        finally:
+            self._measurement_running = False
+            stop_event.clear()
+            self.root.after(0, lambda: self.isos_start_btn.config(state=NORMAL))
+            self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
