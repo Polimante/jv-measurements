@@ -197,7 +197,8 @@ class TestAppendMeasurement:
         wb.close()
         assert val == pytest.approx(13.5, abs=0.01)
 
-    def test_first_measurement_pce_norm_is_100(self, tmp_path):
+    def test_first_measurement_pce_norm_is_1(self, tmp_path):
+        """First measurement must have PCE_norm = 1.0 (ratio convention, not percent)."""
         path = _create(tmp_path)
         append_isos_d1_measurement(path, _make_meas(pce_fwd=14.0, pce_rev=15.5))
         wb = openpyxl.load_workbook(path, data_only=True)
@@ -205,10 +206,11 @@ class TestAppendMeasurement:
         fwd_norm = ws.cell(2, 9).value   # PCE_fwd_norm
         rev_norm = ws.cell(2, 14).value  # PCE_rev_norm
         wb.close()
-        assert fwd_norm == pytest.approx(100.0, abs=0.01)
-        assert rev_norm == pytest.approx(100.0, abs=0.01)
+        assert fwd_norm == pytest.approx(1.0, abs=0.0001)
+        assert rev_norm == pytest.approx(1.0, abs=0.0001)
 
     def test_second_measurement_pce_norm_relative_to_first(self, tmp_path):
+        """PCE_norm is PCE / PCE_t0 as a ratio (e.g. 0.9032, not 90.32)."""
         path = _create(tmp_path)
         append_isos_d1_measurement(path, _make_meas(pce_rev=15.5))
         append_isos_d1_measurement(path, _make_meas(pce_rev=14.0))
@@ -216,8 +218,8 @@ class TestAppendMeasurement:
         ws = wb[_LOG_SHEET]
         rev_norm2 = ws.cell(3, 14).value  # PCE_rev_norm of 2nd measurement
         wb.close()
-        expected = round(14.0 / 15.5 * 100, 2)
-        assert rev_norm2 == pytest.approx(expected, abs=0.1)
+        expected = round(14.0 / 15.5, 4)
+        assert rev_norm2 == pytest.approx(expected, abs=0.001)
 
     def test_delta_h_zero_on_first(self, tmp_path):
         path = _create(tmp_path)

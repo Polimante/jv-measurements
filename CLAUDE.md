@@ -121,7 +121,7 @@ ISOS-D-1 is a light-stability protocol: the cell is measured periodically under 
 - `ISOS_D1_Log` — one row per measurement; columns defined in `_LOG_HEADERS`
 - `JV_Fwd_#NNN_tXXXXh` / `JV_Rev_#NNN_tXXXXh` — raw V/J data per measurement
 
-`PCE_fwd_norm` and `PCE_rev_norm` are always relative to the **first** measurement (`t₀`). `elapsed_h` is wall-clock time since `t0_timestamp` stored in the config sheet. Individual backup files are also saved via `save_data()` (standard illuminated J-V format).
+`PCE_fwd_norm` and `PCE_rev_norm` are always relative to the **first** measurement (`t₀`) — stored as a **ratio** (1.0 = baseline, not percent; e.g. 0.80 means T80). `elapsed_h` is wall-clock time since `t0_timestamp` stored in the config sheet. Individual backup files are also saved via `save_data()` (standard illuminated J-V format).
 
 The GUI panel (Alt+F8) has three tabs: Experiment (sample name, folder, "New / Load"), Measurement Parameters (voltage range, illumination, scan settings), and Conditions (pre-bias, light soaking). The panel shows a live treeview of the log and two plots: PCE stability (normalized, top) and the latest J-V curves (bottom).
 
