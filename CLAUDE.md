@@ -89,6 +89,31 @@ Column mapping is documented in `data_viewer.py::_read_illuminated()` and `_read
 - **Rsh**: `abs(1000 / slope)` near V=0 — always positive
 - **HI**: `(PCE_rev − PCE_fwd) / PCE_rev × 100` (Kim & Park 2014, positive = normal hysteresis)
 
+### Single-diode model fit — `SingleDiodeFit`
+
+`fit_single_diode(v, j, T=298.15)` in `app/measurement/analysis.py` fits the 5-parameter implicit equation:
+
+    J = J_ph - J0·(exp((V + J·Rs·1e-3)/(n·Vt)) - 1) - (V + J·Rs·1e-3)·1e3/Rsh
+
+Units follow CLAUDE.md convention (mA/cm², Ω·cm²). The solver uses `scipy.optimize.brentq` inside `scipy.optimize.curve_fit`. Returns a `SingleDiodeFit` dataclass with:
+
+| Field | Description |
+|---|---|
+| `parameters` | dict: J_ph, J0, n, Rs, Rsh |
+| `std_errors` | dict: standard errors from covariance matrix |
+| `r_squared` | goodness-of-fit R² |
+| `rmse` | root mean square error (mA/cm²) |
+| `rmse_log` | RMSE in log10\|J\| space (robust across dynamic range) |
+| `converged` | bool — False if curve_fit raised |
+| `bounded_parameters` | list of parameter names that hit a bound (potential warning) |
+| `temperature_K` | T used for Vt = kT/q |
+
+**Auto-fit (post-measurement)**: enabled by the "Auto single-diode fit" checkbox (Instrument tab, default OFF). Runs on the reverse scan in the measurement thread. Result is stored in `session_data[-1]["single_diode_fit"]` and written as a `SingleDiodeFit` sheet in the xlsx file.
+
+**Interactive fit (Data Viewer)**: the "Single-Diode Fit" button (top-right bar, enabled only for illuminated J-V files) opens `SingleDiodeFitWindow` — an overlay plot, residuals plot, editable temperature and bounds, Refit, Export CSV, and Save-to-file buttons.
+
+When adding new code that uses J0 or n, update both the local-derivative methods and the fit's `_estimate_initial_guess` helper in `analysis.py`.
+
 ### Measurement modes and keyboard shortcuts
 
 | Mode | Shortcut | Class / entry point |

@@ -2,16 +2,23 @@
 
 import os
 import xlsxwriter
+import openpyxl
 from datetime import datetime
+
+# Sheet name used for the single-diode model fit results
+FIT_SHEET = "SingleDiodeFit"
+
+_FIT_PARAM_NAMES = ("J_ph", "J0", "n", "Rs", "Rsh")
+_FIT_PARAM_UNITS = {
+    "J_ph": "mA/cm²",
+    "J0":   "mA/cm²",
+    "n":    "—",
+    "Rs":   "Ω·cm²",
+    "Rsh":  "Ω·cm²",
+}
 
 
 # ── Shared format factory ─────────────────────────────────────────────────────
-# All exported workbooks use the same three cell styles so every file produced
-# by this application has an identical visual identity.
-#
-#   hf  — header row  : blue fill (#1565C0), white bold Calibri 11, thin border
-#   pf  — scalar row  : bold Calibri 11, centred, thin border, 4-decimal format
-#   nf  — data rows   : Calibri 10, centred, 6-decimal format
 
 def _fmt(wb):
     hf = wb.add_format({
@@ -42,6 +49,111 @@ def _fmt(wb):
     return hf, pf, nf
 
 
+# ── SingleDiodeFit sheet writer (xlsxwriter) ─────────────────────────────────
+
+def _write_fit_sheet(wb, hf, pf, nf, fit):
+    """Write a SingleDiodeFit to a new sheet in an xlsxwriter Workbook."""
+    ws = wb.add_worksheet(FIT_SHEET)
+    ws.set_column("A:A", 20)
+    ws.set_column("B:C", 18)
+    ws.set_column("D:D", 16)
+
+    # Row 0: column headers
+    for c, h in enumerate(["Parameter", "Value", "±Std Error", "Unit"]):
+        ws.write(0, c, h, hf)
+
+    # Rows 1-5: fitted parameters
+    for i, name in enumerate(_FIT_PARAM_NAMES):
+        r = i + 1
+        ws.write(r, 0, name, pf)
+        ws.write(r, 1, fit.parameters.get(name, float("nan")), nf)
+        ws.write(r, 2, fit.std_errors.get(name, float("nan")), nf)
+        ws.write(r, 3, _FIT_PARAM_UNITS.get(name, ""), nf)
+
+    # Rows 6-8: goodness-of-fit metrics
+    for i, (label, val, unit) in enumerate([
+        ("R²",       fit.r_squared, ""),
+        ("RMSE",          fit.rmse,      "mA/cm²"),
+        ("RMSE_log",      fit.rmse_log,  "log₁₀ scale"),
+    ]):
+        r = 6 + i
+        ws.write(r, 0, label, pf)
+        ws.write(r, 1, val, nf)
+        ws.write(r, 3, unit, nf)
+
+    # Row 10: metadata headers; Row 11: values
+    for c, h in enumerate(
+        ["Method", "Temperature (K)", "Fit Timestamp", "Bounded Parameters"]
+    ):
+        ws.write(10, c, h, hf)
+    ws.write(11, 0, fit.method, nf)
+    ws.write(11, 1, fit.temperature_K, nf)
+    ws.write(11, 2, fit.timestamp, nf)
+    ws.write(
+        11, 3,
+        ", ".join(fit.bounded_parameters) if fit.bounded_parameters else "none",
+        nf,
+    )
+
+
+# ── append_single_diode_fit_to_file (openpyxl) ───────────────────────────────
+
+def append_single_diode_fit_to_file(filepath: str, fit) -> None:
+    """Write or overwrite the SingleDiodeFit sheet in an existing xlsx file.
+
+    Uses openpyxl so it can append to a file already closed by xlsxwriter.
+
+    Args:
+        filepath: Absolute path to an existing .xlsx file.
+        fit: SingleDiodeFit instance from app.measurement.analysis.
+    """
+    wb = openpyxl.load_workbook(filepath)
+    if FIT_SHEET in wb.sheetnames:
+        del wb[FIT_SHEET]
+    ws = wb.create_sheet(FIT_SHEET)
+
+    # Headers
+    ws.cell(1, 1, "Parameter")
+    ws.cell(1, 2, "Value")
+    ws.cell(1, 3, "±Std Error")
+    ws.cell(1, 4, "Unit")
+
+    # Parameters (rows 2-6)
+    for i, name in enumerate(_FIT_PARAM_NAMES):
+        r = i + 2
+        ws.cell(r, 1, name)
+        ws.cell(r, 2, fit.parameters.get(name))
+        ws.cell(r, 3, fit.std_errors.get(name))
+        ws.cell(r, 4, _FIT_PARAM_UNITS.get(name, ""))
+
+    # Metrics (rows 7-9)
+    for i, (label, val, unit) in enumerate([
+        ("R²",   fit.r_squared, ""),
+        ("RMSE",      fit.rmse,      "mA/cm²"),
+        ("RMSE_log",  fit.rmse_log,  "log₁₀ scale"),
+    ]):
+        r = 7 + i
+        ws.cell(r, 1, label)
+        ws.cell(r, 2, val)
+        ws.cell(r, 4, unit)
+
+    # Metadata (row 11 header, row 12 values)
+    for c, h in enumerate(
+        ["Method", "Temperature (K)", "Fit Timestamp", "Bounded Parameters"], 1
+    ):
+        ws.cell(11, c, h)
+    ws.cell(12, 1, fit.method)
+    ws.cell(12, 2, fit.temperature_K)
+    ws.cell(12, 3, fit.timestamp)
+    ws.cell(12, 4,
+            ", ".join(fit.bounded_parameters) if fit.bounded_parameters else "none")
+
+    wb.save(filepath)
+    wb.close()
+
+
+# ── Primary save functions ────────────────────────────────────────────────────
+
 def save_data(
     export_folder, sample_name,
     v_f, j_f, v_r, j_r, illum,
@@ -51,7 +163,14 @@ def save_data(
     prebias_enabled, prebias_voltage, prebias_duration,
     instrument_idn,
     scan_rate=None,
+    fit_result=None,
 ):
+    """Save an illuminated J-V measurement to xlsx.
+
+    Args:
+        fit_result: Optional SingleDiodeFit.  When provided a second sheet
+            named ``SingleDiodeFit`` is appended to the workbook.
+    """
     p_f = v_f * j_f
     p_r = v_r * j_r
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -86,7 +205,6 @@ def save_data(
     pb_v = prebias_voltage if prebias_enabled else 0.0
     pb_t = prebias_duration if prebias_enabled else 0.0
 
-    # Calculate scan rate if not provided explicitly
     if scan_rate is None:
         _nplc_ms        = nplc * (1000.0 / 60.0)
         _time_per_point = (delay_ms + _nplc_ms + 20.0) / 1000.0
@@ -119,6 +237,9 @@ def save_data(
             ws.write(r, 3, v_r[i], nf)
             ws.write(r, 4, j_r[i], nf)
             ws.write(r, 5, p_r[i], nf)
+
+    if fit_result is not None:
+        _write_fit_sheet(wb, hf, pf, nf, fit_result)
 
     wb.close()
     return fp

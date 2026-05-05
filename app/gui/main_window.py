@@ -37,7 +37,9 @@ from app.measurement.analysis import (
     calculate_jv_parameters,
     calculate_resistances,
     calculate_hysteresis_index,
+    fit_single_diode,
 )
+from app.io.exporter import append_single_diode_fit_to_file
 from app.instrument.keithley import (
     init_instrument, apply_prebias, apply_light_soaking, measure_scan,
 )
@@ -315,6 +317,26 @@ class JVMeasurementApp:
                 "  Standard:    10\u2013100 mV/s  (good balance of speed and accuracy)\n"
                 "  Slow scan:   1\u201310 mV/s    (approaches quasi-steady-state)\n\n"
                 "Always report this value alongside Step Voltage and Delay when publishing.")
+
+        # ── Auto single-diode fit ─────────────────────────────────────────────
+        fitf = LabelFrame(tab_inst, text="Analysis", padx=6, pady=4)
+        fitf.pack(fill=X, pady=(0, 4))
+
+        self.auto_single_diode_fit_var = BooleanVar(value=False)
+        auto_fit_cb = Checkbutton(
+            fitf,
+            text="Auto single-diode fit",
+            variable=self.auto_single_diode_fit_var,
+        )
+        auto_fit_cb.grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+        ToolTip(
+            auto_fit_cb,
+            "After each J-V measurement, automatically fit the 5-parameter\n"
+            "single-diode model to the reverse scan.\n\n"
+            "Results are saved in the Excel file (SingleDiodeFit sheet) and\n"
+            "stored with the session data for the current session.\n\n"
+            "Adds approximately 1–3 seconds per measurement.",
+        )
 
         # ─── Tab 3: Conditioning ──────────────────────────────────────────────
         tab_cond = Frame(nb, padx=6, pady=4, bg="#ececec")
@@ -1018,6 +1040,7 @@ class JVMeasurementApp:
             "Voc_rev": Voc_r, "Jsc_rev": Jsc_r, "FF_rev": FF_r, "PCE_rev": PCE_r,
             "HI": HI,
             "color": color,
+            "single_diode_fit": None,   # populated later if auto-fit is enabled
         })
         pb = (f"Pre-bias: {self.prebias_voltage_var.get():.2f} V "
               f"for {self.prebias_duration_var.get():.1f} s\n"
@@ -1179,6 +1202,17 @@ class JVMeasurementApp:
                                         v_df=v_df, j_df=j_df,
                                         v_dr=v_dr, j_dr=j_dr)
             self.update_plot()
+
+            # \u2500\u2500 Auto single-diode fit (reverse scan) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+            fit_result = None
+            if self.auto_single_diode_fit_var.get():
+                self.status_var.set("Fitting single-diode model\u2026")
+                try:
+                    fit_result = fit_single_diode(v_r, j_r)
+                    self.session_data[-1]["single_diode_fit"] = fit_result
+                except Exception:
+                    pass   # fit failure must not abort the measurement
+
             save_data(
                 self.export_folder_var.get(),
                 self.sample_name_var.get(),
@@ -1194,6 +1228,7 @@ class JVMeasurementApp:
                 self.prebias_duration_var.get(),
                 self.instrument_idn or "",
                 scan_rate=float(self.scan_rate_var.get()) if self.scan_rate_var.get() != "\u2014" else None,
+                fit_result=fit_result,
             )
 
             self.status_var.set("Measurement complete.")
