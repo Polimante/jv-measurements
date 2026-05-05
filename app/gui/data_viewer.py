@@ -1351,30 +1351,33 @@ class SingleDiodeFitWindow:
 
     def _parse_bounds(self):
         """Parse user-editable bounds fields.  Returns None on error."""
-        from app.measurement.analysis import _estimate_initial_guess
         j_sc = float(abs(self._j[np.argmin(np.abs(self._v))]))
         bounds = {}
         for name in _FIT_PARAM_NAMES:
-            lo_str = self._bound_lo_var[name].get().strip()
-            hi_str = self._bound_hi_var[name].get().strip()
             try:
-                lo_str = lo_str.replace("× Jsc", "").replace("×Jsc", "").strip()
-                hi_str = hi_str.replace("× Jsc", "").replace("×Jsc", "").strip()
-                lo = float(lo_str) * j_sc if "Jsc" not in lo_str else float(lo_str) * j_sc
-                hi = float(hi_str) * j_sc if "Jsc" not in hi_str else float(hi_str) * j_sc
+                lo = self._parse_one_bound(
+                    self._bound_lo_var[name].get(), j_sc)
+                hi = self._parse_one_bound(
+                    self._bound_hi_var[name].get(), j_sc)
             except Exception:
-                try:
-                    lo = float(lo_str)
-                    hi = float(hi_str)
-                except Exception:
-                    return None
-            if name == "J_ph":
-                lo = float(self._bound_lo_var[name].get().replace("× Jsc","").replace("×Jsc","").strip())
-                hi = float(self._bound_hi_var[name].get().replace("× Jsc","").replace("×Jsc","").strip())
-                lo *= j_sc
-                hi *= j_sc
+                return None
             bounds[name] = (lo, hi)
         return bounds
+
+    @staticmethod
+    def _parse_one_bound(raw: str, j_sc: float) -> float:
+        """Parse a single bound string.
+
+        If the raw string contains "Jsc" (e.g. "0.5 × Jsc"), the numeric
+        coefficient is extracted and multiplied by j_sc.  Otherwise the
+        string is parsed as a plain float.  The "Jsc" check happens BEFORE
+        any stripping so the detection is not defeated by the strip itself.
+        """
+        raw = raw.strip()
+        if "Jsc" in raw:
+            coeff = raw.replace("× Jsc", "").replace("×Jsc", "").replace("Jsc", "").strip()
+            return float(coeff) * j_sc
+        return float(raw)
 
     def _run_fit_async(self):
         if self._fitting:
