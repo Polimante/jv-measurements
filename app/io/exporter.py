@@ -7,6 +7,8 @@ from datetime import datetime
 
 # Sheet name used for the single-diode model fit results
 FIT_SHEET = "SingleDiodeFit"
+# Sheet name used for the dark ideality factor fit results
+DARK_IDEALITY_SHEET = "DarkIdealityFit"
 
 _FIT_PARAM_NAMES = ("J_ph", "J0", "n", "Rs", "Rsh")
 _FIT_PARAM_UNITS = {
@@ -149,6 +151,79 @@ def append_single_diode_fit_to_file(filepath: str, fit) -> None:
             ", ".join(fit.bounded_parameters) if fit.bounded_parameters else "none")
 
     wb.save(filepath)
+    wb.close()
+
+
+# ── append_dark_ideality_fit_to_file (openpyxl) ──────────────────────────────
+
+def append_dark_ideality_fit_to_file(filepath, fit) -> None:
+    """Write or overwrite the DarkIdealityFit sheet in an existing xlsx file.
+
+    Uses openpyxl so it can append to a file already closed by xlsxwriter.
+    Header row uses the project's standard blue (#1565C0) background style
+    applied as font colour and bold, matching other sheets in this project.
+
+    Args:
+        filepath: Absolute path to an existing .xlsx file (str or Path).
+        fit: DarkIdealityFit instance from app.measurement.analysis.
+    """
+    from openpyxl.styles import PatternFill, Font, Alignment
+
+    wb = openpyxl.load_workbook(str(filepath))
+    if DARK_IDEALITY_SHEET in wb.sheetnames:
+        del wb[DARK_IDEALITY_SHEET]
+    ws = wb.create_sheet(DARK_IDEALITY_SHEET)
+
+    header_fill = PatternFill("solid", fgColor="1565C0")
+    header_font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+    header_align = Alignment(horizontal="center", vertical="center")
+    data_font  = Font(name="Calibri", size=10)
+    data_align = Alignment(horizontal="center", vertical="center")
+
+    def _hdr(row, col, text):
+        c = ws.cell(row, col, text)
+        c.fill   = header_fill
+        c.font   = header_font
+        c.alignment = header_align
+        return c
+
+    def _dat(row, col, value):
+        c = ws.cell(row, col, value)
+        c.font      = data_font
+        c.alignment = data_align
+        return c
+
+    # Row 1: column headers
+    for col, text in enumerate(["Parameter", "Value", "Std Error", "Notes"], 1):
+        _hdr(1, col, text)
+
+    # Rows 2-10: fit parameters and metrics
+    rows = [
+        ("n_idd",     fit.n_idd,     fit.n_idd_err,  "Dark ideality factor"),
+        ("J_s",       fit.J_s,       fit.J_s_err,    "Dark saturation current density (mA/cm²)"),
+        ("R^2",       fit.r_squared, None,            "Coefficient of determination"),
+        ("RMSE_log",  fit.rmse_log,  None,            "RMSE in log10|J| units"),
+        ("V_min",     fit.v_min,     None,            "Window minimum (V)"),
+        ("V_max",     fit.v_max,     None,            "Window maximum (V)"),
+        ("n_points",  fit.n_points,  None,            "Number of data points in window"),
+        ("T (K)",     fit.temperature_K, None,        "Temperature used in fit"),
+        ("Method",    fit.method,    None,            ""),
+        ("Timestamp", fit.timestamp, None,            "Fit performed at"),
+    ]
+    for i, (param, value, err, note) in enumerate(rows):
+        r = i + 2
+        _dat(r, 1, param)
+        _dat(r, 2, value)
+        _dat(r, 3, err if err is not None else "—")
+        _dat(r, 4, note)
+
+    # Column widths
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 22
+    ws.column_dimensions["D"].width = 40
+
+    wb.save(str(filepath))
     wb.close()
 
 

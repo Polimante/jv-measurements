@@ -35,7 +35,8 @@ _PMPP_SHEET        = "PureMPP_Data"
 _MPP_SPO_SHEET     = "MPP_SPO"
 _MPP_JV_PARAMS     = "MPP_JV"
 _MPP_OLD_SHEET     = "JV_Parameters"
-_FIT_SHEET         = "SingleDiodeFit"
+_FIT_SHEET              = "SingleDiodeFit"
+_DARK_IDEALITY_SHEET    = "DarkIdealityFit"
 
 _COLORS = [
     "#1565C0", "#B71C1C", "#1B5E20", "#E65100", "#4A148C",
@@ -143,6 +144,47 @@ def _read_single_diode_fit(ws):
         "timestamp":          timestamp,
         "bounded_parameters": bounded,
     }
+
+
+def _read_dark_ideality_fit(ws):
+    """DarkIdealityFit sheet — rows 2-11 contain parameter/value/error/note rows."""
+    def _sf(v):
+        try:
+            return float(v) if v is not None else float("nan")
+        except (TypeError, ValueError):
+            return float("nan")
+
+    # Row index mapping (1-indexed): param rows are 2-11
+    _PARAM_ROWS = {
+        "n_idd":      2,
+        "J_s":        3,
+        "r_squared":  4,
+        "rmse_log":   5,
+        "v_min":      6,
+        "v_max":      7,
+        "n_points":   8,
+        "temperature_K": 9,
+        "method":    10,
+        "timestamp": 11,
+    }
+    result: dict = {}
+    for key, row in _PARAM_ROWS.items():
+        raw = _cell(ws, row, 2)
+        if key in ("method", "timestamp"):
+            result[key] = str(raw) if raw is not None else ""
+        elif key == "n_points":
+            try:
+                result[key] = int(raw) if raw is not None else 0
+            except (TypeError, ValueError):
+                result[key] = 0
+        else:
+            result[key] = _sf(raw)
+
+    for err_key, row in [("n_idd_err", 2), ("J_s_err", 3)]:
+        raw = _cell(ws, row, 3)
+        result[err_key] = _sf(raw) if not isinstance(raw, str) else float("nan")
+
+    return result
 
 
 def _read_dark(ws):
@@ -435,7 +477,10 @@ def load_jv_file(filepath):
                 meta["single_diode_fit"] = _read_single_diode_fit(wb[_FIT_SHEET])
             return meta
         elif _DARK_SHEET in sheets:
-            return _read_dark(wb[_DARK_SHEET])
+            meta = _read_dark(wb[_DARK_SHEET])
+            if _DARK_IDEALITY_SHEET in sheets:
+                meta["dark_ideality_fit"] = _read_dark_ideality_fit(wb[_DARK_IDEALITY_SHEET])
+            return meta
         elif _STAB_SHEET in sheets:
             return _read_stab(wb[_STAB_SHEET])
         elif _STAB_SHEET_OLD in sheets:
@@ -513,6 +558,15 @@ class DataViewerWindow:
             state=DISABLED,
         )
         self._fit_btn.pack(side=RIGHT, padx=4, pady=4)
+
+        self._dark_ideality_btn = Button(
+            top_bar, text="Dark Ideality Fit",
+            command=self._on_dark_ideality_fit,
+            bg="#00695C", fg="white", relief="flat",
+            font=("Arial", 9), padx=8, pady=2,
+            state=DISABLED,
+        )
+        self._dark_ideality_btn.pack(side=RIGHT, padx=4, pady=4)
 
         Button(
             top_bar, text="Open Another File…",
@@ -602,11 +656,16 @@ class DataViewerWindow:
         self._title_lbl.config(text=f"\U0001f4c2  {filename}   —   {type_str}")
         self.win.title(f"Data Viewer — {filename}")
 
-        # Enable the fit button only for illuminated J-V data
+        # Enable each analysis button only for the relevant data type
         if data["type"] == "illuminated":
             self._fit_btn.config(state=NORMAL)
         else:
             self._fit_btn.config(state=DISABLED)
+
+        if data["type"] == "dark":
+            self._dark_ideality_btn.config(state=NORMAL)
+        else:
+            self._dark_ideality_btn.config(state=DISABLED)
 
         self._populate_metadata(data, filename)
         self._draw_plot(data, filename)
@@ -722,6 +781,12 @@ class DataViewerWindow:
                 fit = data.get("single_diode_fit")
                 if fit:
                     self._populate_fit_metadata_section(section, row, fit)
+
+            # ── Dark Ideality Fit (dark files only, if present) ────────────
+            if dtype == "dark":
+                dfit = data.get("dark_ideality_fit")
+                if dfit:
+                    self._populate_dark_ideality_metadata_section(section, row, dfit)
 
         # ── Stabilized Current ────────────────────────────────────────────
         elif dtype == "stab":
@@ -845,6 +910,30 @@ class DataViewerWindow:
         if bounded:
             row(sf, "⚠ Bounded:", ", ".join(bounded), fg="#E65100")
 
+    def _populate_dark_ideality_metadata_section(self, section, row, dfit):
+        """Append Dark Ideality Fit sub-section to the metadata panel."""
+        sf = section("Dark Ideality Fit")
+        n_idd = dfit.get("n_idd")
+        n_err = dfit.get("n_idd_err")
+        j_s   = dfit.get("J_s")
+        j_err = dfit.get("J_s_err")
+        if n_idd is not None and not math.isnan(n_idd):
+            if n_err is not None and not math.isnan(n_err):
+                row(sf, "n_idd:", f"{n_idd:.4f} ± {n_err:.4f}", "#00695C")
+            else:
+                row(sf, "n_idd:", f"{n_idd:.4f}", "#00695C")
+        if j_s is not None and not math.isnan(j_s):
+            if j_err is not None and not math.isnan(j_err):
+                row(sf, "J_s:", f"{j_s:.3e} ± {j_err:.1e} mA/cm²")
+            else:
+                row(sf, "J_s:", f"{j_s:.3e} mA/cm²")
+        r2 = dfit.get("r_squared")
+        if r2 is not None and not math.isnan(r2):
+            row(sf, "R²:", f"{r2:.6f}")
+        ts = dfit.get("timestamp", "")
+        if ts:
+            row(sf, "Fitted:", ts[:16])
+
     # ── Single-Diode Fit button ───────────────────────────────────────────────
 
     def _on_single_diode_fit(self):
@@ -869,6 +958,31 @@ class DataViewerWindow:
             j=j_r,
             filepath=self._current_filepath,
             initial_fit=initial_fit,
+            basename=basename,
+        )
+
+    def _on_dark_ideality_fit(self):
+        if self._current_data is None or self._current_data.get("type") != "dark":
+            return
+        # Use reverse scan if available, fall back to forward
+        v = self._current_data.get("v_r", np.array([]))
+        j = self._current_data.get("j_r", np.array([]))
+        if len(v) < 5:
+            v = self._current_data.get("v_f", np.array([]))
+            j = self._current_data.get("j_f", np.array([]))
+        if len(v) < 5:
+            messagebox.showwarning(
+                "Insufficient data",
+                "The dark J-V scan has fewer than 5 points — cannot fit.",
+                parent=self.win,
+            )
+            return
+        basename = os.path.splitext(os.path.basename(self._current_filepath or ""))[0]
+        DarkIdealityFitWindow(
+            parent=self.win,
+            v=v,
+            j=j,
+            filepath=self._current_filepath,
             basename=basename,
         )
 
@@ -1616,6 +1730,436 @@ class SingleDiodeFitWindow:
         try:
             from app.io.exporter import append_single_diode_fit_to_file
             append_single_diode_fit_to_file(self._filepath, self._fit)
+            self._status_lbl.config(text="Saved to file.")
+        except Exception as exc:
+            messagebox.showerror("Save Error", str(exc), parent=self.win)
+
+
+# ── DarkIdealityFitWindow ─────────────────────────────────────────────────────
+
+class DarkIdealityFitWindow:
+    """Interactive dark ideality factor extraction window (Toplevel).
+
+    Shows |J| vs V on a semi-log scale with two draggable cursor lines
+    delimiting the exponential region.  The fit updates live as cursors move.
+    """
+
+    _DEFAULT_VMIN = 0.4
+    _DEFAULT_VMAX = 1.0
+    _CURSOR_GRAB_TOL = 0.03   # V — how close a click must be to grab a cursor
+
+    def __init__(
+        self,
+        parent,
+        v: np.ndarray,
+        j: np.ndarray,
+        filepath: str | None,
+        basename: str = "dark_jv",
+    ):
+        self._parent   = parent
+        self._v        = np.asarray(v, dtype=float)
+        self._j        = np.asarray(j, dtype=float)
+        self._filepath = filepath
+        self._basename = basename
+        self._fit      = None
+        self._dragging = None   # "left" | "right" | None
+
+        # Clamp default window to data range
+        v_data_min = float(np.min(self._v))
+        v_data_max = float(np.max(self._v))
+        self._vmin = max(self._DEFAULT_VMIN, v_data_min)
+        self._vmax = min(self._DEFAULT_VMAX, v_data_max)
+        if self._vmin >= self._vmax:
+            self._vmin = v_data_min
+            self._vmax = v_data_max
+
+        self.win = Toplevel(parent)
+        self.win.title("Dark Ideality Fit")
+        self.win.geometry("1100x700")
+        self.win.minsize(900, 580)
+        self.win.transient(parent)
+        self.win.grab_set()
+
+        self._build_ui()
+        self._run_fit()
+
+    # ── UI construction ───────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        outer = Frame(self.win)
+        outer.pack(fill=BOTH, expand=True)
+
+        # Left: plots
+        plot_frame = Frame(outer)
+        plot_frame.pack(side=LEFT, fill=BOTH, expand=True)
+
+        from matplotlib.gridspec import GridSpec
+        self._fig = Figure(figsize=(7, 6), constrained_layout=True)
+        gs = GridSpec(3, 1, figure=self._fig, hspace=0.45)
+        self._ax_main = self._fig.add_subplot(gs[0:2, 0])
+        self._ax_res  = self._fig.add_subplot(gs[2, 0])
+
+        self._canvas = FigureCanvasTkAgg(self._fig, plot_frame)
+        self._canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+
+        # Cursor drag events
+        self._canvas.mpl_connect("button_press_event",   self._on_mouse_press)
+        self._canvas.mpl_connect("motion_notify_event",  self._on_mouse_motion)
+        self._canvas.mpl_connect("button_release_event", self._on_mouse_release)
+
+        # Right: controls
+        ctrl_outer = Frame(outer, width=290, bg="#f5f5f5")
+        ctrl_outer.pack(side=RIGHT, fill=Y, expand=False)
+        ctrl_outer.pack_propagate(False)
+
+        ctrl_canvas = Canvas(ctrl_outer, bg="#f5f5f5", highlightthickness=0)
+        vsb = ttk.Scrollbar(ctrl_outer, orient="vertical", command=ctrl_canvas.yview)
+        ctrl_canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=RIGHT, fill=Y)
+        ctrl_canvas.pack(side=LEFT, fill=BOTH, expand=True)
+
+        self._ctrl_inner = Frame(ctrl_canvas, bg="#f5f5f5")
+        _win_id = ctrl_canvas.create_window((0, 0), window=self._ctrl_inner, anchor="nw")
+        self._ctrl_inner.bind(
+            "<Configure>",
+            lambda e: ctrl_canvas.configure(scrollregion=ctrl_canvas.bbox("all")),
+        )
+        ctrl_canvas.bind(
+            "<Configure>",
+            lambda e: ctrl_canvas.itemconfig(_win_id, width=e.width),
+        )
+        self._build_controls(self._ctrl_inner)
+
+    def _build_controls(self, parent):
+        bg  = "#f5f5f5"
+        pad = {"padx": 8, "pady": 4}
+
+        def sec(title):
+            lf = LabelFrame(parent, text=title, bg=bg,
+                            font=("Arial", 9, "bold"), padx=6, pady=4)
+            lf.pack(fill=X, **pad)
+            return lf
+
+        # ── Temperature ───────────────────────────────────────────────────────
+        tf = sec("Temperature")
+        row_t = Frame(tf, bg=bg)
+        row_t.pack(fill=X)
+        Label(row_t, text="T (K):", bg=bg, font=("Arial", 9)).pack(side=LEFT)
+        self._temp_var = DoubleVar(value=298.15)
+        Entry(row_t, textvariable=self._temp_var, width=9).pack(side=LEFT, padx=(4, 0))
+        self._celsius_lbl = Label(row_t, text="= 25.00 °C", bg=bg,
+                                  fg="#607d8b", font=("Arial", 9))
+        self._celsius_lbl.pack(side=LEFT, padx=(6, 0))
+        self._temp_var.trace_add("write", lambda *_: self._on_temp_change())
+        self._on_temp_change()
+
+        # ── Fit Window ────────────────────────────────────────────────────────
+        wf = sec("Fit Window")
+        self._vmin_var = StringVar(value=f"{self._vmin:.3f}")
+        self._vmax_var = StringVar(value=f"{self._vmax:.3f}")
+
+        for label, var, attr in [
+            ("V_min (V):", self._vmin_var, "_vmin"),
+            ("V_max (V):", self._vmax_var, "_vmax"),
+        ]:
+            rf = Frame(wf, bg=bg)
+            rf.pack(fill=X, pady=2)
+            Label(rf, text=label, bg=bg, font=("Arial", 9), width=10,
+                  anchor=W).pack(side=LEFT)
+            e = Entry(rf, textvariable=var, width=9)
+            e.pack(side=LEFT, padx=(4, 0))
+            e.bind("<Return>", lambda _e, a=attr, sv=var: self._on_window_entry(a, sv))
+            e.bind("<FocusOut>", lambda _e, a=attr, sv=var: self._on_window_entry(a, sv))
+
+        # ── Actions ───────────────────────────────────────────────────────────
+        af = sec("Actions")
+        self._refit_btn = Button(
+            af, text="Refit",
+            command=self._run_fit,
+            bg="#1565C0", fg="white", relief="flat",
+            font=("Arial", 9, "bold"), pady=3,
+        )
+        self._refit_btn.pack(fill=X, pady=2)
+
+        Button(
+            af, text="Export fit (CSV)",
+            command=self._export_csv,
+            bg="#455a64", fg="white", relief="flat",
+            font=("Arial", 9), pady=3,
+        ).pack(fill=X, pady=2)
+
+        self._save_btn = Button(
+            af, text="Save fit to file",
+            command=self._save_to_file,
+            bg="#1B5E20", fg="white", relief="flat",
+            font=("Arial", 9), pady=3,
+            state=NORMAL if self._filepath else DISABLED,
+        )
+        self._save_btn.pack(fill=X, pady=2)
+
+        # ── Fit Results ───────────────────────────────────────────────────────
+        rf_sec = sec("Fit Results")
+        self._result_lbl = Label(
+            rf_sec, text="—", bg=bg, fg="#607d8b",
+            font=("Arial", 9), justify=LEFT, anchor=W,
+        )
+        self._result_lbl.pack(fill=X, padx=4)
+
+        self._warn_lbl = Label(
+            parent, text="", bg=bg, fg="#E65100",
+            font=("Arial", 9, "bold"), anchor=W, justify=LEFT,
+        )
+        self._warn_lbl.pack(fill=X, padx=8, pady=(4, 0))
+
+        self._status_lbl = Label(
+            parent, text="Ready", bg="#37474F", fg="#CFD8DC",
+            font=("Arial", 8), anchor=W,
+        )
+        self._status_lbl.pack(fill=X, side="bottom", padx=0, pady=0)
+
+    # ── Temperature display ───────────────────────────────────────────────────
+
+    def _on_temp_change(self, *_):
+        try:
+            t_k = self._temp_var.get()
+            self._celsius_lbl.config(text=f"= {t_k - 273.15:.2f} °C")
+        except Exception:
+            self._celsius_lbl.config(text="")
+
+    # ── Window entry syncing ──────────────────────────────────────────────────
+
+    def _on_window_entry(self, attr, sv):
+        try:
+            val = float(sv.get())
+        except ValueError:
+            return
+        setattr(self, attr, val)
+        self._run_fit()
+
+    def _sync_entries(self):
+        self._vmin_var.set(f"{self._vmin:.3f}")
+        self._vmax_var.set(f"{self._vmax:.3f}")
+
+    # ── Cursor drag ───────────────────────────────────────────────────────────
+
+    def _on_mouse_press(self, event):
+        if event.inaxes is not self._ax_main or event.button != 1:
+            return
+        x = event.xdata
+        if x is None:
+            return
+        if abs(x - self._vmin) < self._CURSOR_GRAB_TOL:
+            self._dragging = "left"
+        elif abs(x - self._vmax) < self._CURSOR_GRAB_TOL:
+            self._dragging = "right"
+
+    def _on_mouse_motion(self, event):
+        if self._dragging is None or event.inaxes is not self._ax_main:
+            return
+        x = event.xdata
+        if x is None:
+            return
+        v_data_min = float(np.min(self._v))
+        v_data_max = float(np.max(self._v))
+        x = float(np.clip(x, v_data_min, v_data_max))
+        if self._dragging == "left":
+            self._vmin = min(x, self._vmax - 0.01)
+        else:
+            self._vmax = max(x, self._vmin + 0.01)
+        self._sync_entries()
+        self._run_fit()
+
+    def _on_mouse_release(self, event):
+        self._dragging = None
+
+    # ── Fitting ───────────────────────────────────────────────────────────────
+
+    def _run_fit(self):
+        try:
+            T = self._temp_var.get()
+        except Exception:
+            T = 298.15
+
+        from app.measurement.analysis import fit_dark_ideality
+        try:
+            fit = fit_dark_ideality(
+                self._v, self._j,
+                v_min=self._vmin,
+                v_max=self._vmax,
+                T=T,
+            )
+        except ValueError as exc:
+            self._fit = None
+            self._status_lbl.config(text=f"Fit error: {str(exc)[:80]}")
+            self._result_lbl.config(text="—")
+            self._warn_lbl.config(text="")
+            self._update_plots(None)
+            return
+
+        self._fit = fit
+        self._status_lbl.config(
+            text=f"n_idd = {fit.n_idd:.4f}  |  R² = {fit.r_squared:.6f}"
+        )
+        self._update_results_panel(fit)
+        self._update_plots(fit)
+
+    # ── UI update helpers ─────────────────────────────────────────────────────
+
+    def _update_results_panel(self, fit):
+        lines = [
+            f"n_idd  = {fit.n_idd:.4f} ± {fit.n_idd_err:.4f}",
+            f"J_s    = {fit.J_s:.3e} ± {fit.J_s_err:.1e} mA/cm²",
+            f"R²     = {fit.r_squared:.6f}",
+            f"RMSE_log = {fit.rmse_log:.5f}",
+            f"Points: {fit.n_points}",
+        ]
+        self._result_lbl.config(text="\n".join(lines))
+
+        low_quality = fit.r_squared < 0.995 or fit.n_points < 10
+        self._warn_lbl.config(
+            text="⚠ Low fit quality" if low_quality else "",
+            fg="#E65100",
+        )
+
+    def _update_plots(self, fit):
+        self._ax_main.clear()
+        self._ax_res.clear()
+
+        abs_j = np.abs(self._j)
+        pos   = abs_j > 0
+        v_pos = self._v[pos]
+        j_pos = abs_j[pos]
+
+        # ── Main semi-log plot ────────────────────────────────────────────────
+        self._ax_main.semilogy(
+            v_pos, j_pos, "o", color=_COLORS[4],
+            markersize=4, alpha=0.8, label="|J| measured",
+        )
+
+        if fit is not None:
+            # Fitted line over the window — straight line in log space
+            v_line = np.linspace(self._vmin, self._vmax, 200)
+            from app.measurement.analysis import _KB, _Q, _LN10
+            vt = _KB * fit.temperature_K / _Q
+            slope     = 1.0 / (fit.n_idd * vt * _LN10) if fit.n_idd > 0 else 0.0
+            intercept = math.log10(fit.J_s) if fit.J_s > 0 else 0.0
+            j_line    = 10.0 ** (intercept + slope * v_line)
+            self._ax_main.semilogy(
+                v_line, j_line, "-", color="#E65100", linewidth=2.0,
+                label=f"Fit (n={fit.n_idd:.3f})", zorder=4,
+            )
+
+        # Cursor lines
+        self._ax_main.axvline(
+            self._vmin, color="#1565C0", linestyle="--", linewidth=1.5,
+            label=f"V_min={self._vmin:.3f} V",
+        )
+        self._ax_main.axvline(
+            self._vmax, color="#1565C0", linestyle="--", linewidth=1.5,
+            label=f"V_max={self._vmax:.3f} V",
+        )
+
+        # Cursor V labels at top of axes
+        y_top = self._ax_main.get_ylim()[1] if self._ax_main.get_ylim()[1] > 0 else 1.0
+        for vx, lbl in [(self._vmin, f"{self._vmin:.3f}"), (self._vmax, f"{self._vmax:.3f}")]:
+            self._ax_main.text(
+                vx, y_top, lbl,
+                ha="center", va="bottom", fontsize=7, color="#1565C0",
+                transform=self._ax_main.get_xaxis_transform(),
+            )
+
+        self._ax_main.set_xlabel("Voltage (V)", fontsize=9)
+        self._ax_main.set_ylabel("|J| (mA/cm²)", fontsize=9)
+        self._ax_main.set_title("|J| vs V — Dark Ideality Fit", fontsize=10)
+        self._ax_main.legend(fontsize=7, loc="upper left")
+        self._ax_main.grid(True, which="both", alpha=0.3)
+
+        # ── Residuals plot ────────────────────────────────────────────────────
+        if fit is not None:
+            window_mask = (self._v >= self._vmin) & (self._v <= self._vmax)
+            v_w = self._v[window_mask]
+            j_w = np.abs(self._j[window_mask])
+            pos_w = j_w > 0
+            v_w = v_w[pos_w]
+            j_w = j_w[pos_w]
+
+            if len(v_w) > 0:
+                from app.measurement.analysis import _KB, _Q, _LN10
+                vt = _KB * fit.temperature_K / _Q
+                slope     = 1.0 / (fit.n_idd * vt * _LN10) if fit.n_idd > 0 else 0.0
+                intercept = math.log10(fit.J_s) if fit.J_s > 0 else 0.0
+                log_j_meas = np.log10(j_w)
+                log_j_fit  = intercept + slope * v_w
+                residuals  = log_j_meas - log_j_fit
+                self._ax_res.stem(
+                    v_w, residuals,
+                    linefmt="grey", markerfmt="o", basefmt=" ",
+                )
+
+        self._ax_res.axhline(0, color="#aaaaaa", linewidth=0.9, linestyle="--")
+        self._ax_res.set_xlabel("Voltage (V)", fontsize=9)
+        self._ax_res.set_ylabel("Residual (log₁₀)", fontsize=9)
+        self._ax_res.set_title("Residuals", fontsize=9)
+        self._ax_res.grid(True, alpha=0.3)
+
+        self._canvas.draw_idle()
+
+    # ── Export helpers ────────────────────────────────────────────────────────
+
+    def _export_csv(self):
+        if self._fit is None:
+            messagebox.showwarning("No fit", "Run a fit first.", parent=self.win)
+            return
+        suggested = f"{self._basename}_DarkIdealityFit.csv"
+        path = filedialog.asksaveasfilename(
+            parent=self.win,
+            title="Export dark ideality fit",
+            initialfile=suggested,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            fit = self._fit
+            # Windowed data for export
+            window_mask = (self._v >= fit.v_min) & (self._v <= fit.v_max)
+            v_w = self._v[window_mask]
+            j_w = self._j[window_mask]
+
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Parameter", "Value", "Std_Error", "Unit"])
+                writer.writerow(["n_idd",     fit.n_idd,      fit.n_idd_err,  "—"])
+                writer.writerow(["J_s",        fit.J_s,        fit.J_s_err,    "mA/cm2"])
+                writer.writerow(["R2",          fit.r_squared,  "",             ""])
+                writer.writerow(["RMSE_log",    fit.rmse_log,   "",             "log10 scale"])
+                writer.writerow(["V_min",       fit.v_min,      "",             "V"])
+                writer.writerow(["V_max",       fit.v_max,      "",             "V"])
+                writer.writerow(["n_points",    fit.n_points,   "",             ""])
+                writer.writerow(["Temperature", fit.temperature_K, "",          "K"])
+                writer.writerow(["Method",      fit.method,     "",             ""])
+                writer.writerow(["Timestamp",   fit.timestamp,  "",             ""])
+                writer.writerow([])
+                writer.writerow(["V (V)", "J (mA/cm2)", "|J| (mA/cm2)", "log10|J|"])
+                for vi, ji in zip(v_w, j_w):
+                    abs_ji = abs(ji)
+                    log_ji = math.log10(abs_ji) if abs_ji > 0 else float("nan")
+                    writer.writerow([vi, ji, abs_ji, log_ji])
+            self._status_lbl.config(text=f"Exported: {os.path.basename(path)}")
+        except Exception as exc:
+            messagebox.showerror("Export Error", str(exc), parent=self.win)
+
+    def _save_to_file(self):
+        if self._fit is None:
+            messagebox.showwarning("No fit", "Run a fit first.", parent=self.win)
+            return
+        if not self._filepath:
+            messagebox.showwarning("No file", "No source file path known.", parent=self.win)
+            return
+        try:
+            from app.io.exporter import append_dark_ideality_fit_to_file
+            append_dark_ideality_fit_to_file(self._filepath, self._fit)
             self._status_lbl.config(text="Saved to file.")
         except Exception as exc:
             messagebox.showerror("Save Error", str(exc), parent=self.win)

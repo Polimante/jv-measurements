@@ -10,6 +10,7 @@ from typing import Optional
 
 import numpy as np
 from scipy.optimize import brentq, curve_fit
+from scipy.stats import linregress
 
 # ── Physical constants ────────────────────────────────────────────────────────
 _KB: float = 1.380649e-23   # J/K
@@ -335,4 +336,138 @@ def fit_single_diode(
         method="curve_fit+brentq",
         bounded_parameters=bounded,
         temperature_K=float(T),
+    )
+
+
+# ── Dark ideality factor fitting ───────────────────────────────────────────────
+
+@dataclass
+class DarkIdealityFit:
+    """Result of a log-linear fit of dark J-V data to extract the ideality factor.
+
+    Equation fitted:  log10(|J|) = log10(J_s) + V / (n_idd · Vt · ln(10))
+    where Vt = k_B · T / q.
+
+    Units:
+        J_s   — mA/cm²
+        n_idd — dimensionless
+        rmse_log — log10(mA/cm²)
+    """
+
+    n_idd: float
+    n_idd_err: float
+    J_s: float
+    J_s_err: float
+    r_squared: float
+    rmse_log: float
+    v_min: float
+    v_max: float
+    n_points: int
+    temperature_K: float
+    method: str
+    timestamp: str = field(
+        default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )
+
+
+def fit_dark_ideality(
+    v: np.ndarray,
+    j: np.ndarray,
+    v_min: float,
+    v_max: float,
+    T: float = 298.15,
+) -> DarkIdealityFit:
+    """Fit dark ideality factor from log10(|J|) vs V in a user-selected window.
+
+    Performs a linear regression of log10(|J|) on V within [v_min, v_max].
+    The slope converts to the ideality factor via:
+        n_idd = q / (k_B · T · ln(10) · slope) = 1 / (Vt · ln(10) · slope)
+
+    Args:
+        v: Voltage array (V).  Need not be sorted.
+        j: Current density array (mA/cm²).  Sign convention per CLAUDE.md
+            (dark current is negative after instrument negation; absolute value
+            is taken internally).
+        v_min: Lower bound of the exponential region (V).
+        v_max: Upper bound of the exponential region (V).
+        T: Cell temperature (K).
+
+    Returns:
+        DarkIdealityFit dataclass.
+
+    Raises:
+        ValueError: If fewer than 5 positive-current points fall inside the window.
+    """
+    v = np.asarray(v, dtype=float)
+    j = np.asarray(j, dtype=float)
+
+    if v_min > v_max:
+        warnings.warn(
+            f"fit_dark_ideality: v_min ({v_min}) > v_max ({v_max}); swapping.",
+            UserWarning,
+            stacklevel=2,
+        )
+        v_min, v_max = v_max, v_min
+
+    # Sort by voltage
+    order = np.argsort(v)
+    v = v[order]
+    j = j[order]
+
+    # Window mask
+    window = (v >= v_min) & (v <= v_max)
+    v_w = v[window]
+    j_w = j[window]
+
+    # Keep only points where |J| > 0 (filter zeros and negatives of |J|)
+    pos_mask = np.abs(j_w) > 0.0
+    v_w = v_w[pos_mask]
+    j_w = j_w[pos_mask]
+
+    n_points = int(len(v_w))
+    if n_points < 5:
+        raise ValueError(
+            f"Fit window must contain at least 5 data points; window "
+            f"[{v_min}, {v_max}] V contains only {n_points} points "
+            f"(after filtering non-positive |J| values)."
+        )
+
+    log_j = np.log10(np.abs(j_w))
+    result = linregress(v_w, log_j)
+
+    slope     = float(result.slope)
+    intercept = float(result.intercept)
+    slope_se  = float(result.stderr)
+
+    vt = _KB * T / _Q
+    n_idd = 1.0 / (vt * _LN10 * slope) if slope > 0 else float("nan")
+
+    # Error propagation: n_idd = 1/(Vt·ln10·slope) → δn = n_idd · (δslope/slope)
+    if slope > 0 and not math.isnan(slope_se):
+        n_idd_err = abs(n_idd) * (slope_se / abs(slope))
+    else:
+        n_idd_err = float("nan")
+
+    J_s = 10.0 ** intercept
+    intercept_se = float(getattr(result, "intercept_stderr", float("nan")))
+    J_s_err = J_s * _LN10 * intercept_se if not math.isnan(intercept_se) else float("nan")
+
+    r_squared = float(result.rvalue ** 2)
+
+    log_j_fit = intercept + slope * v_w
+    residuals  = log_j - log_j_fit
+    rmse_log   = float(np.sqrt(np.mean(residuals ** 2)))
+
+    return DarkIdealityFit(
+        n_idd=n_idd,
+        n_idd_err=n_idd_err,
+        J_s=J_s,
+        J_s_err=J_s_err,
+        r_squared=r_squared,
+        rmse_log=rmse_log,
+        v_min=v_min,
+        v_max=v_max,
+        n_points=n_points,
+        temperature_K=float(T),
+        method="log_linear_regression",
     )
