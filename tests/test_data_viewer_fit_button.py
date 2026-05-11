@@ -26,9 +26,10 @@ def _tk_available() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _tk_available(), reason="Tk not available in this environment"
-)
+pytestmark = [
+    pytest.mark.gui,
+    pytest.mark.skipif(not _tk_available(), reason="Tk not available in this environment"),
+]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

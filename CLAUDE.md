@@ -187,6 +187,33 @@ Both modes use 50 ms as the GPIB overhead constant so they round-trip consistent
 4. Commit, push, create a GitHub Release tagged `vX.Y.Z`
 5. Optionally attach the compiled installer `.exe` to the release
 
+### Continuous Integration
+
+Two GitHub Actions workflows live in `.github/workflows/`:
+
+| Workflow file | Runner | Python | Marker filter |
+|---|---|---|---|
+| `tests.yml` | `ubuntu-latest` | 3.10, 3.11, 3.12 (matrix) | `not windows_only and not gui` |
+| `tests-windows.yml` | `windows-latest` | 3.11 | `not gui` |
+
+Both workflows trigger on every `push` and `pull_request` to any branch.
+
+**Pytest markers** (defined in `tests/conftest.py` and registered in `pyproject.toml`):
+
+- `windows_only` — test requires Windows; auto-skipped on Linux/macOS.
+- `gui` — test requires a live Tk display; auto-skipped in CI and on headless Linux (no `DISPLAY`).
+
+Currently no tests carry `windows_only` (all hardware is mocked). Two tests carry `gui`:
+`test_data_viewer_fit_button.py` and `test_data_viewer_dark_ideality_button.py`.
+
+**Run the same checks locally before pushing:**
+
+```bash
+pytest tests/ -v -m "not windows_only and not gui"
+```
+
+Coverage XML is uploaded as a workflow artifact on each Linux CI run (one artifact per Python version). No external coverage service is configured.
+
 ### Matplotlib layout note
 
 `mpp_fig` and `pmpp_fig` use `constrained_layout=True` (set at figure creation) because they contain `GridSpec` subplots with column-spanning axes. Do **not** call `tight_layout()` on these figures — it conflicts with `constrained_layout` and produces warnings. `stab_fig` does not use `constrained_layout` and still uses `tight_layout()` normally.
