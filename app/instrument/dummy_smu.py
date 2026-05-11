@@ -56,6 +56,12 @@ class DummySMU(SourceMeter):
         self._four_wire: bool = False
         self._compliance: float = 200.0  # mA/cm² — generous default
 
+    # ── Illumination control ──────────────────────────────────────────────────
+
+    def set_illumination_factor(self, factor: float) -> None:
+        """Forward to the underlying DummyCell.  See DummyCell.set_illumination_factor."""
+        self._cell.set_illumination_factor(factor)
+
     # ── Connection state machine ───────────────────────────────────────────────
 
     def connect(self) -> None:

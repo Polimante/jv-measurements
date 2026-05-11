@@ -108,8 +108,24 @@ class DummyCell:
             rng if rng is not None else np.random.default_rng()
         )
         self._t_start: float = time.monotonic()
+        self._illumination_factor: float = 1.0
 
     # ── Time control ──────────────────────────────────────────────────────────
+
+    def set_illumination_factor(self, factor: float) -> None:
+        """Scale photocurrent linearly with *factor*.
+
+        factor=1.0 is the nominal J_ph given at construction time.
+        factor=0.5 halves J_ph, simulating 0.5-sun illumination.
+        Linear scaling only — no sub-linear corrections.
+        Used for testing light-intensity-dependent measurements.
+
+        Args:
+            factor: Illumination scale (must be > 0).
+        """
+        if factor <= 0:
+            raise ValueError(f"illumination_factor must be positive; got {factor!r}")
+        self._illumination_factor = float(factor)
 
     def set_time_offset(self, seconds: float) -> None:
         """Set the simulated elapsed time to *seconds* as of right now.
@@ -142,7 +158,7 @@ class DummyCell:
             Tuple (j_ph, j0, n, rs, rsh) in module units.
         """
         t = self._elapsed()
-        j_ph = self._j_ph
+        j_ph = self._j_ph * self._illumination_factor
         j0 = self._j0
         n = self._n
         rs = self._rs

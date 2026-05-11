@@ -370,6 +370,121 @@ class DarkIdealityFit:
     )
 
 
+# ── Light ideality factor fitting ─────────────────────────────────────────────
+
+@dataclass
+class LightIdealityFit:
+    """Result of a linear regression of Voc vs ln(L_normalized).
+
+    Computes the light ideality factor n_idL following Caprioglio et al.
+    (Adv. Energy Mater. 2020) and the Fluxim DC measurement convention
+    (equation 4).
+
+    The regression is performed on L_norm = L / max(L) so that the absolute
+    units of the intensity axis (suns, %, mW/cm²) are irrelevant — only the
+    ratios between intensities matter.  n_idL is then:
+
+        n_idL = (q / k_B / T) × slope,   slope = dVoc / d(ln(L_norm))
+
+    This quantity is immune to series-resistance effects because Voc shifts
+    only in response to the recombination rate change, making n_idL a cleaner
+    indicator of the dominant recombination mechanism than the dark ideality
+    factor n_idd.
+    """
+
+    n_idL: float
+    n_idL_err: float
+    slope: float
+    slope_err: float
+    intercept: float
+    r_squared: float
+    n_points: int
+    intensities_normalized: np.ndarray
+    voc_values: np.ndarray
+    temperature_K: float
+
+
+def fit_light_ideality(
+    intensities: np.ndarray,
+    voc_values: np.ndarray,
+    T: float = 298.15,
+) -> LightIdealityFit:
+    """Fit the light ideality factor n_idL from Voc vs ln(L_normalized).
+
+    Performs a linear regression of Voc (V) on ln(L/max(L)).  n_idL is
+    derived from the slope via n_idL = q / (k_B × T) × slope.
+
+    The normalization L_norm = L / max(L) means that the absolute units of
+    *intensities* (suns, %, mW/cm², or any other proportional scale) do not
+    affect the result — only the intensity ratios matter.
+
+    Args:
+        intensities: 1-D array of illumination intensities in any consistent
+            unit.  Must have at least 3 distinct values.
+        voc_values: 1-D array of Voc values (V), same length as *intensities*.
+        T: Cell temperature (K).  Defaults to 298.15 K (25 °C).
+
+    Returns:
+        LightIdealityFit dataclass with fit parameters and echoed input arrays.
+
+    Raises:
+        ValueError: If fewer than 3 data points are provided, or if all
+            intensities are identical (zero variation in ln(L)).
+    """
+    intensities = np.asarray(intensities, dtype=float)
+    voc_values  = np.asarray(voc_values,  dtype=float)
+
+    n = len(intensities)
+    if n < 3:
+        raise ValueError(
+            f"fit_light_ideality requires at least 3 data points; got {n}."
+        )
+    if len(voc_values) != n:
+        raise ValueError(
+            f"intensities (length {n}) and voc_values (length {len(voc_values)}) "
+            "must have the same length."
+        )
+
+    if np.all(intensities == intensities[0]):
+        raise ValueError(
+            "All intensities are identical — ln(L) has no variation; "
+            "cannot determine slope."
+        )
+
+    l_norm = intensities / np.max(intensities)
+    ln_l   = np.log(l_norm)
+
+    if np.allclose(voc_values, voc_values[0], atol=1e-6):
+        warnings.warn(
+            "All Voc values are identical — n_idL will be 0 with a large error.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    result    = linregress(ln_l, voc_values)
+    slope     = float(result.slope)
+    slope_err = float(result.stderr)
+    intercept = float(result.intercept)
+    r_sq      = float(result.rvalue ** 2)
+
+    vt     = _KB * T / _Q
+    n_idL  = slope / vt
+    n_idL_err = slope_err / vt
+
+    return LightIdealityFit(
+        n_idL=n_idL,
+        n_idL_err=n_idL_err,
+        slope=slope,
+        slope_err=slope_err,
+        intercept=intercept,
+        r_squared=r_sq,
+        n_points=n,
+        intensities_normalized=l_norm,
+        voc_values=voc_values.copy(),
+        temperature_K=float(T),
+    )
+
+
 def fit_dark_ideality(
     v: np.ndarray,
     j: np.ndarray,

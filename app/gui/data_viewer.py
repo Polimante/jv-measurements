@@ -37,6 +37,9 @@ _MPP_JV_PARAMS     = "MPP_JV"
 _MPP_OLD_SHEET     = "JV_Parameters"
 _FIT_SHEET              = "SingleDiodeFit"
 _DARK_IDEALITY_SHEET    = "DarkIdealityFit"
+_LIGHT_JV_CONFIG_SHEET  = "Config"
+_LIGHT_JV_SUMMARY_SHEET = "Summary"
+_LIGHT_JV_IDEALITY_SHEET = "LightIdealityAnalysis"
 
 _COLORS = [
     "#1565C0", "#B71C1C", "#1B5E20", "#E65100", "#4A148C",
@@ -462,6 +465,185 @@ def _read_mpp_old(wb):
     return meta
 
 
+def _read_light_ideality_analysis(ws):
+    """LightIdealityAnalysis sheet — rows 2-9 are key-value table, then raw data."""
+    def _sf(v):
+        try:
+            return float(v) if v is not None else float("nan")
+        except (TypeError, ValueError):
+            return float("nan")
+
+    kv: dict = {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row and row[0] is not None:
+            kv[str(row[0])] = (row[1], row[2] if len(row) > 2 else None)
+
+    def _get(key, idx):
+        pair = kv.get(key, (None, None))
+        val  = pair[idx] if pair and len(pair) > idx else None
+        return _sf(val)
+
+    n_pts_pair = kv.get("n_points", (None, None))
+    try:
+        n_pts_fwd = int(n_pts_pair[0]) if n_pts_pair and n_pts_pair[0] is not None else 0
+    except (TypeError, ValueError):
+        n_pts_fwd = 0
+    try:
+        n_pts_rev = int(n_pts_pair[1]) if n_pts_pair and n_pts_pair[1] is not None else 0
+    except (TypeError, ValueError):
+        n_pts_rev = 0
+
+    warn_pair = kv.get("Warning", ("", ""))
+
+    intensities: list = []
+    l_norm: list = []
+    voc_fwd_list: list = []
+    voc_rev_list: list = []
+    data_section = False
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row and row[0] == "Intensity (user units)":
+            data_section = True
+            continue
+        if data_section and row and row[0] is not None:
+            try:
+                intensities.append(float(row[0]))
+                l_norm.append(float(row[1]))
+                voc_fwd_list.append(float(row[2]))
+                voc_rev_list.append(float(row[3]))
+            except (TypeError, ValueError, IndexError):
+                pass
+
+    return {
+        "n_idL_fwd":     _get("n_idL",     0),
+        "n_idL_rev":     _get("n_idL",     1),
+        "n_idL_fwd_err": _get("n_idL_err", 0),
+        "n_idL_rev_err": _get("n_idL_err", 1),
+        "slope_fwd":     _get("slope (V)", 0),
+        "slope_rev":     _get("slope (V)", 1),
+        "r2_fwd":        _get("R²",        0),
+        "r2_rev":        _get("R²",        1),
+        "n_points_fwd":  n_pts_fwd,
+        "n_points_rev":  n_pts_rev,
+        "warning_fwd":   str(warn_pair[0] or ""),
+        "warning_rev":   str(warn_pair[1] or ""),
+        "intensities":   np.array(intensities, dtype=float),
+        "l_norm":        np.array(l_norm,       dtype=float),
+        "voc_fwd":       np.array(voc_fwd_list, dtype=float),
+        "voc_rev":       np.array(voc_rev_list, dtype=float),
+    }
+
+
+def _read_light_intensity_jv(wb):
+    """Config + Summary + LightIdealityAnalysis + JV_* sheets → metadata dict."""
+    def _sf(v):
+        try:
+            return float(v) if v is not None else float("nan")
+        except (TypeError, ValueError):
+            return float("nan")
+
+    # Config: key/value pairs starting from row 2
+    ws_cfg = wb[_LIGHT_JV_CONFIG_SHEET]
+    cfg: dict = {}
+    for row in ws_cfg.iter_rows(min_row=2, values_only=True):
+        if row and row[0] is not None:
+            cfg[str(row[0])] = row[1]
+
+    # Summary: one row per intensity
+    ws_sum = wb[_LIGHT_JV_SUMMARY_SHEET]
+    results: list = []
+    for row in ws_sum.iter_rows(min_row=2, values_only=True):
+        if row and row[0] is not None:
+            try:
+                results.append({
+                    "index":     int(row[0]) - 1,
+                    "intensity": _sf(row[1]),
+                    "Voc_fwd":   _sf(row[2]),
+                    "Voc_rev":   _sf(row[3]),
+                    "Jsc_fwd":   _sf(row[4]),
+                    "Jsc_rev":   _sf(row[5]),
+                    "FF_fwd":    _sf(row[6]),
+                    "FF_rev":    _sf(row[7]),
+                    "PCE_fwd":   _sf(row[8]),
+                    "PCE_rev":   _sf(row[9]),
+                    "HI":        _sf(row[10]),
+                    "backup":    str(row[11]) if row[11] else "",
+                    "status":    str(row[12]) if len(row) > 12 and row[12] else "unknown",
+                })
+            except (TypeError, ValueError, IndexError):
+                pass
+
+    # LightIdealityAnalysis (optional)
+    ideality = None
+    if _LIGHT_JV_IDEALITY_SHEET in wb.sheetnames:
+        try:
+            ideality = _read_light_ideality_analysis(wb[_LIGHT_JV_IDEALITY_SHEET])
+        except Exception:
+            pass
+
+    # Per-intensity JV sheets: JV_{tag}sun_Fwd / JV_{tag}sun_Rev
+    jv_data: dict = {}
+    for sheet_name in wb.sheetnames:
+        if not sheet_name.startswith("JV_"):
+            continue
+        if sheet_name.endswith("_Fwd"):
+            inner = sheet_name[3:-4]
+            scan  = "fwd"
+        elif sheet_name.endswith("_Rev"):
+            inner = sheet_name[3:-4]
+            scan  = "rev"
+        else:
+            continue
+        if not inner.endswith("sun"):
+            continue
+        tag = inner[:-3]
+        intensity_key = tag.replace("_", ".", 1)
+
+        ws = wb[sheet_name]
+        v_arr, j_arr, p_arr = [], [], []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row and row[0] is not None:
+                try:
+                    v_arr.append(float(row[0]))
+                    j_arr.append(float(row[1]))
+                    p_arr.append(float(row[2]))
+                except (TypeError, ValueError, IndexError):
+                    pass
+
+        if intensity_key not in jv_data:
+            jv_data[intensity_key] = {}
+        jv_data[intensity_key][f"v_{scan}"] = np.array(v_arr, dtype=np.float64)
+        jv_data[intensity_key][f"j_{scan}"] = np.array(j_arr, dtype=np.float64)
+        jv_data[intensity_key][f"p_{scan}"] = np.array(p_arr, dtype=np.float64)
+
+    return {
+        "type":            "light_jv",
+        "sample_name":     cfg.get("Sample Name", ""),
+        "timestamp":       str(cfg.get("t0 Timestamp", "") or ""),
+        "instrument":      str(cfg.get("Instrument IDN", "") or ""),
+        "n_intensities":   cfg.get("Total Intensities Planned"),
+        "intensities_str": str(cfg.get("Intensity Values (suns)", "") or ""),
+        "ref_illum":       _sf(cfg.get("Reference Illumination (mW/cm²)")),
+        "stabilization_s": _sf(cfg.get("Stabilization Time (s)")),
+        "auto_fit":        cfg.get("Auto Single-Diode Fit", "OFF") == "ON",
+        "start_v":         _sf(cfg.get("Start Voltage (V)")),
+        "end_v":           _sf(cfg.get("End Voltage (V)")),
+        "step_v":          _sf(cfg.get("Step Voltage (V)")),
+        "delay_ms":        _sf(cfg.get("Delay per Point (ms)")),
+        "nplc":            _sf(cfg.get("NPLC")),
+        "cell_area":       _sf(cfg.get("Cell Area (cm²)")),
+        "four_wire":       cfg.get("4-Wire Sensing", "OFF") == "ON",
+        "prebias_enabled": cfg.get("Pre-bias Enabled", "OFF") == "ON",
+        "prebias_v":       _sf(cfg.get("Pre-bias Voltage (V)")),
+        "prebias_t":       _sf(cfg.get("Pre-bias Duration (s)")),
+        "ls_enabled":      cfg.get("Light Soaking Enabled", "OFF") == "ON",
+        "ls_dur":          _sf(cfg.get("Light Soaking Duration (s)")),
+        "abort_note":      str(cfg.get("Note", "") or ""),
+        "results":         results,
+        "ideality":        ideality,
+        "jv_data":         jv_data,
+    }
+
+
 def load_jv_file(filepath):
     """
     Open an xlsx file and return a parsed metadata dict.
@@ -471,6 +653,15 @@ def load_jv_file(filepath):
     wb = openpyxl.load_workbook(filepath, data_only=True)
     try:
         sheets = wb.sheetnames
+        if _LIGHT_JV_CONFIG_SHEET in sheets and _LIGHT_JV_SUMMARY_SHEET in sheets:
+            ws_cfg = wb[_LIGHT_JV_CONFIG_SHEET]
+            _is_lijv = any(
+                row[0] == "Total Intensities Planned"
+                for row in ws_cfg.iter_rows(min_row=2, max_row=25, values_only=True)
+                if row and row[0] is not None
+            )
+            if _is_lijv:
+                return _read_light_intensity_jv(wb)
         if _ILLUMINATED_SHEET in sheets:
             meta = _read_illuminated(wb[_ILLUMINATED_SHEET])
             if _FIT_SHEET in sheets:
@@ -527,6 +718,10 @@ class DataViewerWindow:
         self._cursor   = None
         self._current_data     = None
         self._current_filepath = None
+        self._lij_intensity_var = None
+        self._lij_key_map: dict = {}
+        self._voc_canvas        = None
+        self._ax_voc            = None
 
         self.win = Toplevel(parent)
         self.win.title("Data Viewer")
@@ -650,6 +845,7 @@ class DataViewerWindow:
             "stab":        "Stabilized Current",
             "pure_mpp":    "Pure MPP Tracking",
             "mpp":         "MPP Tracking (JV-SPO)",
+            "light_jv":    "Light-Intensity J-V",
         }
         type_str = _TYPE_LABELS.get(data["type"], data["type"])
 
@@ -673,6 +869,15 @@ class DataViewerWindow:
     # ── Metadata panel ────────────────────────────────────────────────────────
 
     def _populate_metadata(self, data, filename):
+        if self._voc_canvas is not None:
+            try:
+                self._voc_canvas.get_tk_widget().destroy()
+            except Exception:
+                pass
+            self._voc_canvas = None
+        self._lij_intensity_var = None
+        self._lij_key_map = {}
+
         for w in self._meta_inner.winfo_children():
             w.destroy()
 
@@ -702,6 +907,7 @@ class DataViewerWindow:
             "stab":        "Stabilized Current",
             "pure_mpp":    "Pure MPP Tracking",
             "mpp":         "MPP Tracking (JV-SPO)",
+            "light_jv":    "Light-Intensity J-V",
         }
         _TYPE_COLORS = {
             "illuminated": "#1565C0",
@@ -709,6 +915,7 @@ class DataViewerWindow:
             "stab":        "#1B5E20",
             "pure_mpp":    "#E65100",
             "mpp":         "#006064",
+            "light_jv":    "#4A148C",
         }
 
         sf = section("File")
@@ -875,6 +1082,195 @@ class DataViewerWindow:
                     row(sc, f"Cycle {cyc['cycle']}:",
                         f"PCE={pce_v}%  HI={hi_v}%")
 
+        # ── Light-Intensity J-V ───────────────────────────────────────────
+        elif dtype == "light_jv":
+            results_list = data.get("results", [])
+            n_planned    = data.get("n_intensities") or 0
+            n_completed  = sum(1 for r in results_list if r.get("status") == "completed")
+
+            sx = section("Experiment")
+            sn = data.get("sample_name", "—") or "—"
+            row(sx, "Sample:", (sn[:34] + "…") if len(sn) > 34 else sn)
+            ts_raw = data.get("timestamp", "") or ""
+            try:
+                ts_disp = (f"{ts_raw[:4]}-{ts_raw[4:6]}-{ts_raw[6:8]} "
+                           f"{ts_raw[9:11]}:{ts_raw[11:13]}:{ts_raw[13:15]}"
+                           ) if len(ts_raw) >= 15 else ts_raw or "—"
+            except Exception:
+                ts_disp = ts_raw or "—"
+            row(sx, "Timestamp:", ts_disp)
+            idn = str(data.get("instrument") or "—")
+            row(sx, "Instrument:", (idn[:34] + "…") if len(idn) > 34 else idn)
+            abort_note = data.get("abort_note", "") or ""
+            if abort_note:
+                row(sx, "Note:",
+                    (abort_note[:34] + "…") if len(abort_note) > 34 else abort_note,
+                    fg="#E65100")
+
+            ss = section("Scan Settings")
+            sv = data.get("start_v"); ev = data.get("end_v")
+            if sv is not None and ev is not None and not (math.isnan(sv) or math.isnan(ev)):
+                row(ss, "V range:", f"{sv:.3f} → {ev:.3f} V")
+            row(ss, "Step:",       _fmt(data.get("step_v"),   "%.4f V"))
+            row(ss, "Delay:",      _fmt(data.get("delay_ms"), "%.0f ms"))
+            row(ss, "NPLC:",       _fmt(data.get("nplc"),     "%.2f"))
+            row(ss, "4-Wire:",     "ON" if data.get("four_wire") else "OFF")
+            row(ss, "Cell area:",  _fmt(data.get("cell_area"), "%.4f cm²"))
+            row(ss, "Ref. illum.", _fmt(data.get("ref_illum"), "%.1f mW/cm²"))
+
+            sq = section("Sequence")
+            row(sq, "Measured:", f"{n_completed} / {n_planned}")
+            row(sq, "Stabiliz.:", _fmt(data.get("stabilization_s"), "%.0f s"))
+            if data.get("prebias_enabled"):
+                row(sq, "Pre-bias:",
+                    f"{_fmt(data.get('prebias_v'), '%.2f')} V, "
+                    f"{_fmt(data.get('prebias_t'), '%.1f')} s")
+            else:
+                row(sq, "Pre-bias:", "OFF", fg="#9e9e9e")
+            if data.get("ls_enabled"):
+                row(sq, "Light soak:", _fmt(data.get("ls_dur"), "%.0f s"))
+            else:
+                row(sq, "Light soak:", "OFF", fg="#9e9e9e")
+
+            pce_revs = [
+                r["PCE_rev"] for r in results_list
+                if r.get("status") == "completed" and not math.isnan(r.get("PCE_rev", float("nan")))
+            ]
+            if pce_revs:
+                sbp = section("Best Result")
+                row(sbp, "Max PCE (rev):", _fmt(max(pce_revs), "%.2f %%"), "#1565C0")
+                best = max(results_list,
+                           key=lambda r: r.get("PCE_rev", float("nan"))
+                           if not math.isnan(r.get("PCE_rev", float("nan"))) else -999)
+                if not math.isnan(best.get("PCE_rev", float("nan"))):
+                    row(sbp, "@ intensity:", f"{best['intensity']:.4g} sun")
+                    row(sbp, "Voc (rev):", _fmt(best.get("Voc_rev"), "%.4f V"))
+                    row(sbp, "Jsc (rev):", _fmt(best.get("Jsc_rev"), "%.4f mA/cm²"))
+                    row(sbp, "FF (rev):",  _fmt(best.get("FF_rev"), "%.2f %%"))
+
+            # ── Light ideality factor ─────────────────────────────────────
+            ideality = data.get("ideality")
+            if ideality is not None:
+                sid = section("Light Ideality Factor")
+                n_fwd    = ideality.get("n_idL_fwd")
+                n_rev    = ideality.get("n_idL_rev")
+                e_fwd    = ideality.get("n_idL_fwd_err")
+                e_rev    = ideality.get("n_idL_rev_err")
+                r2_fwd   = ideality.get("r2_fwd")
+                r2_rev   = ideality.get("r2_rev")
+
+                if n_fwd is not None and not math.isnan(n_fwd):
+                    if e_fwd is not None and not math.isnan(e_fwd):
+                        row(sid, "n_idL (fwd):", f"{n_fwd:.4f} ± {e_fwd:.4f}", "#1565C0")
+                    else:
+                        row(sid, "n_idL (fwd):", f"{n_fwd:.4f}", "#1565C0")
+                if n_rev is not None and not math.isnan(n_rev):
+                    if e_rev is not None and not math.isnan(e_rev):
+                        row(sid, "n_idL (rev):", f"{n_rev:.4f} ± {e_rev:.4f}", "#B71C1C")
+                    else:
+                        row(sid, "n_idL (rev):", f"{n_rev:.4f}", "#B71C1C")
+                if r2_fwd is not None and not math.isnan(r2_fwd):
+                    row(sid, "R² (fwd):", f"{r2_fwd:.6f}")
+                if r2_rev is not None and not math.isnan(r2_rev):
+                    row(sid, "R² (rev):", f"{r2_rev:.6f}")
+
+                w_fwd = ideality.get("warning_fwd", "")
+                w_rev = ideality.get("warning_rev", "")
+                if w_fwd and w_fwd.upper() not in ("OK", ""):
+                    row(sid, "⚠ Fwd:", (w_fwd[:34] + "…") if len(w_fwd) > 34 else w_fwd,
+                        fg="#E65100")
+                if w_rev and w_rev.upper() not in ("OK", ""):
+                    row(sid, "⚠ Rev:", (w_rev[:34] + "…") if len(w_rev) > 34 else w_rev,
+                        fg="#E65100")
+
+                # Embedded Voc vs ln(L_norm) plot
+                l_norm_arr  = ideality.get("l_norm",   np.array([]))
+                voc_fwd_arr = ideality.get("voc_fwd",  np.array([]))
+                voc_rev_arr = ideality.get("voc_rev",  np.array([]))
+                if len(l_norm_arr) > 1 and np.any(l_norm_arr > 0):
+                    try:
+                        voc_fig = Figure(figsize=(2.7, 2.0), dpi=90, tight_layout=True)
+                        ax_voc  = voc_fig.add_subplot(111)
+
+                        mask = l_norm_arr > 0
+                        ln_l = np.log(l_norm_arr[mask])
+
+                        if len(voc_fwd_arr) == len(l_norm_arr):
+                            ax_voc.scatter(ln_l, voc_fwd_arr[mask], s=20,
+                                           color="#1565C0", zorder=3, label="Fwd")
+                            slope_fwd = ideality.get("slope_fwd")
+                            if slope_fwd is not None and not math.isnan(slope_fwd):
+                                ln_line = np.linspace(ln_l.min(), ln_l.max(), 60)
+                                b = (float(np.mean(voc_fwd_arr[mask]))
+                                     - slope_fwd * float(np.mean(ln_l)))
+                                ax_voc.plot(ln_line, slope_fwd * ln_line + b,
+                                            color="#1565C0", linewidth=1.2,
+                                            linestyle="--", alpha=0.75)
+
+                        if len(voc_rev_arr) == len(l_norm_arr):
+                            ax_voc.scatter(ln_l, voc_rev_arr[mask], s=20,
+                                           color="#B71C1C", zorder=3, label="Rev")
+                            slope_rev = ideality.get("slope_rev")
+                            if slope_rev is not None and not math.isnan(slope_rev):
+                                ln_line = np.linspace(ln_l.min(), ln_l.max(), 60)
+                                b = (float(np.mean(voc_rev_arr[mask]))
+                                     - slope_rev * float(np.mean(ln_l)))
+                                ax_voc.plot(ln_line, slope_rev * ln_line + b,
+                                            color="#B71C1C", linewidth=1.2,
+                                            linestyle="--", alpha=0.75)
+
+                        ax_voc.set_xlabel("ln(L/L_max)", fontsize=7)
+                        ax_voc.set_ylabel("Voc (V)", fontsize=7)
+                        ax_voc.tick_params(labelsize=6)
+                        ax_voc.grid(True, alpha=0.4)
+                        ax_voc.legend(fontsize=6, loc="upper left",
+                                      framealpha=0.7)
+
+                        self._voc_canvas = FigureCanvasTkAgg(
+                            voc_fig, master=self._meta_inner
+                        )
+                        self._voc_canvas.draw()
+                        self._voc_canvas.get_tk_widget().pack(
+                            fill=X, padx=6, pady=(4, 0)
+                        )
+                        self._voc_canvas.get_tk_widget().bind(
+                            "<MouseWheel>", self._on_mousewheel
+                        )
+                    except Exception:
+                        pass
+
+            # ── Individual scan dropdown ──────────────────────────────────
+            jv_data      = data.get("jv_data", {})
+            jv_keys_avail = set(jv_data.keys())
+            completed_with_jv = [
+                r for r in results_list
+                if r.get("status") == "completed"
+                and f"{r['intensity']:.4g}" in jv_keys_avail
+            ]
+            if completed_with_jv:
+                sc_int = section("Individual Scan")
+                choices = ["— Overview —"] + [
+                    f"{r['intensity']:.4g} sun" for r in completed_with_jv
+                ]
+                self._lij_key_map = {
+                    "— Overview —": None,
+                    **{
+                        f"{r['intensity']:.4g} sun": f"{r['intensity']:.4g}"
+                        for r in completed_with_jv
+                    },
+                }
+                self._lij_intensity_var = StringVar(value="— Overview —")
+                combo = ttk.Combobox(
+                    sc_int,
+                    textvariable=self._lij_intensity_var,
+                    values=choices,
+                    state="readonly",
+                    width=22,
+                )
+                combo.pack(fill=X, padx=2, pady=4)
+                combo.bind("<<ComboboxSelected>>",
+                           lambda e: self._on_lij_intensity_select())
+
         self._meta_inner.update_idletasks()
         self._meta_canvas.configure(scrollregion=self._meta_canvas.bbox("all"))
         self._meta_canvas.yview_moveto(0)
@@ -1002,7 +1398,17 @@ class DataViewerWindow:
             self._cursor = None
 
         self._fig.clf()
-        self._ax  = self._fig.add_subplot(111)
+        _is_lijv_ov = (
+            data.get("type") == "light_jv"
+            and (self._lij_intensity_var is None
+                 or self._lij_intensity_var.get() == "— Overview —")
+        )
+        if _is_lijv_ov:
+            self._ax     = self._fig.add_subplot(211)
+            self._ax_voc = self._fig.add_subplot(212)
+        else:
+            self._ax     = self._fig.add_subplot(111)
+            self._ax_voc = None
         self._ax2 = self._ax.twinx()
         self._ax2.yaxis.set_label_position("right")
 
@@ -1021,6 +1427,9 @@ class DataViewerWindow:
 
         elif dtype == "mpp":
             self._draw_mpp(data, title, all_lines)
+
+        elif dtype == "light_jv":
+            self._draw_light_jv(data, title, all_lines)
 
         # ── Clickable legend ──────────────────────────────────────────────
         h1, l1 = self._ax.get_legend_handles_labels()
@@ -1225,6 +1634,219 @@ class DataViewerWindow:
         self._ax.set_title(title, fontsize=12, fontweight="bold", pad=12)
         self._ax.grid(True)
         self._fig.subplots_adjust(left=0.12, right=0.88, top=0.88)
+
+
+    def _on_lij_intensity_select(self):
+        """Redraw main plot when the user picks a different intensity from the dropdown."""
+        if self._current_data is None:
+            return
+        filename = os.path.basename(self._current_filepath or "")
+        self._draw_plot(self._current_data, filename)
+
+    def _draw_light_jv(self, data, title, all_lines):
+        sel     = self._lij_intensity_var.get() if self._lij_intensity_var else "— Overview —"
+        jv_key  = self._lij_key_map.get(sel) if self._lij_key_map else None
+        jv_data = data.get("jv_data", {})
+        if jv_key and jv_key in jv_data:
+            self._draw_light_jv_single(data, jv_key, sel, title, all_lines)
+        else:
+            self._draw_light_jv_overview(data, title, all_lines)
+
+    def _draw_light_jv_overview(self, data, title, all_lines):
+        """All completed reverse (or forward) J-V curves overlaid, coloured by intensity."""
+        results_list = data.get("results", [])
+        jv_data      = data.get("jv_data", {})
+
+        completed = [
+            r for r in results_list
+            if r.get("status") == "completed"
+            and f"{r['intensity']:.4g}" in jv_data
+        ]
+
+        if not completed:
+            self._ax.set_title(
+                f"{title}\n(no completed measurements)", fontsize=10
+            )
+            self._ax.grid(True)
+            self._ax2.tick_params(right=False, labelright=False)
+            self._fig.subplots_adjust(left=0.12, right=0.95, top=0.88)
+            return
+
+        for i, r in enumerate(completed):
+            key   = f"{r['intensity']:.4g}"
+            jvd   = jv_data[key]
+            v     = jvd.get("v_rev", np.array([]))
+            j     = jvd.get("j_rev", np.array([]))
+            if len(v) == 0:
+                v = jvd.get("v_fwd", np.array([]))
+                j = jvd.get("j_fwd", np.array([]))
+            color = _COLORS[i % len(_COLORS)]
+            l, = self._ax.plot(v, j, color=color, linewidth=1.5,
+                               label=f"{key} sun", zorder=3)
+            all_lines.append(l)
+
+        self._ax.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--", zorder=1)
+        self._ax.set_xlabel("Voltage (V)", labelpad=8)
+        self._ax.set_ylabel("Current Density (mA/cm²)", labelpad=8)
+        self._ax.set_title(
+            f"{title}  —  all intensities (rev scan)",
+            fontsize=10, fontweight="bold", pad=8,
+        )
+        self._ax.grid(True)
+        self._ax2.tick_params(right=False, labelright=False)
+        self._ax2.set_ylabel("")
+
+        ideality = data.get("ideality")
+        if self._ax_voc is not None and ideality is not None:
+            self._draw_voc_subplot(ideality)
+        elif self._ax_voc is not None:
+            self._ax_voc.set_visible(False)
+
+        self._fig.subplots_adjust(left=0.12, right=0.95, top=0.93, hspace=0.55)
+
+    def _draw_voc_subplot(self, ideality):
+        """Draw Voc vs ln(L/Lmax) with linear regression fit on self._ax_voc."""
+        ax          = self._ax_voc
+        l_norm_arr  = ideality.get("l_norm",   np.array([]))
+        voc_fwd_arr = ideality.get("voc_fwd",  np.array([]))
+        voc_rev_arr = ideality.get("voc_rev",  np.array([]))
+        n_fwd       = ideality.get("n_idL_fwd")
+        n_rev       = ideality.get("n_idL_rev")
+        slope_fwd   = ideality.get("slope_fwd")
+        slope_rev   = ideality.get("slope_rev")
+
+        mask = l_norm_arr > 0
+        if not np.any(mask):
+            ax.set_visible(False)
+            return
+
+        ln_l    = np.log(l_norm_arr[mask])
+        ln_line = np.linspace(ln_l.min(), ln_l.max(), 60)
+
+        has_data = False
+
+        if len(voc_fwd_arr) == len(l_norm_arr) and np.any(np.isfinite(voc_fwd_arr[mask])):
+            lbl_fwd = f"Fwd  (n_idL = {n_fwd:.3f})" if (n_fwd and not math.isnan(n_fwd)) else "Fwd"
+            ax.plot(ln_l, voc_fwd_arr[mask], "o", color="#1565C0",
+                    markersize=5, label=lbl_fwd, zorder=3)
+            if slope_fwd is not None and not math.isnan(float(slope_fwd)):
+                b = float(np.mean(voc_fwd_arr[mask])) - float(slope_fwd) * float(np.mean(ln_l))
+                ax.plot(ln_line, float(slope_fwd) * ln_line + b,
+                        color="#1565C0", linewidth=1.5, linestyle="--", alpha=0.75)
+            has_data = True
+
+        if len(voc_rev_arr) == len(l_norm_arr) and np.any(np.isfinite(voc_rev_arr[mask])):
+            lbl_rev = f"Rev  (n_idL = {n_rev:.3f})" if (n_rev and not math.isnan(n_rev)) else "Rev"
+            ax.plot(ln_l, voc_rev_arr[mask], "s", color="#C62828",
+                    markersize=5, label=lbl_rev, zorder=3)
+            if slope_rev is not None and not math.isnan(float(slope_rev)):
+                b = float(np.mean(voc_rev_arr[mask])) - float(slope_rev) * float(np.mean(ln_l))
+                ax.plot(ln_line, float(slope_rev) * ln_line + b,
+                        color="#C62828", linewidth=1.5, linestyle="--", alpha=0.75)
+            has_data = True
+
+        if not has_data:
+            ax.set_visible(False)
+            return
+
+        ax.set_xlabel("ln(L / L_max)", labelpad=6)
+        ax.set_ylabel("Voc (V)", labelpad=6)
+        ax.set_title("Voc vs ln(L/L_max) — Light Ideality Factor", fontsize=10, pad=6)
+        ax.grid(True, alpha=0.5)
+        ax.legend(loc="upper left", fontsize=8.5, framealpha=0.9)
+
+    def _draw_light_jv_single(self, data, jv_key, label, title, all_lines):
+        """Forward + reverse J-V with power for one selected intensity."""
+        jvd = data["jv_data"][jv_key]
+        v_f = jvd.get("v_fwd", np.array([])); j_f = jvd.get("j_fwd", np.array([]))
+        p_f = jvd.get("p_fwd", np.array([]))
+        v_r = jvd.get("v_rev", np.array([])); j_r = jvd.get("j_rev", np.array([]))
+        p_r = jvd.get("p_rev", np.array([]))
+
+        result = next(
+            (r for r in data.get("results", [])
+             if f"{r['intensity']:.4g}" == jv_key),
+            None,
+        )
+
+        has_power = False
+        if len(v_f) > 0:
+            l1, = self._ax.plot(
+                v_f, j_f, color=_COLORS[0], linestyle="-",
+                marker="o", markersize=5,
+                markerfacecolor=_COLORS[0], markeredgecolor=_COLORS[0],
+                linewidth=1.8, label="Forward J-V", zorder=3,
+            )
+            all_lines.append(l1)
+            if len(p_f) > 0:
+                l3, = self._ax2.plot(
+                    v_f, p_f, color=_COLORS[0], linestyle="-",
+                    marker="s", markersize=4, linewidth=1.2,
+                    alpha=0.5, label="Forward P", zorder=2,
+                )
+                all_lines.append(l3)
+                has_power = True
+
+        if len(v_r) > 0:
+            l2, = self._ax.plot(
+                v_r, j_r, color=_COLORS[1], linestyle="--",
+                marker="o", markersize=5,
+                markerfacecolor="white", markeredgecolor=_COLORS[1],
+                markeredgewidth=1.5, linewidth=1.8,
+                label="Reverse J-V", zorder=3,
+            )
+            all_lines.append(l2)
+            if len(p_r) > 0:
+                l4, = self._ax2.plot(
+                    v_r, p_r, color=_COLORS[1], linestyle="--",
+                    marker="s", markersize=4,
+                    markerfacecolor="white", markeredgecolor=_COLORS[1],
+                    markeredgewidth=1.2, linewidth=1.2, alpha=0.5,
+                    label="Reverse P", zorder=2,
+                )
+                all_lines.append(l4)
+                has_power = True
+
+        if has_power:
+            self._ax2.tick_params(right=True, labelright=True)
+            self._ax2.set_ylabel("Power Density (mW/cm²)", labelpad=8)
+            self._ax2.set_ylim(-10, 30)
+            self._fig.subplots_adjust(left=0.12, right=0.88, top=0.88)
+        else:
+            self._ax2.tick_params(right=False, labelright=False)
+            self._ax2.set_ylabel("")
+            self._fig.subplots_adjust(left=0.12, right=0.95, top=0.88)
+
+        if result is not None:
+            ann = []
+            for k, lbl_a in [("PCE_fwd", "Fwd PCE"), ("PCE_rev", "Rev PCE"),
+                              ("Voc_rev", "Voc"),      ("Jsc_rev", "Jsc"),
+                              ("FF_rev",  "FF"),       ("HI",      "HI")]:
+                val = result.get(k)
+                if val is not None and not math.isnan(val):
+                    fmt  = "%.4f" if k in ("Voc_rev", "Jsc_rev") else "%.2f"
+                    unit = ("%" if k in ("PCE_fwd", "PCE_rev", "FF_rev", "HI")
+                            else "V" if k == "Voc_rev" else " mA/cm²")
+                    ann.append(f"{lbl_a} = {_fmt(val, fmt)} {unit}")
+            if ann:
+                self._ax.text(
+                    0.02, 0.97, "\n".join(ann),
+                    transform=self._ax.transAxes, va="top", ha="left",
+                    fontsize=8.5, color="#2c3e50",
+                    bbox=dict(facecolor="white", alpha=0.85,
+                              edgecolor="#90A4AE", boxstyle="round,pad=0.4"),
+                )
+
+        self._ax.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--", zorder=1)
+        self._ax.set_xlabel("Voltage (V)", labelpad=8)
+        self._ax.set_ylabel("Current Density (mA/cm²)", labelpad=8)
+        self._ax.set_title(
+            f"{title}  —  {label}",
+            fontsize=11, fontweight="bold", pad=12,
+        )
+        self._ax.set_xlim(0, 1.2)
+        self._ax.set_ylim(-10, 30)
+        self._ax.grid(True)
 
 
 # ── SingleDiodeFitWindow ──────────────────────────────────────────────────────

@@ -55,6 +55,8 @@ from app.io.isos_exporter import (
     read_isos_d1_jv_curves,
 )
 from app.gui.data_viewer import DataViewerWindow
+from app.measurement.light_intensity_jv import LightIntensityJVMeasurement
+from app.instrument.keithley_smu import Keithley2400SourceMeter
 
 
 class JVMeasurementApp:
@@ -476,6 +478,7 @@ class JVMeasurementApp:
         self.draw_placeholder_plot()
 
         # ── Build additional mode panels (hidden until mode is switched) ──────
+        self._build_light_intensity_jv_panel(left, plot_frame)
         self._build_mpp_panel(left, plot_frame)
         self._build_stab_panel(left, plot_frame)
         self._build_pure_mpp_panel(left, plot_frame)
@@ -484,11 +487,12 @@ class JVMeasurementApp:
 
         # ── Keyboard shortcuts for mode switching ─────────────────────────────
         self.root.bind("<Alt-F2>", lambda e: self.switch_mode("jv"))
-        self.root.bind("<Alt-F3>", lambda e: self.switch_mode("mpp"))
-        self.root.bind("<Alt-F5>", lambda e: self.switch_mode("stab"))
-        self.root.bind("<Alt-F6>", lambda e: self.switch_mode("pure_mpp"))
-        self.root.bind("<Alt-F7>", lambda e: self.switch_mode("curation"))
-        self.root.bind("<Alt-F8>", lambda e: self.switch_mode("isos"))
+        self.root.bind("<Alt-F3>", lambda e: self.switch_mode("light_jv"))
+        self.root.bind("<Alt-F5>", lambda e: self.switch_mode("mpp"))
+        self.root.bind("<Alt-F6>", lambda e: self.switch_mode("stab"))
+        self.root.bind("<Alt-F7>", lambda e: self.switch_mode("pure_mpp"))
+        self.root.bind("<Alt-F8>", lambda e: self.switch_mode("curation"))
+        self.root.bind("<Alt-F9>", lambda e: self.switch_mode("isos"))
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -531,26 +535,30 @@ class JVMeasurementApp:
             accelerator="Alt+F2",
             command=lambda: self.switch_mode("jv"))
         self.procedures_menu.add_command(
-            label="  MPP Tracking",
+            label="  Light-Intensity J-V",
             accelerator="Alt+F3",
+            command=lambda: self.switch_mode("light_jv"))
+        self.procedures_menu.add_command(
+            label="  MPP Tracking",
+            accelerator="Alt+F5",
             command=lambda: self.switch_mode("mpp"))
         self.procedures_menu.add_command(
             label="  Stabilized Current",
-            accelerator="Alt+F5",
+            accelerator="Alt+F6",
             command=lambda: self.switch_mode("stab"))
         self.procedures_menu.add_command(
             label="  Pure MPP Tracking",
-            accelerator="Alt+F6",
+            accelerator="Alt+F7",
             command=lambda: self.switch_mode("pure_mpp"))
         self.procedures_menu.add_separator()
         self.procedures_menu.add_command(
             label="  Data Curation",
-            accelerator="Alt+F7",
+            accelerator="Alt+F8",
             command=lambda: self.switch_mode("curation"))
         self.procedures_menu.add_separator()
         self.procedures_menu.add_command(
             label="  ISOS Protocols",
-            accelerator="Alt+F8",
+            accelerator="Alt+F9",
             command=lambda: self.switch_mode("isos"))
         menubar.add_cascade(label="Procedures", menu=self.procedures_menu)
 
@@ -580,12 +588,14 @@ class JVMeasurementApp:
             return
 
         self.jv_panel.pack_forget()
+        self.light_jv_panel.pack_forget()
         self.mpp_panel.pack_forget()
         self.stab_panel.pack_forget()
         self.pmpp_panel.pack_forget()
         self.curation_panel.pack_forget()
         self.isos_panel.pack_forget()
         self.jv_plot_frame.pack_forget()
+        self.light_jv_plot_frame.pack_forget()
         self.mpp_plot_frame.pack_forget()
         self.stab_plot_frame.pack_forget()
         self.pmpp_plot_frame.pack_forget()
@@ -595,6 +605,9 @@ class JVMeasurementApp:
         if mode == "jv":
             self.jv_panel.pack(fill=BOTH, expand=True)
             self.jv_plot_frame.pack(fill=BOTH, expand=True)
+        elif mode == "light_jv":
+            self.light_jv_panel.pack(fill=BOTH, expand=True)
+            self.light_jv_plot_frame.pack(fill=BOTH, expand=True)
         elif mode == "mpp":
             self.mpp_panel.pack(fill=BOTH, expand=True)
             self.mpp_plot_frame.pack(fill=BOTH, expand=True)
@@ -615,14 +628,15 @@ class JVMeasurementApp:
         self._update_window_menu_checkmark(mode)
 
     def _update_window_menu_checkmark(self, active_mode):
-        # Entry indices: 0=J-V, 1=MPP, 2=Stab, 3=PureMPP, 4=sep, 5=Curation, 6=sep, 7=ISOS
+        # Entry indices: 0=J-V, 1=LightJV, 2=MPP, 3=Stab, 4=PureMPP, 5=sep, 6=Curation, 7=sep, 8=ISOS
         all_entries = [
-            (0, "  J-V Measurement",    "jv"),
-            (1, "  MPP Tracking",       "mpp"),
-            (2, "  Stabilized Current", "stab"),
-            (3, "  Pure MPP Tracking",  "pure_mpp"),
-            (5, "  Data Curation",      "curation"),
-            (7, "  ISOS Protocols",     "isos"),
+            (0, "  J-V Measurement",     "jv"),
+            (1, "  Light-Intensity J-V", "light_jv"),
+            (2, "  MPP Tracking",        "mpp"),
+            (3, "  Stabilized Current",  "stab"),
+            (4, "  Pure MPP Tracking",   "pure_mpp"),
+            (6, "  Data Curation",       "curation"),
+            (8, "  ISOS Protocols",      "isos"),
         ]
         for menu_i, label, mode_key in all_entries:
             display = ("✓" + label[1:]) if mode_key == active_mode else label
@@ -659,6 +673,7 @@ class JVMeasurementApp:
         self.instrument_label_var.set(f"\u2714  Connected: {short_idn}  [{addr}]")
         self.status_var.set(f"Instrument connected: {addr}")
         self.start_btn.config(state=NORMAL)
+        self.light_jv_start_btn.config(state=NORMAL)
         self.mpp_start_btn.config(state=NORMAL)
         self.stab_start_btn.config(state=NORMAL)
         self.pmpp_start_btn.config(state=NORMAL)
@@ -674,6 +689,7 @@ class JVMeasurementApp:
             "\u26a0  No instrument connected \u2014 use Instrument \u2192 Connect")
         self.status_var.set("Instrument disconnected.")
         self.start_btn.config(state=DISABLED)
+        self.light_jv_start_btn.config(state=DISABLED)
         self.mpp_start_btn.config(state=DISABLED)
         self.stab_start_btn.config(state=DISABLED)
         self.isos_start_btn.config(state=DISABLED)
@@ -1456,6 +1472,716 @@ class JVMeasurementApp:
         self.fig.subplots_adjust(left=0.15, right=0.85, top=0.85)
         self.ax.grid(True)
         self.canvas.draw_idle()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # LIGHT-INTENSITY J-V — panel builder
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_light_intensity_jv_panel(self, left_container, right_container):
+        """Build Light-Intensity J-V left panel and right plot area."""
+        # ── Left panel ────────────────────────────────────────────────────────
+        self.light_jv_panel = Frame(left_container, bg="#ececec")
+
+        # Title
+        Label(self.light_jv_panel,
+              text="Light-Intensity Dependent J-V",
+              font=("Arial", 10, "bold"), bg="#ececec", fg="#1565C0",
+              anchor="w").pack(fill=X, padx=8, pady=(6, 2))
+
+        # ── Settings notebook ─────────────────────────────────────────────────
+        nb = ttk.Notebook(self.light_jv_panel)
+        nb.pack(fill=X, padx=6, pady=(0, 4))
+
+        # ─── Tab 1: Scan ─────────────────────────────────────────────────────
+        tab_scan = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_scan, text="  Scan  ")
+
+        sf = LabelFrame(tab_scan, text="Sample Information", padx=6, pady=4)
+        sf.pack(fill=X, pady=(0, 6))
+        Label(sf, text="Sample Name:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.lij_sample_name_var = StringVar()
+        Entry(sf, textvariable=self.lij_sample_name_var, width=22).grid(
+            row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
+        Label(sf, text="Export Folder:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.lij_export_folder_var = StringVar()
+        lij_exp_entry = Entry(sf, textvariable=self.lij_export_folder_var, width=18)
+        lij_exp_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Button(sf, text="Browse…",
+               command=lambda: self._browse_folder_for(self.lij_export_folder_var),
+               font=("Arial", 8), pady=1
+               ).grid(row=1, column=2, padx=(2, 4), pady=3)
+
+        pf = LabelFrame(tab_scan, text="Scan Parameters", padx=6, pady=4)
+        pf.pack(fill=X, pady=(0, 6))
+        for row, (label, attr, default, unit) in enumerate([
+            ("Start Voltage:", "lij_start_v_var",  -0.1,  "V"),
+            ("End Voltage:",   "lij_end_v_var",    1.05,  "V"),
+            ("Step Voltage:",  "lij_step_v_var",   0.025, "V"),
+            ("Cell Area:",     "lij_cell_area_var", 0.07, "cm²"),
+        ]):
+            Label(pf, text=label).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var = DoubleVar(value=default)
+            setattr(self, attr, var)
+            Entry(pf, textvariable=var, width=10).grid(row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+
+        # Illumination reference
+        ilf = LabelFrame(tab_scan, text="Illumination Reference", padx=6, pady=4)
+        ilf.pack(fill=X, pady=(0, 4))
+        Label(ilf, text="1 sun =").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.lij_ref_illum_var = DoubleVar(value=100.0)
+        Entry(ilf, textvariable=self.lij_ref_illum_var, width=10).grid(
+            row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW/cm²", fg="#666666").grid(row=0, column=2, sticky=W)
+        ToolTip(ilf,
+                "Reference illumination intensity for PCE calculation.\n"
+                "Intensity values entered in the sequence are multiplied by\n"
+                "this number to get mW/cm² for each measurement.\n"
+                "Standard: 100 mW/cm² per 1 sun (AM1.5G).")
+
+        # ─── Tab 2: Instrument ───────────────────────────────────────────────
+        tab_inst = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_inst, text="  Instrument  ")
+
+        inf = LabelFrame(tab_inst, text="Keithley 2400 Settings", padx=6, pady=4)
+        inf.pack(fill=X, pady=(0, 6))
+
+        self.lij_scan_rate_mode = StringVar(value="advanced")
+        mode_frame = Frame(inf)
+        mode_frame.grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=(4, 2))
+        Radiobutton(mode_frame, text="Advanced (manual delay)",
+                    variable=self.lij_scan_rate_mode, value="advanced",
+                    command=self._lij_on_scan_mode_change).pack(side=LEFT)
+        Radiobutton(mode_frame, text="Scan rate (mV/s)",
+                    variable=self.lij_scan_rate_mode, value="scan_rate",
+                    command=self._lij_on_scan_mode_change).pack(side=LEFT, padx=(12, 0))
+
+        Label(inf, text="Delay per point:").grid(row=1, column=0, sticky=W, padx=4, pady=4)
+        self.lij_delay_ms_var = DoubleVar(value=100.0)
+        self.lij_delay_entry = Entry(inf, textvariable=self.lij_delay_ms_var, width=10)
+        self.lij_delay_entry.grid(row=1, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="ms", fg="#666666").grid(row=1, column=2, sticky=W)
+
+        Label(inf, text="NPLC:").grid(row=2, column=0, sticky=W, padx=4, pady=4)
+        self.lij_nplc_var = DoubleVar(value=1.0)
+        Entry(inf, textvariable=self.lij_nplc_var, width=10).grid(
+            row=2, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="(0.01–25)", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        self.lij_target_sr_var = DoubleVar(value=100.0)
+        self._lij_sr_label = Label(inf, text="Target scan rate:")
+        self._lij_sr_entry = Entry(inf, textvariable=self.lij_target_sr_var,
+                                   width=10, state=DISABLED)
+        self._lij_sr_unit  = Label(inf, text="mV/s", fg="#666666")
+        self._lij_sr_label.grid(row=3, column=0, sticky=W, padx=4, pady=4)
+        self._lij_sr_entry.grid(row=3, column=1, sticky=W, padx=4, pady=4)
+        self._lij_sr_unit.grid( row=3, column=2, sticky=W)
+        self._lij_sr_label.grid_remove()
+        self._lij_sr_entry.grid_remove()
+        self._lij_sr_unit.grid_remove()
+
+        srf = LabelFrame(tab_inst, text="Calculated Scan Rate", padx=6, pady=4)
+        srf.pack(fill=X, pady=(0, 4))
+        self.lij_scan_rate_var = StringVar(value="—")
+        Label(srf, textvariable=self.lij_scan_rate_var,
+              font=("Arial", 11, "bold"), fg="#1565C0").grid(
+            row=0, column=0, sticky=W, padx=4, pady=4)
+        Label(srf, text="mV/s", fg="#666666").grid(row=0, column=1, sticky=W)
+
+        self.lij_four_wire_var = BooleanVar(value=False)
+        Checkbutton(inf, text="4-Wire (Kelvin) sensing",
+                    variable=self.lij_four_wire_var
+                    ).grid(row=4, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+
+        # Trace variables for scan rate display
+        self.lij_step_v_var.trace("w",   self._lij_params_changed)
+        self.lij_delay_ms_var.trace("w",  self._lij_params_changed)
+        self.lij_nplc_var.trace("w",      self._lij_params_changed)
+        self.lij_target_sr_var.trace("w", self._lij_recalc_delay)
+        self._lij_update_scan_rate()
+
+        # ─── Tab 3: Conditioning ─────────────────────────────────────────────
+        tab_cond = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_cond, text="  Conditioning  ")
+
+        pbf = LabelFrame(tab_cond, text="Pre-bias Conditioning", padx=6, pady=4)
+        pbf.pack(fill=X, pady=(0, 6))
+        self.lij_prebias_enabled_var = BooleanVar(value=False)
+        Checkbutton(pbf, text="Enable pre-bias before reverse scan",
+                    variable=self.lij_prebias_enabled_var,
+                    command=self._lij_toggle_prebias).grid(
+            row=0, column=0, columnspan=3, sticky=W, padx=4, pady=2)
+        Label(pbf, text="Voltage:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.lij_prebias_v_var = DoubleVar(value=1.2)
+        self.lij_prebias_v_entry = Entry(pbf, textvariable=self.lij_prebias_v_var, width=10,
+                                         state=DISABLED)
+        self.lij_prebias_v_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="V", fg="#666666").grid(row=1, column=2, sticky=W)
+        Label(pbf, text="Duration:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.lij_prebias_t_var = DoubleVar(value=2.0)
+        self.lij_prebias_t_entry = Entry(pbf, textvariable=self.lij_prebias_t_var, width=10,
+                                         state=DISABLED)
+        self.lij_prebias_t_entry.grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="s", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        lsf = LabelFrame(tab_cond, text="Light Soaking", padx=6, pady=4)
+        lsf.pack(fill=X, pady=(0, 6))
+        self.lij_ls_enabled_var = BooleanVar(value=False)
+        Checkbutton(lsf, text="Enable light soaking before each scan",
+                    variable=self.lij_ls_enabled_var,
+                    command=self._lij_toggle_ls).grid(
+            row=0, column=0, columnspan=3, sticky=W, padx=4, pady=2)
+        Label(lsf, text="Duration:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.lij_ls_dur_var = DoubleVar(value=60.0)
+        self.lij_ls_entry = Entry(lsf, textvariable=self.lij_ls_dur_var, width=10,
+                                  state=DISABLED)
+        self.lij_ls_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(lsf, text="s", fg="#666666").grid(row=1, column=2, sticky=W)
+
+        fitf = LabelFrame(tab_cond, text="Analysis", padx=6, pady=4)
+        fitf.pack(fill=X, pady=(0, 4))
+        self.lij_auto_fit_var = BooleanVar(value=True)
+        Checkbutton(fitf, text="Auto single-diode fit",
+                    variable=self.lij_auto_fit_var
+                    ).grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+
+        # ── Intensity Sequence frame ──────────────────────────────────────────
+        seq_frame = LabelFrame(self.light_jv_panel, text="Intensity Sequence",
+                               padx=6, pady=4)
+        seq_frame.pack(fill=X, padx=6, pady=(0, 4))
+
+        # Add intensity row
+        add_row = Frame(seq_frame)
+        add_row.pack(fill=X, pady=(0, 4))
+        Label(add_row, text="Add intensity (suns):").pack(side=LEFT, padx=(0, 4))
+        self.lij_add_intensity_var = StringVar()
+        add_entry = Entry(add_row, textvariable=self.lij_add_intensity_var, width=10)
+        add_entry.pack(side=LEFT)
+        add_entry.bind("<Return>", lambda e: self._lij_add_intensity())
+        Button(add_row, text="Add", command=self._lij_add_intensity,
+               font=("Arial", 8), pady=1).pack(side=LEFT, padx=(4, 0))
+        self.lij_add_warn_var = StringVar()
+        Label(add_row, textvariable=self.lij_add_warn_var,
+              fg="#E65100", font=("Arial", 8)).pack(side=LEFT, padx=(6, 0))
+
+        # Listbox
+        lb_frame = Frame(seq_frame)
+        lb_frame.pack(fill=X, pady=(0, 4))
+        lb_vsb = ttk.Scrollbar(lb_frame, orient="vertical")
+        self.lij_listbox = Listbox(lb_frame, height=6, font=("Consolas", 9),
+                                   yscrollcommand=lb_vsb.set,
+                                   exportselection=False)
+        lb_vsb.config(command=self.lij_listbox.yview)
+        self.lij_listbox.pack(side=LEFT, fill=X, expand=True)
+        lb_vsb.pack(side=LEFT, fill=Y)
+
+        # Listbox button row
+        btn_row = Frame(seq_frame)
+        btn_row.pack(fill=X, pady=(0, 6))
+        for txt, cmd in [
+            ("Remove",  self._lij_remove_selected),
+            ("Up",      self._lij_move_up),
+            ("Down",    self._lij_move_down),
+            ("Clear",   self._lij_clear_all),
+        ]:
+            Button(btn_row, text=txt, command=cmd,
+                   font=("Arial", 8), pady=1, width=8).pack(side=LEFT, padx=(0, 3))
+
+        # Stabilization time
+        stab_row = Frame(seq_frame)
+        stab_row.pack(fill=X)
+        Label(stab_row, text="Stabilization time (s):").pack(side=LEFT, padx=(0, 4))
+        self.lij_stab_time_var = DoubleVar(value=180.0)
+        Entry(stab_row, textvariable=self.lij_stab_time_var, width=8).pack(side=LEFT)
+
+        # ── Control buttons ───────────────────────────────────────────────────
+        btn_frame = Frame(self.light_jv_panel, bg="#ececec")
+        btn_frame.pack(fill=X, padx=8, pady=6)
+
+        self.light_jv_start_btn = Button(
+            btn_frame, text="Start Measurements",
+            command=self._lij_start_sequence,
+            bg="#1565C0", fg="white",
+            font=("Arial", 9, "bold"),
+            pady=4, state=DISABLED)
+        self.light_jv_start_btn.pack(side=LEFT, padx=(0, 6))
+
+        self.light_jv_stop_btn = Button(
+            btn_frame, text="Stop",
+            command=self._lij_stop_sequence,
+            bg="#C62828", fg="white",
+            font=("Arial", 9, "bold"),
+            width=8, pady=4)
+        self.light_jv_stop_btn.pack(side=LEFT)
+        self.light_jv_stop_btn.pack_forget()
+
+        # ── Status bar ────────────────────────────────────────────────────────
+        lij_status_bar = Frame(self.light_jv_panel, bg="#37474F", height=24)
+        lij_status_bar.pack(fill=X, side="bottom")
+        lij_status_bar.pack_propagate(False)
+        self.lij_status_var = StringVar(value="Ready — add intensities and press Start Measurements.")
+        Label(lij_status_bar, textvariable=self.lij_status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W,
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
+
+        # ── Right plot frame ──────────────────────────────────────────────────
+        self.light_jv_plot_frame = Frame(right_container, bg="#ffffff")
+
+        self.lij_fig, (self.lij_ax_jv, self.lij_ax) = plt.subplots(
+            2, 1, figsize=(8, 5.5),
+            gridspec_kw={"height_ratios": [3, 2], "hspace": 0.55},
+        )
+        self.lij_ax_jv.set_xlabel("Voltage (V)", fontsize=10)
+        self.lij_ax_jv.set_ylabel("Current Density (mA/cm²)", fontsize=10)
+        self.lij_ax_jv.set_title("J-V Curves — by intensity (rev scan)",
+                                  fontsize=11, fontweight="bold")
+        self.lij_ax_jv.text(0.5, 0.5, "No data yet\nAdd intensities and start measurements",
+                             ha="center", va="center", fontsize=10, color="gray",
+                             transform=self.lij_ax_jv.transAxes)
+        self.lij_ax_jv.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--")
+        self.lij_ax_jv.grid(True, alpha=0.3)
+        self.lij_ax.set_xlabel("ln(L / L_max)", fontsize=10)
+        self.lij_ax.set_ylabel("Voc (V)", fontsize=10)
+        self.lij_ax.set_title("Voc vs ln(L/L_max) — Light Ideality Factor",
+                               fontsize=11, fontweight="bold")
+        self.lij_ax.text(0.5, 0.5, "Waiting for ≥ 2 measurements…",
+                         ha="center", va="center", fontsize=10, color="gray",
+                         transform=self.lij_ax.transAxes)
+        self.lij_ax.grid(True, alpha=0.3)
+        self.lij_canvas = FigureCanvasTkAgg(self.lij_fig, self.light_jv_plot_frame)
+        self.lij_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+        self.lij_canvas.draw_idle()
+
+        # Internal state
+        self._lij_running = False
+        self._lij_results = []
+
+    # ── Light-Intensity JV scan rate helpers ──────────────────────────────────
+
+    def _lij_update_scan_rate(self, *_args):
+        try:
+            step_mv = self.lij_step_v_var.get() * 1000.0
+            delay   = self.lij_delay_ms_var.get()
+            nplc_ms = self.lij_nplc_var.get() * (1000.0 / 60.0)
+            tpp     = (delay + nplc_ms + 50.0) / 1000.0
+            self.lij_scan_rate_var.set(
+                f"{step_mv / tpp:.1f}" if tpp > 0 and step_mv > 0 else "—"
+            )
+        except Exception:
+            self.lij_scan_rate_var.set("—")
+
+    def _lij_params_changed(self, *_args):
+        if self.lij_scan_rate_mode.get() == "scan_rate":
+            self._lij_recalc_delay()
+        else:
+            self._lij_update_scan_rate()
+
+    def _lij_on_scan_mode_change(self):
+        mode = self.lij_scan_rate_mode.get()
+        if mode == "advanced":
+            self.lij_delay_entry.config(state=NORMAL)
+            self._lij_sr_entry.config(state=DISABLED)
+            self._lij_sr_label.grid_remove()
+            self._lij_sr_entry.grid_remove()
+            self._lij_sr_unit.grid_remove()
+            self._lij_update_scan_rate()
+        else:
+            self.lij_delay_entry.config(state="readonly")
+            self._lij_sr_entry.config(state=NORMAL)
+            self._lij_sr_label.grid()
+            self._lij_sr_entry.grid()
+            self._lij_sr_unit.grid()
+            self._lij_recalc_delay()
+
+    def _lij_recalc_delay(self, *_args):
+        if self.lij_scan_rate_mode.get() != "scan_rate":
+            return
+        try:
+            step_mv = self.lij_step_v_var.get() * 1000.0
+            rate    = self.lij_target_sr_var.get()
+            nplc_ms = self.lij_nplc_var.get() * (1000.0 / 60.0)
+            if step_mv <= 0 or rate <= 0:
+                return
+            tpp_ms  = (step_mv / rate) * 1000.0
+            delay   = max(0.0, tpp_ms - nplc_ms - 50.0)
+            self.lij_delay_ms_var.set(round(delay, 1))
+            actual  = step_mv / ((delay + nplc_ms + 50.0) / 1000.0)
+            warning = " ⚠" if delay == 0.0 else ""
+            self.lij_scan_rate_var.set(f"{actual:.1f}{warning}")
+        except Exception:
+            pass
+
+    def _lij_toggle_prebias(self):
+        state = NORMAL if self.lij_prebias_enabled_var.get() else DISABLED
+        self.lij_prebias_v_entry.config(state=state)
+        self.lij_prebias_t_entry.config(state=state)
+
+    def _lij_toggle_ls(self):
+        state = NORMAL if self.lij_ls_enabled_var.get() else DISABLED
+        self.lij_ls_entry.config(state=state)
+
+    # ── Intensity sequence list management ────────────────────────────────────
+
+    def _lij_add_intensity(self):
+        raw = self.lij_add_intensity_var.get().strip()
+        self.lij_add_warn_var.set("")
+        try:
+            val = float(raw)
+        except ValueError:
+            self.lij_add_warn_var.set("Not a number")
+            return
+        if val <= 0 or val > 10.0:
+            self.lij_add_warn_var.set("Must be 0.001–10.0")
+            return
+        # Warn on duplicate but still add
+        existing = [self.lij_listbox.get(i) for i in range(self.lij_listbox.size())]
+        formatted = f"[ ] {val:.4g}"
+        if any(f"[ ] {val:.4g}" in e or f"[✔] {val:.4g}" in e for e in existing):
+            self.lij_add_warn_var.set("Duplicate value added")
+        self.lij_listbox.insert(END, formatted)
+        self.lij_add_intensity_var.set("")
+
+    def _lij_remove_selected(self):
+        sel = self.lij_listbox.curselection()
+        for idx in reversed(sel):
+            self.lij_listbox.delete(idx)
+
+    def _lij_move_up(self):
+        sel = self.lij_listbox.curselection()
+        if not sel or sel[0] == 0:
+            return
+        idx = sel[0]
+        text = self.lij_listbox.get(idx)
+        fg   = self.lij_listbox.itemcget(idx, "foreground")
+        self.lij_listbox.delete(idx)
+        self.lij_listbox.insert(idx - 1, text)
+        if fg:
+            self.lij_listbox.itemconfig(idx - 1, foreground=fg)
+        self.lij_listbox.selection_set(idx - 1)
+
+    def _lij_move_down(self):
+        sel = self.lij_listbox.curselection()
+        if not sel or sel[0] >= self.lij_listbox.size() - 1:
+            return
+        idx = sel[0]
+        text = self.lij_listbox.get(idx)
+        fg   = self.lij_listbox.itemcget(idx, "foreground")
+        self.lij_listbox.delete(idx)
+        self.lij_listbox.insert(idx + 1, text)
+        if fg:
+            self.lij_listbox.itemconfig(idx + 1, foreground=fg)
+        self.lij_listbox.selection_set(idx + 1)
+
+    def _lij_clear_all(self):
+        self.lij_listbox.delete(0, END)
+
+    def _lij_get_intensities(self):
+        """Return list of float intensities from the listbox."""
+        result = []
+        for i in range(self.lij_listbox.size()):
+            text = self.lij_listbox.get(i)
+            # text is like "[ ] 1.00" or "[✔] 0.50" — value is the last token
+            try:
+                result.append(float(text.split()[-1]))
+            except (ValueError, IndexError):
+                pass
+        return result
+
+    # ── Start/Stop logic ─────────────────────────────────────────────────────
+
+    def _lij_start_sequence(self):
+        if not self.lij_sample_name_var.get():
+            messagebox.showerror("Input Error", "Sample name is required.")
+            return
+        if not self.lij_export_folder_var.get():
+            messagebox.showerror("Input Error", "Export folder is required.")
+            return
+        if self.instrument is None:
+            messagebox.showerror("Input Error", "No instrument connected.")
+            return
+        intensities = self._lij_get_intensities()
+        if not intensities:
+            messagebox.showerror("Input Error",
+                                 "Add at least one intensity to the sequence.")
+            return
+        try:
+            stab = self.lij_stab_time_var.get()
+            if stab <= 0:
+                raise ValueError("Stabilization time must be positive.")
+            ref_illum = self.lij_ref_illum_var.get()
+            if ref_illum <= 0:
+                raise ValueError("Reference illumination must be positive.")
+        except Exception as exc:
+            messagebox.showerror("Input Error", str(exc))
+            return
+
+        self._measurement_running = True
+        self._lij_running         = True
+        self._lij_results         = []
+        self.light_jv_start_btn.config(state=DISABLED)
+        self.light_jv_stop_btn.pack(side=LEFT)
+        # Reset listbox status markers to pending
+        for i in range(self.lij_listbox.size()):
+            text = self.lij_listbox.get(i)
+            val_str = text.split()[-1]
+            self.lij_listbox.delete(i)
+            self.lij_listbox.insert(i, f"[ ] {val_str}")
+            self.lij_listbox.itemconfig(i, foreground="")
+        stop_event.clear()
+        threading.Thread(target=self._lij_run_thread,
+                         args=(intensities,), daemon=True).start()
+
+    def _lij_stop_sequence(self):
+        stop_event.set()
+        self.lij_status_var.set("Stopping…")
+
+    def _lij_run_thread(self, intensities):
+        from pathlib import Path
+        sp = {
+            "start_v":  self.lij_start_v_var.get(),
+            "end_v":    self.lij_end_v_var.get(),
+            "step_v":   self.lij_step_v_var.get(),
+            "delay_ms": self.lij_delay_ms_var.get(),
+            "nplc":     self.lij_nplc_var.get(),
+            "cell_area":self.lij_cell_area_var.get(),
+            "four_wire":self.lij_four_wire_var.get(),
+            "reference_illumination_mw_cm2": self.lij_ref_illum_var.get(),
+        }
+        prebias = {
+            "enabled":  self.lij_prebias_enabled_var.get(),
+            "voltage":  self.lij_prebias_v_var.get(),
+            "duration": self.lij_prebias_t_var.get(),
+        }
+        ls = {
+            "enabled":  self.lij_ls_enabled_var.get(),
+            "duration": self.lij_ls_dur_var.get(),
+        }
+        smu = Keithley2400SourceMeter(self.instrument)
+
+        measurement = LightIntensityJVMeasurement(
+            sourcemeter           = smu,
+            intensities           = intensities,
+            scan_params           = sp,
+            stabilization_time_s  = self.lij_stab_time_var.get(),
+            pre_bias_settings     = prebias,
+            light_soaking_settings= ls,
+            sample_name           = self.lij_sample_name_var.get(),
+            output_folder         = Path(self.lij_export_folder_var.get()),
+            auto_single_diode_fit = self.lij_auto_fit_var.get(),
+            on_status             = self.lij_status_var.set,
+            on_prompt_user        = self._lij_prompt_user,
+            on_progress           = lambda cur, tot, status:
+                                    self.lij_status_var.set(
+                                        f"Step {cur}/{tot} — {status}"),
+            on_measurement_done   = self._lij_on_step_done,
+            on_complete           = self._lij_on_complete,
+            stop_event            = stop_event,
+            instrument_idn        = self.instrument_idn or "",
+        )
+        try:
+            measurement.run()
+        except Exception as exc:
+            messagebox.showerror("Measurement Error", str(exc))
+            self.lij_status_var.set("Sequence failed.")
+        finally:
+            self._measurement_running = False
+            self._lij_running         = False
+            self.root.after(0, self._lij_restore_controls)
+            stop_event.clear()
+
+    def _lij_restore_controls(self):
+        if self.instrument is not None:
+            self.light_jv_start_btn.config(state=NORMAL)
+        self.light_jv_stop_btn.pack_forget()
+
+    def _lij_on_step_done(self, index, result):
+        """Called from measurement thread — schedules GUI update on main thread."""
+        self.root.after(0, lambda: self._lij_update_listbox(index, result))
+        self.root.after(0, lambda: self._lij_update_plot())
+
+    def _lij_update_listbox(self, index, result):
+        if index >= self.lij_listbox.size():
+            return
+        intensity = result.intensity
+        if result.status == "completed":
+            marker = "✔"
+            color  = "green"
+        elif result.status == "failed":
+            marker = "✗"
+            color  = "red"
+        else:
+            marker = "✗"
+            color  = "#E65100"
+        text = f"[{marker}] {intensity:.4g}"
+        self.lij_listbox.delete(index)
+        self.lij_listbox.insert(index, text)
+        self.lij_listbox.itemconfig(index, foreground=color)
+        self._lij_results = list(self._lij_results)
+        if len(self._lij_results) <= index:
+            self._lij_results.extend([None] * (index + 1 - len(self._lij_results)))
+        self._lij_results[index] = result
+
+    def _lij_update_plot(self):
+        """Redraw JV curves (top) and Voc vs ln(L) (bottom) with completed results."""
+        import math as _math
+        import numpy as np
+        from scipy.stats import linregress
+
+        completed = [r for r in self._lij_results
+                     if r is not None and r.status == "completed"]
+
+        # ── Top: J-V curves ───────────────────────────────────────────────────
+        self.lij_ax_jv.clear()
+        self.lij_ax_jv.set_xlabel("Voltage (V)", fontsize=10)
+        self.lij_ax_jv.set_ylabel("Current Density (mA/cm²)", fontsize=10)
+        self.lij_ax_jv.set_title("J-V Curves — by intensity (rev scan)",
+                                  fontsize=11, fontweight="bold")
+        self.lij_ax_jv.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--", zorder=1)
+        self.lij_ax_jv.grid(True, alpha=0.3)
+
+        if completed:
+            for i, r in enumerate(completed):
+                color = PLOT_COLORS[i % len(PLOT_COLORS)]
+                v = r.v_rev if r.v_rev is not None else r.v_fwd
+                j = r.j_rev if r.j_rev is not None else r.j_fwd
+                if v is not None and j is not None and len(v) > 0:
+                    self.lij_ax_jv.plot(v, j, color=color, linewidth=1.5,
+                                        label=f"{r.intensity:.4g} sun", zorder=3)
+            self.lij_ax_jv.legend(fontsize=8, loc="upper right")
+        else:
+            self.lij_ax_jv.text(0.5, 0.5, "No data yet",
+                                 ha="center", va="center", fontsize=10,
+                                 color="gray", transform=self.lij_ax_jv.transAxes)
+
+        # ── Bottom: Voc vs ln(L/Lmax) ─────────────────────────────────────────
+        self.lij_ax.clear()
+        self.lij_ax.set_xlabel("ln(L / L_max)", fontsize=10)
+        self.lij_ax.set_ylabel("Voc (V)", fontsize=10)
+        self.lij_ax.set_title("Voc vs ln(L/L_max) — Light Ideality Factor",
+                               fontsize=11, fontweight="bold")
+        self.lij_ax.grid(True, alpha=0.3)
+
+        if len(completed) >= 2:
+            intensities = [r.intensity for r in completed]
+            l_max  = max(intensities)
+            ln_l   = np.array([_math.log(i / l_max) if i > 0 else float("nan")
+                                for i in intensities])
+            voc_f  = np.array([r.Voc_fwd for r in completed])
+            voc_r  = np.array([r.Voc_rev for r in completed])
+            valid  = np.isfinite(ln_l)
+            self.lij_ax.plot(ln_l[valid], voc_f[valid], "o", color="#1565C0",
+                             markersize=5, label="Fwd Voc", zorder=3)
+            self.lij_ax.plot(ln_l[valid], voc_r[valid], "s", color="#B71C1C",
+                             markersize=5, label="Rev Voc", zorder=3)
+            if valid.sum() >= 3:
+                vt = 1.380649e-23 * 298.15 / 1.602176634e-19
+                x_line = np.linspace(ln_l[valid].min(), ln_l[valid].max(), 50)
+                res_f = linregress(ln_l[valid], voc_f[valid])
+                res_r = linregress(ln_l[valid], voc_r[valid])
+                n_f = res_f.slope / vt
+                n_r = res_r.slope / vt
+                self.lij_ax.plot(x_line, res_f.intercept + res_f.slope * x_line,
+                                 "--", color="#1565C0", alpha=0.75,
+                                 label=f"Fwd fit  n_idL = {n_f:.2f}")
+                self.lij_ax.plot(x_line, res_r.intercept + res_r.slope * x_line,
+                                 "--", color="#B71C1C", alpha=0.75,
+                                 label=f"Rev fit  n_idL = {n_r:.2f}")
+            self.lij_ax.legend(fontsize=8, loc="upper left")
+        else:
+            self.lij_ax.text(0.5, 0.5, "Waiting for ≥ 2 measurements…",
+                              ha="center", va="center", fontsize=10,
+                              color="gray", transform=self.lij_ax.transAxes)
+
+        self.lij_canvas.draw_idle()
+
+    def _lij_on_complete(self, consolidated_path):
+        self.root.after(0, lambda: self._lij_sequence_complete(consolidated_path))
+
+    def _lij_sequence_complete(self, path):
+        self.lij_status_var.set(
+            f"Sequence complete — saved: {path.name}")
+        from app.utils.sound import play_completion_sound
+        play_completion_sound()
+
+    # ── Illumination prompt modal ─────────────────────────────────────────────
+
+    def _lij_prompt_user(self, message: str, intensity: float) -> bool:
+        """Block the measurement thread until the user confirms or cancels.
+
+        Opens a modal Toplevel on the main thread via root.after() + Event.wait().
+        Returns True if the user clicked OK (checkbox ticked), False otherwise.
+        """
+        result = [False]
+        ready  = threading.Event()
+
+        def _show():
+            from tkinter import Toplevel, BooleanVar, Checkbutton, WORD
+            dlg = Toplevel(self.root)
+            dlg.title("Set Illumination Intensity")
+            dlg.resizable(False, False)
+            dlg.grab_set()
+
+            # Prevent window-close button and Esc from bypassing
+            dlg.protocol("WM_DELETE_WINDOW", lambda: None)
+            dlg.bind("<Escape>", lambda e: None)
+
+            # Message
+            msg_frame = Frame(dlg, padx=16, pady=12)
+            msg_frame.pack(fill=X)
+            from tkinter import Text as _Text
+            msg_widget = _Text(msg_frame, wrap=WORD, relief="flat",
+                               bg=dlg.cget("bg"), font=("Arial", 10),
+                               height=5, width=50)
+            msg_widget.insert("1.0", message)
+            msg_widget.config(state=DISABLED)
+            msg_widget.pack()
+
+            # Checkbox
+            ck_var = BooleanVar(value=False)
+            ck_frame = Frame(dlg, padx=16, pady=4)
+            ck_frame.pack(fill=X)
+            ck = Checkbutton(
+                ck_frame,
+                text=f"I confirm the simulator is set to {intensity:.4g} sun",
+                variable=ck_var,
+                font=("Arial", 10),
+            )
+            ck.pack(anchor=W)
+
+            # Buttons
+            btn_frame = Frame(dlg, padx=16, pady=12)
+            btn_frame.pack(fill=X)
+
+            ok_btn = Button(btn_frame, text="OK", width=10,
+                            bg="#1565C0", fg="white",
+                            font=("Arial", 9, "bold"),
+                            state=DISABLED,
+                            command=lambda: _confirm(True))
+            ok_btn.pack(side=RIGHT, padx=(6, 0))
+            Button(btn_frame, text="Cancel", width=10,
+                   font=("Arial", 9),
+                   command=lambda: _confirm(False)).pack(side=RIGHT)
+
+            def _on_ck_change(*_):
+                ok_btn.config(state=NORMAL if ck_var.get() else DISABLED)
+            ck_var.trace("w", _on_ck_change)
+
+            def _confirm(ok: bool):
+                result[0] = ok
+                dlg.grab_release()
+                dlg.destroy()
+                ready.set()
+
+            # Centre over main window
+            self.root.update_idletasks()
+            x = self.root.winfo_x() + (self.root.winfo_width()  - 450) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - 260) // 2
+            dlg.geometry(f"450x260+{x}+{y}")
+
+        self.root.after(0, _show)
+        ready.wait()
+        return result[0]
 
     # ══════════════════════════════════════════════════════════════════════════
     # MPP TRACKING — panel builder
