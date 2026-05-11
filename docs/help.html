@@ -355,26 +355,32 @@
               FF, PCE, R<sub>s</sub>, R<sub>sh</sub>, and Hysteresis Index (HI)</td>
         </tr>
         <tr>
-          <td><strong>MPP Tracking (JV-SPO)</strong></td>
+          <td><strong>Light-Intensity J-V</strong></td>
           <td><code>Alt+F3</code></td>
+          <td>J-V sweeps at user-defined illumination intensities; extracts the light
+              ideality factor n<sub>idL</sub> from the slope of V<sub>oc</sub> vs ln(L)</td>
+        </tr>
+        <tr>
+          <td><strong>MPP Tracking (JV-SPO)</strong></td>
+          <td><code>Alt+F5</code></td>
           <td>Cyclic J-V scans followed by Stabilized Power Output (SPO) phases at V<sub>mpp</sub>;
               tracks efficiency evolution over time with periodic J-V diagnostics</td>
         </tr>
         <tr>
           <td><strong>Stabilized Current</strong></td>
-          <td><code>Alt+F5</code></td>
+          <td><code>Alt+F6</code></td>
           <td>Holds cell at a fixed voltage and records current density over time; reports
               quasi-steady-state PCE and detects the stabilization point</td>
         </tr>
         <tr>
           <td><strong>Pure MPP Tracking (P&amp;O)</strong></td>
-          <td><code>Alt+F6</code></td>
+          <td><code>Alt+F7</code></td>
           <td>Continuous Perturb-and-Observe maximum power point tracking; records V<sub>mpp</sub>,
               J, and PCE at every time step with no interruptions for J-V scans</td>
         </tr>
         <tr>
           <td><strong>Data Curation</strong></td>
-          <td><code>Alt+F7</code></td>
+          <td><code>Alt+F8</code></td>
           <td>Batch analysis of multiple saved J-V files; applies quality thresholds, groups
               devices by composition, and exports curated statistics ready for Origin box plots</td>
         </tr>
@@ -395,7 +401,7 @@
           diagnostics) and pure P&amp;O continuous tracking</li>
       <li><strong>Data Viewer</strong> window for opening and plotting any previously saved
           Excel file, with metadata panel and interactive legend</li>
-      <li><strong>Data Curation</strong> (Alt+F7) — batch analysis of multiple J-V files with
+      <li><strong>Data Curation</strong> (Alt+F8) — batch analysis of multiple J-V files with
           composition grouping, configurable pass/fail thresholds, per-group statistics, champion
           cell identification, and hysteresis summary; exports multi-sheet Excel ready for Origin</li>
       <li>All data exported to <strong>Excel (.xlsx)</strong> using a unified
@@ -606,28 +612,36 @@
        buttons are disabled. White text = instrument identified; measurement can proceed.</p>
 
     <h3>Mode switching</h3>
-    <p>Five modes are accessible from the <strong>Mode</strong> menu or via keyboard shortcuts
-       (Alt+F2, F3, F5, F6, F7). Each mode reveals its own panel of controls in the left pane.
-       Only one mode can be active at a time. Switching mode does not disconnect the instrument.</p>
+    <p>Seven modes are accessible from the <strong>Procedures</strong> menu or via keyboard
+       shortcuts (Alt+F2, F3, F5, F6, F7, F8, F9). Each mode reveals its own panel of controls
+       in the left pane. Only one mode can be active at a time. Switching mode does not
+       disconnect the instrument.</p>
 
     <h3>J-V mode panel (<code>Alt+F2</code>)</h3>
     <p>Sample name, export folder, voltage sweep parameters, cell area, instrument settings,
        illumination input, pre-bias conditioning, and dark J-V option. Contains the main
        J-V plot area and measurement log.</p>
 
-    <h3>MPP Tracking panel (<code>Alt+F3</code>)</h3>
+    <h3>Light-Intensity J-V panel (<code>Alt+F3</code>)</h3>
+    <p>Standard scan parameters (shared with J-V mode) plus an intensity sequence list.
+       The software prompts you to adjust the solar simulator at each intensity step, waits
+       a configurable stabilization time, then runs a forward + reverse J-V scan.
+       Outputs a consolidated workbook with all curves and the fitted light ideality factor
+       n<sub>idL</sub>.</p>
+
+    <h3>MPP Tracking panel (<code>Alt+F5</code>)</h3>
     <p>Sample name, export folder, cell area, scan parameters, pre-bias option, illumination,
        total duration, SPO duration per cycle. Contains SPO plot and J-V per cycle overlay.</p>
 
-    <h3>Stabilized Current panel (<code>Alt+F5</code>)</h3>
+    <h3>Stabilized Current panel (<code>Alt+F6</code>)</h3>
     <p>Sample name, export folder, cell area, applied voltage, illumination, duration, reading
        interval, and stabilization threshold. Contains a live dual-axis plot (J and PCE vs time).</p>
 
-    <h3>Pure MPP Tracking panel (<code>Alt+F6</code>)</h3>
+    <h3>Pure MPP Tracking panel (<code>Alt+F7</code>)</h3>
     <p>Sample name, export folder, cell area, perturbation step, interval, NPLC, delay,
        illumination, and initial scan parameters. Contains dual-axis plot (PCE and V<sub>mpp</sub>).</p>
 
-    <h3>Data Curation panel (<code>Alt+F7</code>)</h3>
+    <h3>Data Curation panel (<code>Alt+F8</code>)</h3>
     <p>Multi-file batch analysis tool. Four tabs: <strong>Files</strong> (load .xlsx files),
        <strong>Groups</strong> (define composition groups), <strong>Thresholds</strong> (set
        minimum quality thresholds), and <strong>Output</strong> (export filename and folder).
@@ -979,7 +993,7 @@
        12. STABILIZED CURRENT MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="stab">
-    <h2>12. Stabilized Current Measurement <span class="mode-badge stab">Alt+F5</span></h2>
+    <h2>12. Stabilized Current Measurement <span class="mode-badge stab">Alt+F6</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -1092,7 +1106,7 @@
        13. MPP TRACKING — JV-SPO CYCLING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="mpp">
-    <h2>13. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F3</span></h2>
+    <h2>13. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F5</span></h2>
 
     <h3>Protocol overview</h3>
     <p>
@@ -1221,7 +1235,7 @@
        14. PURE MPP TRACKING — P&O
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="pure-mpp">
-    <h2>14. Pure MPP Tracking — Perturb &amp; Observe <span class="mode-badge pmpp">Alt+F6</span></h2>
+    <h2>14. Pure MPP Tracking — Perturb &amp; Observe <span class="mode-badge pmpp">Alt+F7</span></h2>
 
     <h3>Algorithm description</h3>
     <p>
@@ -1414,7 +1428,7 @@
        16. DATA CURATION
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="data-curation">
-    <h2>16. Data Curation <span class="mode-badge curation">Alt+F7</span></h2>
+    <h2>16. Data Curation <span class="mode-badge curation">Alt+F8</span></h2>
 
     <p>
       Data Curation is a post-processing tool for batch analysis of multiple J-V measurement files.

@@ -119,11 +119,12 @@ When adding new code that uses J0 or n, update both the local-derivative methods
 | Mode | Shortcut | Class / entry point |
 |---|---|---|
 | J-V Measurement | Alt+F2 | `run_measurement()` in `main_window.py` |
-| MPP Tracking (JV-SPO) | Alt+F3 | `MPPTracker` in `mpp_tracker.py` |
-| Stabilized Current | Alt+F5 | inline in `main_window.py` |
-| Pure MPP Tracking (P&O) | Alt+F6 | `PureMPPTracker` in `pure_mpp_tracker.py` |
-| Data Curation | Alt+F7 | `switch_mode("curation")` in `main_window.py` |
-| ISOS Protocols (D-1) | Alt+F8 | `run_isos_d1_measurement()` in `main_window.py` |
+| JV Light Intensity | Alt+F3 | `LightIntensityJVMeasurement` in `light_intensity_jv.py` |
+| MPP Tracking (JV-SPO) | Alt+F5 | `MPPTracker` in `mpp_tracker.py` |
+| Stabilized Current | Alt+F6 | inline in `main_window.py` |
+| Pure MPP Tracking (P&O) | Alt+F7 | `PureMPPTracker` in `pure_mpp_tracker.py` |
+| Data Curation | Alt+F8 | `switch_mode("curation")` in `main_window.py` |
+| ISOS Protocols (D-1) | Alt+F9 | `run_isos_d1_measurement()` in `main_window.py` |
 
 Mode panels are shown/hidden by `switch_mode()` using `pack()`/`pack_forget()`. The active panel name is stored in `self._current_mode` (`"jv"`, `"mpp"`, `"stab"`, `"pure_mpp"`).
 
