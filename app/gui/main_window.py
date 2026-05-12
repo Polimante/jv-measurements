@@ -882,33 +882,50 @@ class JVMeasurementApp:
             pass
 
     def validate_inputs(self):
+        from app.gui.input_validation import (
+            validate_filename, validate_voltage_range,
+            validate_cell_area, validate_delay_ms, validate_nplc,
+            validate_illumination,
+        )
+
+        def _sv(var, fallback=""):
+            """Return the string value of a Tkinter Var; fallback on error."""
+            try:
+                return str(var.get())
+            except Exception:
+                return fallback
+
         try:
-            if not self.sample_name_var.get():
-                raise ValueError("Sample name is required")
+            res = validate_filename(self.sample_name_var.get())
+            if res.error:
+                raise ValueError(res.error.message)
             if not self.export_folder_var.get():
                 self.export_entry.config(fg="red")
                 raise ValueError("Select an export folder")
             if self.instrument is None:
                 raise ValueError("No instrument connected.\nUse Instrument \u2192 Connect.")
-            if self.start_voltage_var.get() >= self.end_voltage_var.get():
-                raise ValueError("Start voltage must be less than end voltage")
+            res = validate_voltage_range(
+                self.start_voltage_var.get(), self.end_voltage_var.get()
+            )
+            if res.error:
+                raise ValueError(res.error.message)
             if self.step_voltage_var.get() <= 0:
                 raise ValueError("Step voltage must be positive")
-            if self.cell_area_var.get() <= 0:
-                raise ValueError("Cell area must be positive")
-            if self.delay_ms_var.get() < 0:
-                raise ValueError("Delay cannot be negative")
-            if not (0.01 <= self.nplc_var.get() <= 25):
-                raise ValueError("NPLC must be between 0.01 and 25")
+            res = validate_cell_area(_sv(self.cell_area_var))
+            if res.error:
+                raise ValueError(res.error.message)
+            res = validate_delay_ms(_sv(self.delay_ms_var, "0"))
+            if res.error:
+                raise ValueError(res.error.message)
+            res = validate_nplc(_sv(self.nplc_var))
+            if res.error:
+                raise ValueError(res.error.message)
             if self.prebias_enabled_var.get() and self.prebias_duration_var.get() <= 0:
                 raise ValueError("Pre-bias duration must be positive")
             if self.light_soaking_var.get() and self.light_soaking_duration_var.get() <= 0:
                 raise ValueError("Light soaking duration must be positive")
-            try:
-                illum = float(self.illumination_var.get())
-            except ValueError:
-                illum = 0.0
-            if illum <= 0:
+            res = validate_illumination(self.illumination_var.get())
+            if res.error:
                 raise ValueError(
                     "Illumination is 0 mW/cm\u00b2.\n\n"
                     "Enter the detector power in the Illumination Settings panel\n"
