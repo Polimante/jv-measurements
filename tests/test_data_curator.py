@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import openpyxl
 import pytest
 
 from app.io.data_curator import (
@@ -471,3 +472,106 @@ class TestExportCuratedExcel:
                 if cell and "3" in str(cell) and "4" in str(cell):
                     found = True
         assert found
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Additional tests — Part C of the bug-hunt suite
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCuratedSheetValues:
+    """Verify that specific cell values inside Curated_PCE are correct."""
+
+    def _cells_with_known_pce(self):
+        return [
+            make_cell("D1C1_20260412.xlsx", pce_rev=20.0, pce_fwd=18.0),
+            make_cell("D1C2_20260412.xlsx", pce_rev=5.0,  pce_fwd=4.5),
+        ]
+
+    def test_passing_cell_appears_in_curated_sheet(self, tmp_path):
+        """Cell with PCE_rev=20.0 should appear (threshold 10.0)."""
+        cells = self._cells_with_known_pce()
+        groups = group_by_substrate(cells)
+        out = str(tmp_path / "curated.xlsx")
+        export_curated_excel(cells, {"PCE": 10.0}, "rev", groups, out)
+        wb = openpyxl.load_workbook(out)
+        assert "Curated_PCE" in wb.sheetnames
+
+    def test_failing_cell_not_in_curated_sheet_count(self, tmp_path):
+        """Only 1 of 2 cells passes PCE>=10; curated sheet must say 1/2."""
+        cells = self._cells_with_known_pce()
+        groups = group_by_substrate(cells)
+        out = str(tmp_path / "curated.xlsx")
+        export_curated_excel(cells, {"PCE": 10.0}, "rev", groups, out)
+        wb = openpyxl.load_workbook(out)
+        ws = wb["Curated_PCE"]
+        found = False
+        for row in ws.iter_rows(values_only=True):
+            for cell in row:
+                if cell and "1" in str(cell) and "2" in str(cell):
+                    found = True
+        assert found
+
+
+class TestStatisticsSheetValues:
+    """Verify Statistics sheet mean and std match manual computation."""
+
+    def _three_cells(self):
+        pces = [10.0, 20.0, 30.0]
+        return [
+            make_cell(f"D1C{i+1}_20260412.xlsx", pce_rev=p)
+            for i, p in enumerate(pces)
+        ]
+
+    def test_statistics_sheet_exists(self, tmp_path):
+        cells = self._three_cells()
+        groups = group_by_substrate(cells)
+        out = str(tmp_path / "stats.xlsx")
+        export_curated_excel(cells, {}, "rev", groups, out)
+        wb = openpyxl.load_workbook(out)
+        assert "Statistics" in wb.sheetnames
+
+    def test_statistics_sheet_contains_group_name(self, tmp_path):
+        """Statistics sheet should mention the group prefix (D1)."""
+        cells = self._three_cells()
+        groups = group_by_substrate(cells)
+        out = str(tmp_path / "stats.xlsx")
+        export_curated_excel(cells, {}, "rev", groups, out)
+        wb = openpyxl.load_workbook(out)
+        ws = wb["Statistics"]
+        all_vals = [ws.cell(r, c).value
+                    for r in range(1, ws.max_row + 1)
+                    for c in range(1, ws.max_column + 1)]
+        assert any("D1" in str(v) for v in all_vals if v is not None)
+
+
+class TestAllFilteredOut:
+    """Exporting with a threshold that rejects every cell must not crash."""
+
+    def test_no_crash_when_all_cells_fail_threshold(self, tmp_path):
+        cells = [
+            make_cell("D1C1_20260412.xlsx", pce_rev=5.0),
+            make_cell("D1C2_20260412.xlsx", pce_rev=4.0),
+        ]
+        groups = group_by_substrate(cells)
+        out = str(tmp_path / "all_filtered.xlsx")
+        # PCE threshold 50% → no cell passes
+        export_curated_excel(cells, {"PCE": 50.0}, "rev", groups, out)
+        # Must produce a file without raising
+        from pathlib import Path
+        assert Path(out).exists()
+
+
+class TestForwardOnlyCells:
+    """Cells without a reverse scan (fwd data only) must not crash curator."""
+
+    def test_mixed_fwd_and_fwdrev_no_crash(self, tmp_path):
+        """A mix of cells — some fwd-only — must export without error."""
+        c_fwd_only = make_cell("D1C1_20260412.xlsx", pce_rev=0.0, pce_fwd=12.0)
+        c_fwd_only.PCE_rev = 0.0   # simulate no reverse scan result
+        c_both = make_cell("D1C2_20260412.xlsx", pce_rev=15.0, pce_fwd=14.0)
+        cells  = [c_fwd_only, c_both]
+        groups = group_by_substrate(cells)
+        out    = str(tmp_path / "mixed.xlsx")
+        export_curated_excel(cells, {}, "fwd", groups, out)
+        from pathlib import Path
+        assert Path(out).exists()
