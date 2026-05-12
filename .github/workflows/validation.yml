@@ -1,0 +1,60 @@
+name: Validation Suite
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+
+  push:
+    tags:
+      # Any release tag of the form vX.Y.Z
+      - "v*.*.*"
+
+  # Allow manual triggering from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  validation:
+    name: Run validation suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install headless Matplotlib backend
+        run: |
+          sudo apt-get install -y libfreetype6-dev
+          pip install matplotlib
+
+      - name: Run validation suite
+        env:
+          MPLBACKEND: Agg
+        run: |
+          python -m validation.run_suite --config validation/config.yaml
+
+      - name: Upload results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-results-${{ github.run_id }}
+          path: validation/results/
+          retention-days: 90
+
+      - name: Post summary to workflow page
+        if: always()
+        run: |
+          if [ -f validation/results/report.md ]; then
+            cat validation/results/report.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ report.md not found — validation may have crashed." >> $GITHUB_STEP_SUMMARY
+          fi

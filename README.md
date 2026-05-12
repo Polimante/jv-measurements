@@ -37,6 +37,18 @@ python main.py
 The software checks for updates automatically at startup.
 You can also check manually: **Help → Check for Updates**
 
+## Validation
+
+The software ships with a deterministic validation suite that generates
+publication-grade evidence of correctness using synthetic solar cells.
+
+```bash
+python -m validation.run_suite --config validation/config.yaml
+```
+
+See [validation/README.md](validation/README.md) for methodology, acceptance
+criteria, and how the outputs map to manuscript figures.
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.

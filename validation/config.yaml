@@ -1,0 +1,86 @@
+seed: 42
+
+# Realistic perovskite solar cell parameter distributions (used to sample random cells)
+cell_distributions:
+  j_ph:    {low: 18.0,  high: 24.0}   # photocurrent (mA/cm²)
+  j0_log:  {low: -14.0, high: -10.0}  # log10(dark saturation current, mA/cm²)
+  n:       {low: 1.1,   high: 2.0}    # ideality factor
+  rs:      {low: 1.0,   high: 15.0}   # series resistance (Ω·cm²)
+  rsh_log: {low: 2.7,   high: 4.7}    # log10(shunt resistance, Ω·cm²) → [~500, ~50000]
+  T_K:     298.15                      # temperature (K)
+
+# Voltage scan parameters shared across tests
+scan:
+  v_start:      -0.05   # V
+  v_end:         1.30   # V
+  v_step:        0.005  # 5 mV  — used for JV extraction and ground-truth grid
+  v_step_fit:    0.010  # 10 mV — used for single-diode fitting (coarser = faster)
+  illumination: 100.0   # mW/cm²
+  cell_area:     0.09   # cm²
+  nplc:          1.0
+  delay_s:       0.0
+
+# ── Test A: JV parameter extraction ──────────────────────────────────────────
+jv_extraction:
+  n_cells: 50
+  # noise expressed as fraction of Jsc (Gaussian, σ = noise_level × Jsc)
+  noise_levels: [0.0, 0.01]
+  thresholds:
+    no_noise:   {voc: 0.005, jsc: 0.005, ff: 0.005, pce: 0.005}   # 0.5%
+    with_noise: {voc: 0.020, jsc: 0.020, ff: 0.020, pce: 0.020}   # 2.0%
+
+# ── Test B: Single-diode model fitting ───────────────────────────────────────
+single_diode_fit:
+  n_cells: 50
+  noise_levels: [0.0, 0.005, 0.01, 0.02, 0.05]
+  # Per-parameter thresholds at 1% noise — literature-consistent values.
+  # J_ph is well-constrained by Jsc; n and Rs are correlated (need dark JV or
+  # temperature sweep for better accuracy); J0 spans many orders of magnitude.
+  # References: De Soto et al. Sol. Energy Mater. Sol. Cells 2006;
+  #             Laudani et al. Solar Energy 2014;
+  #             Boguslawski et al. Sol. Energy 2022.
+  thresholds_1pct_noise:
+    J_ph: 0.05   # 5%   — well-determined from Jsc
+    n:    0.25   # 25%  — correlated with J0; single illumination insufficient
+    Rs:   2.00   # 200% — highly correlated with n; requires dark JV for accuracy
+    J0:   1.00   # log10-units (factor 10) — optimizer works in log space
+    Rsh:  0.50   # log10-units (factor 3)  — less correlated but still uncertain
+
+# ── Test C: MPP tracking accuracy ────────────────────────────────────────────
+mpp_tracking:
+  area:             0.09
+  pin:             100.0
+  scan_v_start:    -0.05
+  scan_v_end:       1.30
+  scan_v_step:      0.005
+  spo_duration_s:   5.0     # short SPO per cycle (time.sleep is patched to 0)
+  spo_interval_ms:  200
+  n_spo_readings:   10      # minimum SPO readings to collect per cycle
+  n_cycles:         3       # number of JV+SPO cycles for stable-cell check
+  # Decaying cell: simulate 30 evenly-spaced time points over 30 min
+  n_decay_points:   30
+  decay_span_min:   30.0
+  tau_h:           100.0
+  threshold_stable: 0.01    # 1% — mean SPO PCE vs true MPP
+  threshold_decay:  0.03    # 3% — RMSE of PCE_norm vs exp(-t/tau)
+
+# ── Test D: Repeatability ────────────────────────────────────────────────────
+repeatability:
+  n_repeats: 20
+  thresholds: {voc: 0.01, jsc: 0.01, ff: 0.02, pce: 0.02}
+
+# ── Test E: ISOS-D-1 simulation ──────────────────────────────────────────────
+isos_d1:
+  tau_h:              100.0
+  n_measurements:     240        # one per simulated hour
+  interval_h:           1.0
+  threshold:            0.03     # 3% RMSE of tracked PCE_norm vs exp(-t/tau)
+  n_file_integrity:    10        # measurements written to file for integrity check
+  sample_name:         "ValidationCell"
+
+# ── Output ───────────────────────────────────────────────────────────────────
+output:
+  results_dir:  "validation/results"
+  figures_dir:  "validation/results/figures"
+  dpi:          300
+  font_family:  "Arial"         # falls back to DejaVu Sans if Arial not installed
