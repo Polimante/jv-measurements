@@ -16,7 +16,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.io.isos_exporter import (
+from app.io.isos_tracking import (
     create_isos_d1_tracking_file,
     append_isos_d1_measurement,
 )
@@ -25,7 +25,7 @@ from app.measurement.analysis import (
     calculate_resistances,
     calculate_hysteresis_index,
 )
-import app.io.isos_exporter as _mod
+import app.io.isos_tracking as _mod
 
 # ── Experiment configuration ──────────────────────────────────────────────────
 

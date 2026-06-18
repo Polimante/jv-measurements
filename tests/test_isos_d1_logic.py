@@ -21,7 +21,7 @@ import numpy as np
 import openpyxl
 import pytest
 
-from app.io.isos_exporter import (
+from app.io.isos_tracking import (
     create_isos_d1_tracking_file,
     append_isos_d1_measurement,
     read_isos_d1_config,
@@ -116,7 +116,7 @@ def _build_tracking_file(tmp_path, n_points: int = 10, tau_h: float = 100.0,
     mock_times = [_T0, _T0] + [_T0 + timedelta(hours=h) for h in times_h]
     measurements = [_make_meas(cell, h) for h in times_h]
 
-    with patch("app.io.isos_exporter.datetime") as mock_dt:
+    with patch("app.io.isos_tracking.datetime") as mock_dt:
         mock_dt.now.side_effect = mock_times
         mock_dt.strptime.side_effect = _RealDatetime.strptime
         mock_dt.now.return_value = _T0   # fallback

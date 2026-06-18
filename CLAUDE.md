@@ -12,7 +12,7 @@ Tests live in `tests/` and run hardware-free. The application itself is Windows-
 
 ```bash
 python -m pytest tests/          # run all tests
-python -m pytest tests/test_isos_exporter.py -v   # example: single file
+python -m pytest tests/test_isos_tracking.py -v   # example: single file
 ```
 
 ## Dependencies
@@ -39,9 +39,11 @@ app/
     analysis.py                # Pure math: calculate_jv_parameters, calculate_resistances, HI
     mpp_tracker.py             # MPPTracker — JV-SPO cycling protocol (Alt+F5)
     pure_mpp_tracker.py        # PureMPPTracker — Perturb-and-Observe continuous tracking (Alt+F6)
+    isos_protocols.py          # ProtocolSpec registry (PROTOCOLS, get_protocol, list_protocol_*)
   io/
     exporter.py                # save_data() and save_dark_jv_data() → xlsxwriter
-    isos_exporter.py           # ISOS-D-1 tracking workbook (create / append / read)
+    isos_tracking.py           # Generic ISOS tracking workbook (create / append / read) + D-1 shims
+    isos_autosave.py           # CSVStream durable autosave + consolidate_csv_into_xlsx()
   utils/
     constants.py               # APP_NAME, APP_VERSION, global stop_event (threading.Event)
     sound.py                   # play_completion_sound() with playsound / winsound fallback
@@ -62,6 +64,30 @@ version.json                   # Machine-readable version + release notes (read 
 **Session data**: `self.session_data` is a list of dicts accumulated during the application session. Each entry holds raw arrays (`v_fwd`, `j_fwd`, `v_rev`, `j_rev`, `power_fwd`, `power_rev`, optional dark arrays), all PV parameters, and a color from `PLOT_COLORS`. `update_plot()` redraws from this list on every call — it does not accept data arguments.
 
 **Plot interactivity**: The Matplotlib canvas uses `button_press_event` (not `pick_event`) for legend toggling because `mplcursors` with `hover=True` interferes with `pick_event` in the Tkinter backend. The active connection id is stored in `self._pick_cid` and disconnected before re-registering on each redraw.
+
+### Two instrument abstractions (deliberate split)
+
+The project intentionally keeps **two** ways of talking to the source-measure unit:
+
+1. **Raw SCPI** (`app/instrument/keithley.py` + `inst.write`/`inst.query`) — used by
+   **all real-measurement code**: `run_measurement`, `MPPTracker`, `PureMPPTracker`,
+   the ISOS-D-1 routine, and `ContinuousISOSRunner`. `self.instrument` is a live
+   pyvisa resource. This is the only path that ever drives physical hardware.
+2. **`SourceMeter` ABC** (`app/instrument/base.py`, implemented by
+   `app/instrument/dummy_smu.py`) — a higher-level interface (`set_voltage`,
+   `read_current_density`, `measure_scan`…). Used **only** by tests and the
+   synthetic-data / simulation workflows. There is no `SourceMeter`-based path to
+   real hardware.
+
+**These two never meet in production, and that is on purpose.** Converging the
+measurement code onto the ABC would mean rewriting the most safety-critical code
+(it controls a real instrument wired to real cells) with no way to regression-test
+it in CI. The payoff is only consistency, so we do not do it.
+
+Consequence for tests: SCPI-based components are tested with SCPI-shaped fakes
+(`MagicMock` with a `.query` side-effect, or `tests/_isos_runner_helpers.FakeKeithley`),
+**not** with `DummySMU`. Revisit this split only if a concrete need arises to run a
+real measurement mode (e.g. ISOS-L-1/V-1) through `DummySMU` in the live GUI.
 
 ### Sign convention
 
@@ -138,14 +164,20 @@ SPO plot uses **accumulated SPO-only time** on the X-axis (J-V scan time is excl
 
 Runs one initial reverse J-V scan (using `scan_start_v`, `scan_end_v`, `scan_step_v`) to find the real Vmpp, then enters a continuous P&O loop. `t_start` is set after the initial scan so t=0 on the plot corresponds to the start of P&O. Direction reverses whenever power drops. The inter-step sleep is broken into 50 ms chunks so `stop_event` is checked frequently. Callbacks: `on_status`, `on_update(t, v, j, pce)`, `on_jv_done(v_arr, j_arr, vmpp)`, `on_complete`.
 
-### ISOS Protocols (D-1) — `isos_exporter.py` + `main_window.py`
+### ISOS Protocols — `isos_tracking.py` + `isos_protocols.py` + `main_window.py`
 
 ISOS-D-1 is a light-stability protocol: the cell is measured periodically under illumination while kept at open-circuit between measurements. Each run performs the same sequence as J-V mode (optional dark J-V → shutter prompt → light soaking → fwd scan → pre-bias → rev scan) and then appends one row to a cumulative tracking workbook.
 
+The available protocols live in a registry: `app/measurement/isos_protocols.py` exposes a frozen `ProtocolSpec` dataclass, the `PROTOCOLS` list, and `get_protocol(id)` / `list_protocol_ids()` / `list_protocol_labels()`. Only **ISOS-D-1** is registered today (L-1 and V-1 are added in later sessions); the GUI dropdown is populated from `list_protocol_labels()`.
+
+`isos_tracking.py` holds the generic tracking-file API — `create_isos_tracking_file`, `append_isos_measurement`, `read_isos_config`, `read_isos_log`, `read_isos_jv_curves` — plus thin `*_isos_d1_*` compatibility shims that forward with `protocol_id="ISOS-D-1"`. The config sheet carries `protocol_id` in column 1; the readers fall back to the legacy `ISOS_D1_*` sheet names so old D-1 files still open.
+
 **Tracking file layout** (openpyxl):
-- `ISOS_D1_Config` — experiment metadata (one header row + one data row)
-- `ISOS_D1_Log` — one row per measurement; columns defined in `_LOG_HEADERS`
-- `JV_Fwd_#NNN_tXXXXh` / `JV_Rev_#NNN_tXXXXh` — raw V/J data per measurement
+- `ISOS_Config` — experiment metadata (one header row + one data row); `protocol_id` is column 1 (legacy files used `ISOS_D1_Config`)
+- `ISOS_Log` — one row per measurement; columns defined in `_LOG_HEADERS` (legacy files used `ISOS_D1_Log`). Many trailing columns are nullable and reserved for sessions 4–6.
+- `JV_#NNN_tXXXXh` — one combined sheet per measurement (cols A–F = V/J/P fwd & rev), MeasurementData-compatible
+
+For long continuous stress runs, `isos_autosave.py` provides `CSVStream` (append-only, fsync'd per row) and `consolidate_csv_into_xlsx()`, which folds the CSV into the tracking workbook as a new sheet and renames the CSV to `.consumed`.
 
 `PCE_fwd_norm` and `PCE_rev_norm` are always relative to the **first** measurement (`t₀`) — stored as a **ratio** (1.0 = baseline, not percent; e.g. 0.80 means T80). `elapsed_h` is wall-clock time since `t0_timestamp` stored in the config sheet. Individual backup files are also saved via `save_data()` (standard illuminated J-V format).
 

@@ -32,6 +32,7 @@ from app.utils.constants import APP_NAME, stop_event
 from app.utils.sound import play_completion_sound
 from app.utils.updater import check_for_updates, get_local_version
 from app.gui.tooltip import ToolTip
+from app.gui.mpp_settings_frame import build_mpp_settings_frame, build_param_grid
 from app.gui.instrument_dialog import InstrumentDialog
 from app.measurement.analysis import (
     calculate_jv_parameters,
@@ -47,13 +48,14 @@ from app.io.exporter import (
     save_data, save_dark_jv_data,
     save_stab_current_data, save_pure_mpp_data, save_mpp_data,
 )
-from app.io.isos_exporter import (
+from app.io.isos_tracking import (
     create_isos_d1_tracking_file,
     append_isos_d1_measurement,
     read_isos_d1_config,
     read_isos_d1_log,
     read_isos_d1_jv_curves,
 )
+from app.measurement.isos_protocols import list_protocol_labels
 from app.gui.data_viewer import DataViewerWindow
 from app.measurement.light_intensity_jv import LightIntensityJVMeasurement
 from app.instrument.keithley_smu import Keithley2400SourceMeter
@@ -101,6 +103,11 @@ class JVMeasurementApp:
 
         # Silent update check — runs 3 s after startup to avoid delaying launch
         self.root.after(3000, lambda: check_for_updates(self.root, silent=True))
+
+        # Crash-recovery scaffolding — look for interrupted ISOS stress runs.
+        # The recovery dialog itself lands in a later session; for now we only
+        # surface the count in the status bar so unfinished runs are visible.
+        self.root.after(1500, self._scan_for_inprogress_isos)
 
     # ── GUI construction ──────────────────────────────────────────────────────
 
@@ -2240,23 +2247,15 @@ class JVMeasurementApp:
                ).grid(row=1, column=2, padx=(2, 4), pady=3)
 
         # J-V Scan Settings
-        pf = LabelFrame(tab_scan, text="J-V Scan Settings", padx=6, pady=4)
+        pf, _ = build_mpp_settings_frame(tab_scan, "mpp", [
+            ("Start Voltage:", "start_v",  -0.1,  "V"),
+            ("End Voltage:",   "end_v",     1.05, "V"),
+            ("Step Voltage:",  "step_v",    0.025, "V"),
+            ("Cell Area:",     "cell_area", 0.07, "cm\u00b2"),
+            ("Delay/point:",   "delay",     200.0, "ms"),
+            ("NPLC:",          "nplc",      1.0,  "(0.01\u201325)"),
+        ], self, title="J-V Scan Settings")
         pf.pack(fill=X, pady=(0, 6))
-
-        for row, (lbl, attr, default, unit) in enumerate([
-            ("Start Voltage:", "mpp_start_v_var",  -0.1,  "V"),
-            ("End Voltage:",   "mpp_end_v_var",     1.05, "V"),
-            ("Step Voltage:",  "mpp_step_v_var",    0.025, "V"),
-            ("Cell Area:",     "mpp_cell_area_var", 0.07, "cm\u00b2"),
-            ("Delay/point:",   "mpp_delay_var",     200.0, "ms"),
-            ("NPLC:",          "mpp_nplc_var",      1.0,  "(0.01\u201325)"),
-        ]):
-            Label(pf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            Entry(pf, textvariable=var, width=10).grid(
-                row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
 
         srf = LabelFrame(tab_scan, text="Calculated Scan Rate", padx=6, pady=4)
         srf.pack(fill=X, pady=(0, 6))
@@ -2327,33 +2326,24 @@ class JVMeasurementApp:
         Label(pbf, text="s", fg="#666666").grid(row=2, column=2, sticky=W)
 
         # MPP Tracking Settings
-        mf = LabelFrame(tab_mpp, text="MPP Tracking Settings", padx=6, pady=4)
-        mf.pack(fill=X, pady=(0, 4))
-
-        for row, (lbl, attr, default, unit, tip) in enumerate([
-            ("Total duration:", "mpp_total_min_var",      60.0,  "min",
+        mf, _ = build_mpp_settings_frame(tab_mpp, "mpp", [
+            ("Total duration:", "total_min",      60.0,  "min",
              "Total duration of the MPP tracking experiment in minutes.\n"
              "Minimum recommended: 5 min for stabilized PCE.\n"
              "For stability studies: 60\u20131000 min."),
-            ("SPO duration:",   "mpp_spo_duration_var",  120.0,  "s",
+            ("SPO duration:",   "spo_duration",  120.0,  "s",
              "Time spent at Vmpp between J-V scans (Stabilized Power Output phase).\n"
              "Literature recommendation: 60\u2013300 s.\n"
              "Longer SPO gives more stable readings but fewer J-V cycles."),
-            ("SPO interval:",   "mpp_spo_interval_var",  500.0,  "ms",
+            ("SPO interval:",   "spo_interval",  500.0,  "ms",
              "How often current is read during the SPO phase.\n"
              "500 ms is a good balance of time resolution and noise."),
-            ("Stab. threshold:", "mpp_stab_threshold_var", 0.1, "%/min",
+            ("Stab. threshold:", "stab_threshold", 0.1, "%/min",
              "Current change rate below which the device is considered stabilized.\n"
              "Criterion: |\u0394J/\u0394t| < threshold over a 60 s window.\n"
              "Literature standard: 0.05\u20130.1 %/min (NREL protocol)."),
-        ]):
-            Label(mf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            e = Entry(mf, textvariable=var, width=10)
-            e.grid(row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(mf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
-            ToolTip(e, tip)
+        ], self, title="MPP Tracking Settings")
+        mf.pack(fill=X, pady=(0, 4))
 
         # ── Control Buttons ───────────────────────────────────────────────────
         btn_frame = Frame(self.mpp_panel, bg="#ececec")
@@ -3178,8 +3168,6 @@ class JVMeasurementApp:
 
     def _build_pure_mpp_panel(self, left_container, right_container):
         """Build Pure MPP Tracking (P&O) left panel and right plot area."""
-        from matplotlib.gridspec import GridSpec
-
         # ── Left panel ────────────────────────────────────────────────────────
         self.pmpp_panel = Frame(left_container, bg="#ececec")
 
@@ -3245,54 +3233,39 @@ class JVMeasurementApp:
                 "real Vmpp. The P&O algorithm then starts from that voltage.\n"
                 "Use the same voltage range as your regular J-V measurements.")
 
-        for row, (lbl, attr, default, unit) in enumerate([
-            ("Start Voltage:", "pmpp_scan_start_v_var", -0.1,  "V"),
-            ("End Voltage:",   "pmpp_scan_end_v_var",    1.05, "V"),
-            ("Step Voltage:",  "pmpp_scan_step_v_var",   0.025, "V"),
-        ]):
-            Label(jvsf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            Entry(jvsf, textvariable=var, width=10).grid(
-                row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(jvsf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+        build_param_grid(jvsf, "pmpp", [
+            ("Start Voltage:", "scan_start_v", -0.1,  "V"),
+            ("End Voltage:",   "scan_end_v",    1.05, "V"),
+            ("Step Voltage:",  "scan_step_v",   0.025, "V"),
+        ], self)
 
         # ─── Tab 2: P&O Settings ──────────────────────────────────────────────
         tab_po = Frame(nb, padx=6, pady=4, bg="#ececec")
         nb.add(tab_po, text="  P&O Settings  ")
 
-        pf = LabelFrame(tab_po, text="Tracking Parameters", padx=6, pady=4)
-        pf.pack(fill=X, pady=(0, 6))
-
-        for row, (lbl, attr, default, unit, tip) in enumerate([
-            ("Total duration:", "pmpp_total_min_var",   60.0,  "min",
+        pf, _ = build_mpp_settings_frame(tab_po, "pmpp", [
+            ("Total duration:", "total_min",   60.0,  "min",
              "Total duration of the Pure MPP tracking experiment.\n"
              "Recommended: 60\u2013600 min for stability studies."),
-            ("Perturb step:",   "pmpp_step_mv_var",     10.0,  "mV",
+            ("Perturb step:",   "step_mv",     10.0,  "mV",
              "Voltage perturbation step for the P&O algorithm.\n"
              "Smaller step = more accurate tracking, slower convergence.\n"
              "Larger step = faster convergence, more oscillation around MPP.\n"
              "Recommended: 5\u201320 mV."),
-            ("Interval:",       "pmpp_interval_ms_var", 500.0, "ms",
+            ("Interval:",       "interval_ms", 500.0, "ms",
              "Time between consecutive P&O measurements.\n"
              "500 ms gives good time resolution without excessive noise."),
-            ("V min:",          "pmpp_v_min_var",        0.0,  "V",
+            ("V min:",          "v_min",        0.0,  "V",
              "Minimum allowed tracking voltage (safety clamp)."),
-            ("V max:",          "pmpp_v_max_var",        1.20, "V",
+            ("V max:",          "v_max",        1.20, "V",
              "Maximum allowed tracking voltage (safety clamp)."),
-            ("NPLC:",           "pmpp_nplc_var",         1.0,  "(0.01\u201325)",
+            ("NPLC:",           "nplc",         1.0,  "(0.01\u201325)",
              "Number of power line cycles for each current reading.\n"
              "Higher = less noise, slower measurement."),
-            ("Delay/point:",    "pmpp_delay_ms_var",    20.0,  "ms",
+            ("Delay/point:",    "delay_ms",    20.0,  "ms",
              "Source delay after voltage change before reading current."),
-        ]):
-            Label(pf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            e = Entry(pf, textvariable=var, width=10)
-            e.grid(row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
-            ToolTip(e, tip)
+        ], self, title="Tracking Parameters")
+        pf.pack(fill=X, pady=(0, 6))
 
         # ── Control Buttons ───────────────────────────────────────────────────
         btn_frame = Frame(self.pmpp_panel, bg="#ececec")
@@ -3328,37 +3301,17 @@ class JVMeasurementApp:
         # ── Right plot area ───────────────────────────────────────────────────
         self.pmpp_plot_frame = Frame(right_container, bg="#ffffff")
 
-        self.pmpp_fig = plt.figure(figsize=(8, 9), constrained_layout=True)
-        gs = GridSpec(3, 2, figure=self.pmpp_fig, height_ratios=[4, 3, 3])
-        self.pmpp_ax_pce = self.pmpp_fig.add_subplot(gs[0, :])   # full width
-        self.pmpp_ax_j   = self.pmpp_fig.add_subplot(gs[1, :])   # full width
-        self.pmpp_ax_v   = self.pmpp_fig.add_subplot(gs[2, 0])   # bottom-left
-        self.pmpp_ax_jv  = self.pmpp_fig.add_subplot(gs[2, 1])   # bottom-right
+        # Built via the shared plot factory so the L-1 continuous panel (later
+        # sessions) and this Pure-MPP panel stay visually identical.
+        from app.gui.mpp_plot_factory import build_mpp_continuous_panel
 
-        for ax, title, xl, yl in [
-            (self.pmpp_ax_pce,
-             "PCE(t) \u2014 Pure MPP Tracking (P&O)",
-             "Time (min)", "PCE (%)"),
-            (self.pmpp_ax_j,
-             "Current Density at Vmpp",
-             "Time (min)", "J (mA/cm\u00b2)"),
-            (self.pmpp_ax_v,
-             "Tracked Vmpp",
-             "Time (min)", "Vmpp (V)"),
-            (self.pmpp_ax_jv,
-             "Initial J-V Scan",
-             "Voltage (V)", "J (mA/cm\u00b2)"),
-        ]:
-            ax.set_title(title, fontsize=10, fontweight="bold")
-            ax.set_xlabel(xl, fontsize=9)
-            ax.set_ylabel(yl, fontsize=9)
-            ax.grid(True)
-            ax.text(0.5, 0.5, "No data yet", transform=ax.transAxes,
-                    ha="center", va="center", color="gray", fontsize=10)
-
-        self.pmpp_canvas = FigureCanvasTkAgg(
-            self.pmpp_fig, master=self.pmpp_plot_frame)
-        self.pmpp_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+        panel = build_mpp_continuous_panel(self.pmpp_plot_frame)
+        self.pmpp_fig    = panel["fig"]
+        self.pmpp_canvas = panel["canvas"]
+        self.pmpp_ax_pce = panel["ax_pce"]
+        self.pmpp_ax_j   = panel["ax_j"]
+        self.pmpp_ax_v   = panel["ax_v"]
+        self.pmpp_ax_jv  = panel["ax_jv"]
 
     # ══════════════════════════════════════════════════════════════════════════
     # PURE MPP TRACKING — runner and plot-update methods
@@ -3988,7 +3941,7 @@ class JVMeasurementApp:
         Label(exp_f, text="Protocol:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
         self.isos_protocol_var = StringVar(value="ISOS-D-1")
         proto_cb = ttk.Combobox(exp_f, textvariable=self.isos_protocol_var,
-                                values=["ISOS-D-1"], state="readonly", width=12)
+                                values=list_protocol_labels(), state="readonly", width=12)
         proto_cb.grid(row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
         proto_cb.bind("<<ComboboxSelected>>", self._isos_on_protocol_change)
 
@@ -4280,6 +4233,27 @@ class JVMeasurementApp:
         self._isos_on_protocol_change()
 
     # ── ISOS helper methods ───────────────────────────────────────────────────
+
+    def _scan_for_inprogress_isos(self):
+        """Look for interrupted ISOS stress runs and note them in the status bar.
+
+        Continuous runs (L-1 / V-1) stream to ``*_stress_inprogress_*.csv`` files
+        that are renamed to ``.consumed`` once consolidated. A leftover file means
+        a run was interrupted. The recovery dialog is a later session — here we
+        only count and report so the data is not silently forgotten.
+        """
+        import glob
+        folder = self.isos_export_folder_var.get().strip()
+        if not folder or not os.path.isdir(folder):
+            return
+        try:
+            stale = glob.glob(os.path.join(folder, "*_stress_inprogress_*.csv"))
+        except Exception:
+            return
+        if stale:
+            self.status_var.set(
+                f"{len(stale)} interrupted ISOS stress run(s) found in "
+                f"{os.path.basename(folder)} — recovery available in a future update.")
 
     def _isos_on_protocol_change(self, *_):
         protocol = self.isos_protocol_var.get()

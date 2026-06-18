@@ -26,24 +26,33 @@ import numpy as np
 import time
 import threading
 
+from app.instrument.keithley import configure_oc_mode, read_voc_now
+
 
 class MPPTracker:
-    def __init__(self, instrument, params, callbacks, stop_event):
+    def __init__(self, instrument, params, callbacks, stop_event,
+                 load_mode="MPP"):
         """
         instrument : open pyvisa resource (Keithley 2400)
         params     : dict with all measurement parameters
         callbacks  : dict of callables for UI updates
         stop_event : threading.Event to abort measurement
+        load_mode  : "MPP" (hold at Vmpp during SPO, default) or "OC" (hold
+                     at open circuit and record Voc between J-V scans). In OC
+                     mode the SPO phase records Voc into ``spo_v`` while
+                     ``spo_j`` and ``spo_pce`` stay 0.
         """
         self.inst       = instrument
         self.params     = params
         self.callbacks  = callbacks
         self.stop_event = stop_event
+        self.load_mode  = load_mode
 
         self.cycles           = []
         self.spo_time         = []   # continuous absolute elapsed seconds
         self.spo_j            = []   # continuous J (mA/cm²)
         self.spo_pce          = []   # continuous PCE (%)
+        self.spo_v            = []   # Voc readings during OC hold phases (V)
         self.spo_cycle_idx    = []
         self.jv_scan_intervals = []  # list of (t_start_s, t_end_s) per cycle
         self.t_start          = None
@@ -65,6 +74,13 @@ class MPPTracker:
                     break
 
                 cycle_n += 1
+
+                # In OC mode the previous cycle's Voc-hold phase left the
+                # instrument in current-source mode — restore voltage-source
+                # mode before this cycle's J-V scan.
+                if self.load_mode == "OC" and cycle_n > 1:
+                    self._configure_instrument()
+
                 self.callbacks["on_status"](f"Cycle {cycle_n} — J-V scan…")
                 self.callbacks["on_log"](f"\n── Cycle {cycle_n} ──────────────────")
 
@@ -224,12 +240,48 @@ class MPPTracker:
 
     # ── SPO phase ─────────────────────────────────────────────────────────────
 
+    def _run_voc_hold(self, cycle_n):
+        """OC hold phase — record Voc(t) instead of running SPO at Vmpp.
+
+        Switches the instrument to open-circuit mode (source 0 A, sense
+        voltage) and reads Voc each interval. Voc is stored in ``spo_v``;
+        ``spo_j`` and ``spo_pce`` are kept at 0 so downstream consumers can
+        distinguish OC from MPP samples.
+        """
+        configure_oc_mode(self.inst, self.params.get("nplc", 1.0))
+        time.sleep(0.1)
+
+        interval_s  = self.params["spo_interval_ms"] / 1000.0
+        spo_dur_s   = self.params["spo_duration_s"]
+        t_spo_start = time.time()
+
+        while not self.stop_event.is_set():
+            if time.time() - t_spo_start >= spo_dur_s:
+                break
+
+            v   = read_voc_now(self.inst)
+            j   = 0.0
+            pce = 0.0
+
+            t_abs = time.time() - self.t_start
+            self.spo_time.append(t_abs)
+            self.spo_j.append(j)
+            self.spo_pce.append(pce)
+            self.spo_v.append(v)
+            self.spo_cycle_idx.append(cycle_n)
+
+            self.callbacks["on_spo_update"](t_abs, j, pce, cycle_n, False)
+            time.sleep(interval_s)
+
     def _run_spo(self, cycle_n, Vmpp):
         """Hold at Vmpp and record J(t) and PCE(t). Check stabilization.
 
         Sets the voltage to Vmpp here (not in the caller) so the settling
         sleep is always applied before the first reading.
         """
+        if self.load_mode == "OC":
+            return self._run_voc_hold(cycle_n)
+
         # Apply Vmpp and let the cell settle — prevents the first reading
         # from catching the instrument mid-transition from the scan voltage.
         self.inst.write(f":SOUR:VOLT {Vmpp:.4f}")

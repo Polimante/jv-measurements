@@ -30,14 +30,14 @@ from unittest.mock import patch
 import numpy as np
 
 from app.instrument.dummy_smu import DummySMU
-from app.io.isos_exporter import (
+from app.io.isos_tracking import (
     create_isos_d1_tracking_file,
     append_isos_d1_measurement,
     read_isos_d1_log,
 )
 from app.measurement.analysis import calculate_jv_parameters, calculate_resistances
 from app.simulation.dummy_cell import DummyCell
-import app.io.isos_exporter as _isos_mod
+import app.io.isos_tracking as _isos_mod
 
 
 _BASE_TIME = datetime(2026, 1, 1, 0, 0, 0)

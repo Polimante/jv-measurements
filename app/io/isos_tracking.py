@@ -1,11 +1,19 @@
 """
-ISOS protocol tracking file management.
+ISOS protocol tracking file management (generalized across D-1 / L-1 / V-1).
+
+This module supersedes the old ``isos_exporter`` module. The generic functions
+work for any ISOS protocol; the ``*_isos_d1_*`` wrappers at the bottom are thin
+shims kept for backward compatibility so existing callers and old D-1 xlsx
+files keep working unchanged.
 
 Tracking file layout (openpyxl, read/write):
-  ISOS_D1_Config  — row 1: headers, row 2: experiment config + measurement params
-  ISOS_D1_Log     — row 1: headers, rows 2+: one row per measurement (cumulative)
+  ISOS_Config  — row 1: headers, row 2: experiment config + measurement params
+  ISOS_Log     — row 1: headers, rows 2+: one row per measurement (cumulative)
   JV_#001_t0000h  — full MeasurementData-compatible sheet for measurement #1
   JV_#002_t0024h  — ...
+
+Old D-1 files used the sheet names ``ISOS_D1_Config`` / ``ISOS_D1_Log``; the
+readers fall back to those names so legacy files still open.
 
 Each JV_* sheet uses the identical column layout as the standard MeasurementData
 sheet exported by save_data() in exporter.py:
@@ -28,10 +36,16 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.chart import ScatterChart, Reference, Series
 
-_LOG_SHEET = "ISOS_D1_Log"
-_CFG_SHEET = "ISOS_D1_Config"
+# Generic sheet names.
+_LOG_SHEET = "ISOS_Log"
+_CFG_SHEET = "ISOS_Config"
 
-_LOG_HEADERS = [
+# Legacy D-1 sheet names — read-only fallback so old files still open.
+_LEGACY_LOG_SHEET = "ISOS_D1_Log"
+_LEGACY_CFG_SHEET = "ISOS_D1_Config"
+
+# Original D-1 log columns (positions 1-22 must stay fixed — see _LOG_COL_* below).
+_LOG_HEADERS_CORE = [
     "#", "Timestamp", "Elapsed_h", "Delta_h",
     "Voc_fwd (V)", "Jsc_fwd (mA/cm²)", "FF_fwd (%)", "PCE_fwd (%)", "PCE_fwd_norm",
     "Voc_rev (V)", "Jsc_rev (mA/cm²)", "FF_rev (%)", "PCE_rev (%)", "PCE_rev_norm",
@@ -41,11 +55,45 @@ _LOG_HEADERS = [
     "Illumination (mW/cm²)", "Scan_Rate (mV/s)", "Notes",
 ]
 
+# New nullable log columns (used by sessions 4-6). Each entry maps the column
+# header to the meas-dict key it is sourced from in append_isos_measurement.
+_LOG_EXTRA = [
+    ("Load",                       "load"),
+    ("Setpoint_V",                 "setpoint_v"),
+    ("MPP_Engine",                 "mpp_engine"),
+    ("Stress_With_Light",          "stress_with_light"),
+    ("Stress_Elapsed_h",           "stress_elapsed_h"),
+    ("PCE_0_baseline_median",      "pce_0_baseline_median"),
+    ("PCE_0_baseline_std",         "pce_0_baseline_std"),
+    ("baseline_method",            "baseline_method"),
+    ("pre_scan_relaxation_s",      "pre_scan_relaxation_s"),
+    ("PCE_SPO",                    "pce_spo"),
+    ("PCE_SPO_std",                "pce_spo_std"),
+    ("SPO_duration_s",             "spo_duration_s"),
+    ("HI_dark",                    "hi_dark"),
+    ("failure_detected",           "failure_detected"),
+    ("failure_reason",             "failure_reason"),
+    ("R_s_dark_fwd",               "r_s_dark_fwd"),
+    ("R_sh_dark_fwd",              "r_sh_dark_fwd"),
+    ("R_s_dark_rev",               "r_s_dark_rev"),
+    ("R_sh_dark_rev",              "r_sh_dark_rev"),
+    ("n_dark_rev",                 "n_dark_rev"),
+    ("J_s_dark_rev",               "j_s_dark_rev"),
+    ("n_dark_rev_R2",              "n_dark_rev_r2"),
+    ("Voc_setpoint",               "voc_setpoint"),
+    ("Vmpp_setpoint",              "vmpp_setpoint"),
+    ("I_dark_during_stress_mean",  "i_dark_during_stress_mean"),
+]
+
+_LOG_HEADERS = _LOG_HEADERS_CORE + [h for h, _ in _LOG_EXTRA]
+
 # Column index (1-based) of key values in the Log sheet — used for normalization.
+# These live in the fixed core block, so they are unaffected by the extra columns.
 _LOG_COL_PCE_FWD = 8   # PCE_fwd
 _LOG_COL_PCE_REV = 13  # PCE_rev
 
 _CFG_KEYS = [
+    "protocol_id",
     "sample_name", "cell_area", "detector_power", "detector_area",
     "start_voltage", "end_voltage", "step_voltage",
     "delay_ms", "nplc", "four_wire",
@@ -54,6 +102,10 @@ _CFG_KEYS = [
     "dark_jv", "electrical_load",
     "scan_rate_mode", "target_scan_rate",
     "t0_timestamp",
+    # new config columns (used by sessions 4-6; nullable)
+    "equilibration_duration_h", "equilibration_done",
+    "baseline_n_scans", "baseline_rest_s",
+    "tiered_schedule_json",
 ]
 
 # Column headers for each per-measurement JV sheet — matches MeasurementData exactly
@@ -97,11 +149,47 @@ def _header_row(ws, headers, col_width=16):
         ws.column_dimensions[get_column_letter(c)].width = col_width
 
 
-def create_isos_d1_tracking_file(folder: str, config: dict) -> str:
-    """Create a new ISOS-D-1 tracking workbook and return its path."""
-    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    name = config.get("sample_name", "Sample") or "Sample"
-    fp   = os.path.join(folder, f"{name}_ISOS-D1_{ts}.xlsx")
+def _protocol_file_label(protocol_id: str) -> str:
+    """'ISOS-D-1' → 'ISOS-D1' for use in file names (matches legacy naming)."""
+    parts = str(protocol_id).split("-")
+    if len(parts) <= 1:
+        return str(protocol_id)
+    return parts[0] + "-" + "".join(parts[1:])
+
+
+def _resolve_sheet(wb, primary, legacy):
+    """Return the worksheet under ``primary`` name, falling back to ``legacy``."""
+    if primary in wb.sheetnames:
+        return wb[primary]
+    if legacy in wb.sheetnames:
+        return wb[legacy]
+    return None
+
+
+def _read_headers(ws):
+    """Read the contiguous header labels from row 1 (stops at the first blank)."""
+    headers = []
+    c = 1
+    while True:
+        h = ws.cell(1, c).value
+        if h is None:
+            break
+        headers.append(h)
+        c += 1
+    return headers
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic API
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_isos_tracking_file(folder: str, config: dict) -> str:
+    """Create a new ISOS tracking workbook and return its path."""
+    protocol_id = config.get("protocol_id", "ISOS-D-1") or "ISOS-D-1"
+    ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    name  = config.get("sample_name", "Sample") or "Sample"
+    label = _protocol_file_label(protocol_id)
+    fp    = os.path.join(folder, f"{name}_{label}_{ts}.xlsx")
 
     wb = openpyxl.Workbook()
 
@@ -110,6 +198,7 @@ def create_isos_d1_tracking_file(folder: str, config: dict) -> str:
     ws_cfg.title  = _CFG_SHEET
     _header_row(ws_cfg, _CFG_KEYS, col_width=22)
     cfg = dict(config)
+    cfg["protocol_id"] = protocol_id
     cfg["t0_timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row = []
     for k in _CFG_KEYS:
@@ -130,7 +219,7 @@ def create_isos_d1_tracking_file(folder: str, config: dict) -> str:
     return fp
 
 
-def append_isos_d1_measurement(tracking_path: str, meas: dict) -> None:
+def append_isos_measurement(tracking_path: str, meas: dict) -> None:
     """
     Append one measurement to the tracking file.
 
@@ -144,17 +233,21 @@ def append_isos_d1_measurement(tracking_path: str, meas: dict) -> None:
       cell_area, delay_ms, nplc, four_wire
       prebias_enabled, prebias_voltage, prebias_duration
       instrument_idn, notes
+
+    Optional (new nullable Log columns — see _LOG_EXTRA): load, setpoint_v,
+      mpp_engine, stress_with_light, … (all default to None if absent).
     """
     wb     = openpyxl.load_workbook(tracking_path)
-    ws_log = wb[_LOG_SHEET]
-    ws_cfg = wb[_CFG_SHEET]
+    ws_log = _resolve_sheet(wb, _LOG_SHEET, _LEGACY_LOG_SHEET)
+    ws_cfg = _resolve_sheet(wb, _CFG_SHEET, _LEGACY_CFG_SHEET)
 
-    # Read t0 from config sheet
+    # Read t0 from config sheet (scan by header name).
     t0_str = ""
-    for c in range(1, len(_CFG_KEYS) + 1):
-        if ws_cfg.cell(1, c).value == "t0_timestamp":
-            t0_str = ws_cfg.cell(2, c).value or ""
-            break
+    if ws_cfg is not None:
+        for c in range(1, ws_cfg.max_column + 1):
+            if ws_cfg.cell(1, c).value == "t0_timestamp":
+                t0_str = ws_cfg.cell(2, c).value or ""
+                break
     try:
         t0 = datetime.strptime(str(t0_str), "%Y-%m-%d %H:%M:%S")
     except Exception:
@@ -201,11 +294,13 @@ def append_isos_d1_measurement(tracking_path: str, meas: dict) -> None:
         round(float(meas.get("scan_rate", 0)),    2),
         meas.get("notes", ""),
     ]
+    # New nullable columns — default to None when the caller does not supply them.
+    log_row += [meas.get(key) for _, key in _LOG_EXTRA]
     ws_log.append(log_row)
 
     # Style the new data row
     r = ws_log.max_row
-    for c in range(1, len(_LOG_HEADERS) + 1):
+    for c in range(1, len(log_row) + 1):
         ws_log.cell(r, c).font      = _V_FONT
         ws_log.cell(r, c).alignment = _C_ALIGN
 
@@ -267,8 +362,7 @@ def append_isos_d1_measurement(tracking_path: str, meas: dict) -> None:
     p_fwd = [float(v) * float(j) for v, j in zip(v_fwd, j_fwd)]
     p_rev = [float(v) * float(j) for v, j in zip(v_rev, j_rev)]
 
-    n_nf = openpyxl.styles.numbers.FORMAT_NUMBER_00
-    nf   = _DATA_FONT
+    nf = _DATA_FONT
 
     for i in range(max(len(v_fwd), len(v_rev))):
         row_data = [None] * 6
@@ -326,16 +420,16 @@ def append_isos_d1_measurement(tracking_path: str, meas: dict) -> None:
     wb.close()
 
 
-def read_isos_d1_config(tracking_path: str) -> dict:
+def read_isos_config(tracking_path: str) -> dict:
     """Read config values from the tracking file. Returns {} on failure."""
     try:
         wb = openpyxl.load_workbook(tracking_path, data_only=True)
-        if _CFG_SHEET not in wb.sheetnames:
+        ws = _resolve_sheet(wb, _CFG_SHEET, _LEGACY_CFG_SHEET)
+        if ws is None:
             wb.close()
             return {}
-        ws  = wb[_CFG_SHEET]
         out = {}
-        for c in range(1, len(_CFG_KEYS) + 1):
+        for c in range(1, ws.max_column + 1):
             key = ws.cell(1, c).value
             val = ws.cell(2, c).value
             if key:
@@ -346,19 +440,19 @@ def read_isos_d1_config(tracking_path: str) -> dict:
         return {}
 
 
-def read_isos_d1_log(tracking_path: str) -> list:
+def read_isos_log(tracking_path: str) -> list:
     """Read all measurement rows from the log. Returns list of dicts."""
     try:
         wb = openpyxl.load_workbook(tracking_path, data_only=True)
-        if _LOG_SHEET not in wb.sheetnames:
+        ws = _resolve_sheet(wb, _LOG_SHEET, _LEGACY_LOG_SHEET)
+        if ws is None:
             wb.close()
             return []
-        ws      = wb[_LOG_SHEET]
-        headers = [ws.cell(1, c).value for c in range(1, len(_LOG_HEADERS) + 1)]
+        headers = _read_headers(ws)
         rows    = []
         for r in range(2, ws.max_row + 1):
             row = {headers[c - 1]: ws.cell(r, c).value
-                   for c in range(1, len(_LOG_HEADERS) + 1)}
+                   for c in range(1, len(headers) + 1)}
             if row.get("#") is not None:
                 rows.append(row)
         wb.close()
@@ -367,7 +461,7 @@ def read_isos_d1_log(tracking_path: str) -> list:
         return []
 
 
-def read_isos_d1_jv_curves(tracking_path: str) -> list:
+def read_isos_jv_curves(tracking_path: str) -> list:
     """
     Read all JV curve sheets from the tracking file.
     Returns list of dicts: {direction, elapsed_h, v, j}
@@ -426,3 +520,102 @@ def read_isos_d1_jv_curves(tracking_path: str) -> list:
         return curves
     except Exception:
         return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic auxiliary sheets (baseline scans, SPO traces, equilibration logs)
+#
+# Continuous protocols (L-1 / V-1) persist several supporting tables alongside
+# the main Log: baseline conditioning scans, SPO traces after each scan, and an
+# equilibration log. These two helpers write those without imposing a fixed
+# schema, so the runner owns the column definitions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def append_curve_sheet(tracking_path: str, sheet_name: str, columns: dict) -> None:
+    """Write ``columns`` (an ordered ``{header: list}`` mapping) as a fresh sheet.
+
+    Used for Baseline_#NN and SPO_#NNN_tXXXXh sheets. Any pre-existing sheet of
+    the same name is replaced so re-runs stay idempotent. Columns may differ in
+    length; shorter columns are padded with blanks.
+    """
+    wb = openpyxl.load_workbook(tracking_path)
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws = wb.create_sheet(sheet_name)
+
+    headers = list(columns.keys())
+    _header_row(ws, headers, col_width=18)
+
+    n_rows = max((len(v) for v in columns.values()), default=0)
+    for i in range(n_rows):
+        row = []
+        for h in headers:
+            col = columns[h]
+            row.append(col[i] if i < len(col) else None)
+        ws.append(row)
+
+    for r in range(2, ws.max_row + 1):
+        for c in range(1, len(headers) + 1):
+            ws.cell(r, c).font      = _DATA_FONT
+            ws.cell(r, c).alignment = _C_ALIGN
+
+    wb.save(tracking_path)
+    wb.close()
+
+
+def append_log_sheet_row(tracking_path: str, sheet_name: str,
+                         headers: list, row: list) -> None:
+    """Append ``row`` to a named log sheet, creating it with ``headers`` if new.
+
+    Used for the Equilibration_log sheet. Unlike ``append_curve_sheet`` this is
+    additive — each call appends one row to the existing table.
+    """
+    wb = openpyxl.load_workbook(tracking_path)
+    if sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+    else:
+        ws = wb.create_sheet(sheet_name)
+        _header_row(ws, headers, col_width=20)
+
+    ws.append(list(row))
+    r = ws.max_row
+    for c in range(1, len(row) + 1):
+        ws.cell(r, c).font      = _V_FONT
+        ws.cell(r, c).alignment = _C_ALIGN
+
+    wb.save(tracking_path)
+    wb.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backward-compatibility wrappers (ISOS-D-1)
+#
+# These keep the old public names working. They forward to the generic
+# functions with protocol_id="ISOS-D-1".
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_isos_d1_tracking_file(folder: str, config: dict) -> str:
+    """Create a new ISOS-D-1 tracking workbook and return its path."""
+    cfg = dict(config)
+    cfg.setdefault("protocol_id", "ISOS-D-1")
+    return create_isos_tracking_file(folder, cfg)
+
+
+def append_isos_d1_measurement(tracking_path: str, meas: dict) -> None:
+    """Append one ISOS-D-1 measurement to the tracking file."""
+    return append_isos_measurement(tracking_path, meas)
+
+
+def read_isos_d1_config(tracking_path: str) -> dict:
+    """Read ISOS-D-1 config values from the tracking file."""
+    return read_isos_config(tracking_path)
+
+
+def read_isos_d1_log(tracking_path: str) -> list:
+    """Read all ISOS-D-1 measurement rows from the log."""
+    return read_isos_log(tracking_path)
+
+
+def read_isos_d1_jv_curves(tracking_path: str) -> list:
+    """Read all ISOS-D-1 JV curve sheets from the tracking file."""
+    return read_isos_jv_curves(tracking_path)
