@@ -52,6 +52,20 @@ PROTOCOLS = [
             "dark between periodic illuminated J-V characterisations."
         ),
     ),
+    ProtocolSpec(
+        id="ISOS-L-1",
+        label="ISOS-L-1",
+        is_continuous=True,
+        supports_oc=True,
+        supports_mpp=True,
+        supports_bias_v1=False,
+        requires_dark_jv=False,
+        requires_illuminated_jv=True,
+        default_interval_min=15.0,
+        default_total_duration_h=24.0,
+        stress_with_light=True,
+        notes="Light soaking at ambient T, OC or MPP load.",
+    ),
 ]
 
 

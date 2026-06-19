@@ -106,6 +106,12 @@ _CFG_KEYS = [
     "equilibration_duration_h", "equilibration_done",
     "baseline_n_scans", "baseline_rest_s",
     "tiered_schedule_json",
+    # ISOS-L-1 continuous-stress columns (nullable; blank for D-1 files)
+    "total_duration_h", "scan_interval_min",
+    "pre_scan_relaxation_s", "spo_duration_s",
+    "mpp_engine", "failure_pce_threshold_pct", "auto_stop_on_failure",
+    "voc_read_interval_ms",
+    "perturb_step_mv", "mpp_v_min", "mpp_v_max", "mpp_log_interval_s",
 ]
 
 # Column headers for each per-measurement JV sheet — matches MeasurementData exactly
