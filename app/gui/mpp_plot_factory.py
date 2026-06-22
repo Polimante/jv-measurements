@@ -218,6 +218,209 @@ def update_scan_only_plot(axes, log_rows, latest_jv=None, i_dark_trace=None):
     _redraw(axes)
 
 
+# ── Layout 4: V-1 diagnostic panel (dark + illuminated J-V degradation) ─────────
+
+def build_v1_diagnostic_panel(parent_frame) -> dict:
+    """Build the rich ISOS-V-1 diagnostic panel (GridSpec 4×2).
+
+      row 0, span:  PCE(t) markers (from illuminated scans)
+      row 1, col 0: R_s_dark(t) and R_s_illum(t) overlaid
+      row 1, col 1: R_sh_dark(t) and R_sh_illum(t) — log scale
+      row 2, col 0: n_dark(t)
+      row 2, col 1: J_s_dark(t) — log scale
+      row 3, col 0: HI(t) and HI_dark(t) overlaid
+      row 3, col 1: latest illuminated J-V (top) / latest dark J-V (bottom)
+    """
+    # A flat 8×2 GridSpec (no nested subgridspecs — those defeat
+    # constrained_layout and cause overlapping titles/axes). Each diagnostic row
+    # spans two grid rows; the bottom-right J-V cell is split into one grid row
+    # each (illuminated on top, dark below) while HI spans both on the left.
+    fig = plt.figure(figsize=(9, 12), constrained_layout=True)
+    gs = GridSpec(8, 2, figure=fig)
+    ax_pce = fig.add_subplot(gs[0:2, :])
+    ax_rs  = fig.add_subplot(gs[2:4, 0])
+    ax_rsh = fig.add_subplot(gs[2:4, 1])
+    ax_n   = fig.add_subplot(gs[4:6, 0])
+    ax_js  = fig.add_subplot(gs[4:6, 1])
+    ax_hi  = fig.add_subplot(gs[6:8, 0])
+    ax_jv      = fig.add_subplot(gs[6, 1])
+    ax_jv_dark = fig.add_subplot(gs[7, 1])
+
+    _blank(ax_pce, "PCE vs Time (illuminated scans)", "Time (h)", "PCE (%)")
+    _blank(ax_rs,  "Series Resistance", "Time (h)", "R_s (Ω·cm²)")
+    _blank(ax_rsh, "Shunt Resistance", "Time (h)", "R_sh (Ω·cm²)")
+    _blank(ax_n,   "Dark Ideality Factor", "Time (h)", "n_dark")
+    _blank(ax_js,  "Dark Saturation Current", "Time (h)", "J_s (mA/cm²)")
+    _blank(ax_hi,  "Hysteresis Index", "Time (h)", "HI (%)")
+    _blank(ax_jv,      "Latest Illuminated J-V", "Voltage (V)", "J (mA/cm²)")
+    _blank(ax_jv_dark, "Latest Dark J-V", "Voltage (V)", "J (mA/cm²)")
+
+    canvas = _make_canvas(fig, parent_frame)
+    return {"fig": fig, "canvas": canvas,
+            "ax_pce": ax_pce, "ax_rs": ax_rs, "ax_rsh": ax_rsh,
+            "ax_n": ax_n, "ax_js": ax_js, "ax_hi": ax_hi,
+            "ax_jv": ax_jv, "ax_jv_dark": ax_jv_dark}
+
+
+def _v1_col(rows, key):
+    """Extract a float column from log rows, preserving None for missing cells."""
+    out = []
+    for r in rows:
+        val = r.get(key)
+        try:
+            out.append(float(val) if val not in (None, "") else None)
+        except (TypeError, ValueError):
+            out.append(None)
+    return out
+
+
+def _v1_pairs(t, y):
+    """Zip two parallel columns, dropping entries where either is None."""
+    return [(a, b) for a, b in zip(t, y) if a is not None and b is not None]
+
+
+def _v1_scatter(ax, title, xl, yl, series, logy=False):
+    """Redraw a marker time-series axis from a list of (pairs, color, label)."""
+    ax.clear()
+    any_data = False
+    for pairs, color, label in series:
+        if pairs:
+            xs, ys = zip(*pairs)
+            ax.plot(xs, ys, color=color, marker="o", markersize=4,
+                    linewidth=1.0, label=label)
+            any_data = True
+    ax.set_title(title, fontsize=10, fontweight="bold")
+    ax.set_xlabel(xl, fontsize=9); ax.set_ylabel(yl, fontsize=9)
+    ax.grid(True, which="both")
+    if logy and any_data:
+        try:
+            ax.set_yscale("log")
+        except Exception:
+            pass
+    if any_data and len([s for s in series if s[2]]) > 1:
+        ax.legend(fontsize=7)
+    elif not any_data:
+        ax.text(0.5, 0.5, "No data yet", transform=ax.transAxes,
+                ha="center", va="center", color="gray", fontsize=9)
+
+
+def update_v1_plot(axes, log_rows, latest_illum_jv=None, latest_dark_jv=None):
+    """Redraw the V-1 diagnostic panel from cumulative log rows + latest curves.
+
+    ``log_rows`` — list of dicts as produced by ``read_isos_log``.
+    ``latest_illum_jv`` / ``latest_dark_jv`` — optional ``{"v","j","vmpp"}``.
+    """
+    rows = log_rows or []
+    t = _v1_col(rows, "Elapsed_h")
+
+    _v1_scatter(
+        axes["ax_pce"], "PCE vs Time (illuminated scans)", "Time (h)", "PCE (%)",
+        [(_v1_pairs(t, _v1_col(rows, "PCE_rev (%)")), _C_REV, "PCE reverse"),
+         (_v1_pairs(t, _v1_col(rows, "PCE_fwd (%)")), _C_FWD, "PCE forward")])
+
+    _v1_scatter(
+        axes["ax_rs"], "Series Resistance", "Time (h)", "R_s (Ω·cm²)",
+        [(_v1_pairs(t, _v1_col(rows, "R_s_dark_rev")), _C_IDARK, "R_s dark"),
+         (_v1_pairs(t, _v1_col(rows, "Rs_rev (Ω·cm²)")), _C_J, "R_s illum")])
+
+    _v1_scatter(
+        axes["ax_rsh"], "Shunt Resistance", "Time (h)", "R_sh (Ω·cm²)",
+        [(_v1_pairs(t, _v1_col(rows, "R_sh_dark_rev")), _C_IDARK, "R_sh dark"),
+         (_v1_pairs(t, _v1_col(rows, "Rsh_rev (Ω·cm²)")), _C_J, "R_sh illum")],
+        logy=True)
+
+    _v1_scatter(
+        axes["ax_n"], "Dark Ideality Factor", "Time (h)", "n_dark",
+        [(_v1_pairs(t, _v1_col(rows, "n_dark_rev")), _C_V, "")])
+
+    _v1_scatter(
+        axes["ax_js"], "Dark Saturation Current", "Time (h)", "J_s (mA/cm²)",
+        [(_v1_pairs(t, _v1_col(rows, "J_s_dark_rev")), _C_PCE, "")],
+        logy=True)
+
+    _v1_scatter(
+        axes["ax_hi"], "Hysteresis Index", "Time (h)", "HI (%)",
+        [(_v1_pairs(t, _v1_col(rows, "HI (%)")), _C_REV, "HI illum"),
+         (_v1_pairs(t, _v1_col(rows, "HI_dark")), _C_IDARK, "HI dark")])
+
+    _draw_jv(axes["ax_jv"], latest_illum_jv or {})
+    axes["ax_jv"].set_title("Latest Illuminated J-V")
+    _draw_jv(axes["ax_jv_dark"], latest_dark_jv or {})
+    axes["ax_jv_dark"].set_title("Latest Dark J-V")
+
+    _redraw(axes)
+
+
+# ── Stability-metric overlays ───────────────────────────────────────────────────
+
+# Overlay colours (kept distinct from the trace colours above).
+_C_T80   = "#C62828"   # red
+_C_T95   = "#4FC3F7"   # light blue
+_C_TS80  = "#FB8C00"   # orange
+_C_TS    = "#9E9E9E"   # gray (burn-in end)
+
+
+def overlay_stability_metrics(ax_pce, metrics, total_duration_h):
+    """Draw stability-metric reference lines + annotations on a PCE axis.
+
+    The axis is assumed to be showing the *normalized* PCE trend (ratio to t₀),
+    so the 0.80 / 0.95 horizontal thresholds line up with the data. Works for the
+    L-1 MPP, L-1 OC, and V-1 sparse-marker panels.
+
+    Draws:
+      * horizontal dashed lines at 0.80 (red) and 0.95 (light blue);
+      * a horizontal dashed line at 0.80·PCE_S_norm (orange) — the Ts80 reference;
+      * a vertical gray dashed line at T_S (burn-in end);
+      * vertical lines at T80 (red) and T95 (light blue) when reached;
+      * a vertical orange line at T_S + Ts80 when reached;
+      * short text annotations near each marker.
+
+    ``metrics`` may be ``None`` (no-op). ``total_duration_h`` bounds annotation
+    placement.
+    """
+    if metrics is None or ax_pce is None:
+        return
+
+    ax_pce.axhline(0.80, color=_C_T80, linestyle="--", linewidth=0.9, alpha=0.6)
+    ax_pce.axhline(0.95, color=_C_T95, linestyle="--", linewidth=0.9, alpha=0.6)
+
+    pce_0 = getattr(metrics, "pce_0", None)
+    pce_s = getattr(metrics, "pce_s", None)
+    if pce_s is not None and pce_0:
+        ts_ref = 0.80 * (pce_s / pce_0)
+        ax_pce.axhline(ts_ref, color=_C_TS80, linestyle="--",
+                       linewidth=0.9, alpha=0.6)
+
+    def _vline(x, color, label):
+        if x is None:
+            return
+        ax_pce.axvline(x, color=color, linestyle="--", linewidth=1.1)
+        try:
+            y_top = ax_pce.get_ylim()[1]
+        except Exception:
+            y_top = 1.0
+        ax_pce.annotate(label, xy=(x, y_top), xytext=(2, -2),
+                        textcoords="offset points", rotation=90,
+                        va="top", ha="left", fontsize=7, color=color)
+
+    t_s = getattr(metrics, "t_s_h", None)
+    if t_s is not None:
+        _vline(t_s, _C_TS, f"T_S = {t_s:.1f} h")
+
+    if getattr(metrics, "t80_reached", False):
+        t80 = getattr(metrics, "t80_h", None)
+        _vline(t80, _C_T80, f"T80 = {t80:.1f} h" if t80 is not None else "T80")
+
+    if getattr(metrics, "t95_reached", False):
+        t95 = getattr(metrics, "t95_h", None)
+        _vline(t95, _C_T95, f"T95 = {t95:.1f} h" if t95 is not None else "T95")
+
+    if getattr(metrics, "ts80_reached", False):
+        ts80 = getattr(metrics, "ts80_h", None)
+        if ts80 is not None and t_s is not None:
+            _vline(t_s + ts80, _C_TS80, f"Ts80 = {ts80:.1f} h")
+
+
 # ── Internal drawing helpers ────────────────────────────────────────────────────
 
 def _draw_jv(ax, jv):

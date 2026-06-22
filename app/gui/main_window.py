@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import threading
 import winsound
@@ -59,6 +60,7 @@ from app.io.isos_tracking import (
     read_isos_config,
     read_isos_log,
     read_isos_jv_curves,
+    append_metrics_row,
 )
 from app.measurement.isos_protocols import list_protocol_labels, get_protocol
 from app.gui.data_viewer import DataViewerWindow
@@ -4154,6 +4156,8 @@ class JVMeasurementApp:
 
         # ── ISOS-L-1 continuous-stress sub-frame (shown only for L-1) ───────────
         self._build_isos_l1_subframe(tab_cond)
+        # ── ISOS-V-1 dark-bias sub-frame (shown only for V-1) ───────────────────
+        self._build_isos_v1_subframe(tab_cond)
 
         # ── History Treeview ──────────────────────────────────────────────────
         hist_f = LabelFrame(self.isos_panel, text="Measurement History", padx=4, pady=4)
@@ -4168,6 +4172,9 @@ class JVMeasurementApp:
         self.isos_tree.configure(yscrollcommand=vsb.set)
         self.isos_tree.pack(side=LEFT, fill=BOTH, expand=True)
         vsb.pack(side=RIGHT, fill=Y)
+
+        # ── Stability Metrics panel (T80 / T95 / Ts80 / T_S / PCE_S / n_1000) ───
+        self._build_isos_metrics_panel(self.isos_panel)
 
         # ── Run/Stop buttons ──────────────────────────────────────────────────
         btn_ctrl = Frame(self.isos_panel, bg="#ececec")
@@ -4225,6 +4232,7 @@ class JVMeasurementApp:
         # (see _isos_rebuild_plot_area). Live L-1 stress traces are buffered here.
         self._isos_plot_layout    = None
         self.isos_l1_plot_axes    = None
+        self.isos_v1_plot_axes    = None
         self._isos_l1_last_draw   = 0.0
         self._isos_l1_reset_traces()
         self._isos_build_d1_figure()
@@ -4358,6 +4366,236 @@ class JVMeasurementApp:
         # Switching load reveals the matching sub-frame and swaps the plot layout.
         self.isos_load_var.trace("w", self._isos_on_load_change)
 
+    # ── ISOS-V-1 sub-frame (dark electrical-bias stress) ────────────────────────
+
+    _V1_TIER_DEFAULTS = [(0.0, 5.0, 60.0), (5.0, 24.0, 240.0), (24.0, 99999.0, 1440.0)]
+
+    def _build_isos_v1_subframe(self, parent):
+        """Build the ISOS-V-1 dark-bias controls (hidden until V-1 selected)."""
+        self._isos_v1_custom_schedule = None
+        self._isos_v1_scan_blocked    = False
+
+        self.isos_v1_subframe = LabelFrame(
+            parent, text="ISOS-V-1 Dark Electrical-Bias Stress", padx=6, pady=4)
+        v1 = self.isos_v1_subframe
+
+        r = 0
+        Label(v1, text="Stress is performed in DARK. Shutter opens only briefly\n"
+                       "for periodic illuminated J-V scans.",
+              bg="#FFF59D", justify="left", font=("Arial", 8)
+              ).grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=(0, 4))
+        r += 1
+
+        def _num_row(label, attr, default, unit, vartype=DoubleVar):
+            nonlocal r
+            Label(v1, text=label).grid(row=r, column=0, sticky=W, padx=4, pady=2)
+            var = vartype(value=default)
+            Entry(v1, textvariable=var, width=8).grid(row=r, column=1, sticky=W, padx=2)
+            Label(v1, text=unit, fg="#666666").grid(row=r, column=2, sticky=W)
+            setattr(self, attr, var)
+            r += 1
+
+        _num_row("Total duration:", "isos_v1_total_h_var", 24.0, "h")
+
+        # ── Measurement schedule ───────────────────────────────────────────────
+        sched_f = LabelFrame(v1, text="Measurement schedule", padx=4, pady=2)
+        sched_f.grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=(4, 2))
+        r += 1
+        self.isos_v1_schedule_mode_var = StringVar(value="tiered")
+        Radiobutton(sched_f, text="Fixed interval (min):",
+                    variable=self.isos_v1_schedule_mode_var, value="fixed",
+                    command=self._isos_v1_on_schedule_mode_change
+                    ).grid(row=0, column=0, sticky=W)
+        self.isos_v1_interval_min_var = DoubleVar(value=60.0)
+        Entry(sched_f, textvariable=self.isos_v1_interval_min_var, width=7
+              ).grid(row=0, column=1, sticky=W, padx=2)
+        Radiobutton(sched_f, text="Tiered (recommended)",
+                    variable=self.isos_v1_schedule_mode_var, value="tiered",
+                    command=self._isos_v1_on_schedule_mode_change
+                    ).grid(row=1, column=0, columnspan=2, sticky=W)
+
+        # Editable 3-row tier table.
+        self.isos_v1_tier_frame = Frame(sched_f)
+        self.isos_v1_tier_frame.grid(row=2, column=0, columnspan=3, sticky="ew")
+        for c, h in enumerate(("Start h", "End h", "Interval min")):
+            Label(self.isos_v1_tier_frame, text=h, font=("Arial", 8),
+                  fg="#666666").grid(row=0, column=c + 1, padx=2)
+        self.isos_v1_tier_vars = []
+        for i, (s0, e0, iv0) in enumerate(self._V1_TIER_DEFAULTS):
+            Label(self.isos_v1_tier_frame, text=f"Phase {i + 1}:"
+                  ).grid(row=i + 1, column=0, sticky=W, padx=2)
+            sv, ev, ivv = DoubleVar(value=s0), DoubleVar(value=e0), DoubleVar(value=iv0)
+            Entry(self.isos_v1_tier_frame, textvariable=sv, width=6
+                  ).grid(row=i + 1, column=1, padx=2, pady=1)
+            Entry(self.isos_v1_tier_frame, textvariable=ev, width=6
+                  ).grid(row=i + 1, column=2, padx=2, pady=1)
+            Entry(self.isos_v1_tier_frame, textvariable=ivv, width=7
+                  ).grid(row=i + 1, column=3, padx=2, pady=1)
+            self.isos_v1_tier_vars.append((sv, ev, ivv))
+
+        self.isos_v1_custom_path_var = StringVar(value="")
+        Radiobutton(sched_f, text="Custom (CSV)",
+                    variable=self.isos_v1_schedule_mode_var, value="custom",
+                    command=self._isos_v1_on_schedule_mode_change
+                    ).grid(row=3, column=0, sticky=W)
+        Button(sched_f, text="Import…", font=("Arial", 8), pady=0,
+               command=self._isos_v1_import_schedule_csv
+               ).grid(row=3, column=1, sticky=W, padx=2)
+
+        # ── Dark J-V scan range + ideality fit window ──────────────────────────
+        dark_f = LabelFrame(v1, text="Dark J-V scan", padx=4, pady=2)
+        dark_f.grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=2)
+        r += 1
+        for c, (label, attr, default) in enumerate([
+            ("Start (V):", "isos_v1_dark_start_v_var", -0.2),
+            ("End (V):",   "isos_v1_dark_end_v_var",    1.1),
+            ("Step (V):",  "isos_v1_dark_step_v_var",   0.025),
+        ]):
+            Label(dark_f, text=label).grid(row=0, column=c * 2, sticky=W, padx=2)
+            var = DoubleVar(value=default)
+            Entry(dark_f, textvariable=var, width=6
+                  ).grid(row=0, column=c * 2 + 1, sticky=W, padx=2)
+            setattr(self, attr, var)
+        for c, (label, attr, default) in enumerate([
+            ("Fit V_min:", "isos_v1_fit_vmin_var", 0.5),
+            ("Fit V_max:", "isos_v1_fit_vmax_var", 0.8),
+        ]):
+            Label(dark_f, text=label).grid(row=1, column=c * 2, sticky=W, padx=2)
+            var = DoubleVar(value=default)
+            Entry(dark_f, textvariable=var, width=6
+                  ).grid(row=1, column=c * 2 + 1, sticky=W, padx=2)
+            setattr(self, attr, var)
+
+        # ── Illuminated scan-rate warning (real-time) ──────────────────────────
+        self.isos_v1_scan_warn_var = StringVar(value="")
+        self._isos_v1_warn_lbl = Label(v1, textvariable=self.isos_v1_scan_warn_var,
+                                       wraplength=240, justify="left",
+                                       font=("Arial", 8), fg="#B71C1C")
+        self._isos_v1_warn_lbl.grid(row=r, column=0, columnspan=3, sticky="ew",
+                                    padx=2, pady=(2, 2))
+        r += 1
+
+        self.isos_v1_log_idark_var = BooleanVar(value=True)
+        Checkbutton(v1, text="Log I_dark during stress",
+                    variable=self.isos_v1_log_idark_var
+                    ).grid(row=r, column=0, columnspan=3, sticky=W, padx=4)
+        r += 1
+
+        _num_row("Pre-scan relaxation:", "isos_v1_relax_s_var", 60.0, "s")
+        _num_row("SPO after scan:",      "isos_v1_spo_s_var",   20.0, "s (0=off)")
+
+        self.isos_v1_equil_enabled_var = BooleanVar(value=True)
+        Checkbutton(v1, text="Equilibration before start",
+                    variable=self.isos_v1_equil_enabled_var
+                    ).grid(row=r, column=0, columnspan=3, sticky=W, padx=4, pady=(6, 0))
+        r += 1
+        _num_row("  Duration:", "isos_v1_equil_h_var", 12.0, "h")
+
+        _num_row("Baseline scans:", "isos_v1_baseline_n_var", 4, "", IntVar)
+        _num_row("Baseline rest:",  "isos_v1_baseline_rest_s_var", 60.0, "s")
+
+        fail_f = LabelFrame(v1, text="Failure detection", padx=4, pady=2)
+        fail_f.grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=(6, 2))
+        r += 1
+        Label(fail_f, text="PCE threshold (% of PCE₀):").grid(row=0, column=0, sticky=W)
+        self.isos_v1_fail_pct_var = DoubleVar(value=20.0)
+        Entry(fail_f, textvariable=self.isos_v1_fail_pct_var, width=6
+              ).grid(row=0, column=1, sticky=W, padx=2)
+        Label(fail_f, text="I_dark × baseline:").grid(row=1, column=0, sticky=W)
+        self.isos_v1_fail_idark_mult_var = DoubleVar(value=5.0)
+        Entry(fail_f, textvariable=self.isos_v1_fail_idark_mult_var, width=6
+              ).grid(row=1, column=1, sticky=W, padx=2)
+        Label(fail_f, text="R_sh_dark min (Ω·cm²):").grid(row=2, column=0, sticky=W)
+        self.isos_v1_fail_rsh_dark_var = DoubleVar(value=0.0)
+        Entry(fail_f, textvariable=self.isos_v1_fail_rsh_dark_var, width=6
+              ).grid(row=2, column=1, sticky=W, padx=2)
+        self.isos_v1_auto_stop_var = BooleanVar(value=True)
+        Checkbutton(fail_f, text="Auto-stop on failure",
+                    variable=self.isos_v1_auto_stop_var
+                    ).grid(row=3, column=0, columnspan=2, sticky=W)
+
+        # MPP hold settings (reused parameter grid; shown when load == MPP).
+        self.isos_v1_mpp_frame = LabelFrame(v1, text="MPP hold settings", padx=4, pady=2)
+        Label(self.isos_v1_mpp_frame,
+              text="Hold last Vmpp from scan (constant V, dark).",
+              font=("Arial", 8), fg="#666666"
+              ).grid(row=0, column=0, columnspan=3, sticky=W)
+        mpp_params = Frame(self.isos_v1_mpp_frame)
+        mpp_params.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 0))
+        build_param_grid(mpp_params, "isos_v1", [
+            ("V min:",            "v_min",                 0.0,  "V"),
+            ("V max:",            "v_max",                 1.2,  "V"),
+            ("I_dark log interval:", "stress_log_interval_s", 2.0, "s"),
+        ], self)
+        self._isos_v1_mpp_row = r
+        r += 1
+
+        self._isos_v1_on_schedule_mode_change()
+
+    def _isos_v1_on_schedule_mode_change(self):
+        # The fixed-interval entry and tier table stay visible in all modes; the
+        # active schedule is resolved from the selected mode at run time by
+        # _isos_v1_build_schedule(). This hook exists for the radiobuttons and
+        # is a placeholder for future enable/disable styling.
+        pass
+
+    def _isos_v1_import_schedule_csv(self):
+        path = filedialog.askopenfilename(
+            title="Import V-1 schedule CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if not path:
+            return
+        sched = self._isos_v1_read_schedule_csv(path)
+        if not sched:
+            messagebox.showerror(
+                "Invalid Schedule",
+                "Could not parse a schedule from this CSV.\n"
+                "Expected rows of: start_h, end_h, interval_min")
+            return
+        self._isos_v1_custom_schedule = sched
+        self.isos_v1_custom_path_var.set(path)
+        self.isos_v1_schedule_mode_var.set("custom")
+        self.isos_status_var.set(
+            f"Loaded {len(sched)} schedule tiers from {os.path.basename(path)}")
+
+    @staticmethod
+    def _isos_v1_read_schedule_csv(path):
+        import csv
+        sched = []
+        try:
+            with open(path, newline="") as fh:
+                for row in csv.reader(fh):
+                    cells = [c.strip() for c in row if c.strip() != ""]
+                    if len(cells) < 3:
+                        continue
+                    try:
+                        s0, e0, iv0 = float(cells[0]), float(cells[1]), float(cells[2])
+                    except ValueError:
+                        continue          # header or comment row
+                    sched.append((s0, e0, iv0))
+        except Exception:
+            return []
+        return sched
+
+    def _isos_v1_build_schedule(self):
+        """Return the active V-1 schedule as a list of (start_h, end_h, int_min).
+
+        Fixed mode returns None (the runner falls back to scan_interval_min).
+        """
+        mode = self.isos_v1_schedule_mode_var.get()
+        if mode == "fixed":
+            return None
+        if mode == "custom" and self._isos_v1_custom_schedule:
+            return list(self._isos_v1_custom_schedule)
+        # tiered
+        tiers = []
+        for sv, ev, ivv in self.isos_v1_tier_vars:
+            try:
+                tiers.append((float(sv.get()), float(ev.get()), float(ivv.get())))
+            except Exception:
+                continue
+        return tiers or None
+
     def _isos_on_protocol_change(self, *_):
         protocol = self.isos_protocol_var.get()
         # ISOS-D-1 is OC-only; disable load selection and lock to OC
@@ -4366,21 +4604,42 @@ class JVMeasurementApp:
             self.isos_load_rb_oc.config(state=DISABLED)
             self.isos_load_rb_mpp.config(state=DISABLED)
             self.isos_l1_subframe.pack_forget()
+            self.isos_v1_subframe.pack_forget()
+        elif protocol == "ISOS-V-1":
+            self.isos_load_rb_oc.config(state=NORMAL)
+            self.isos_load_rb_mpp.config(state=NORMAL)
+            self.isos_l1_subframe.pack_forget()
+            self.isos_v1_subframe.pack(fill=X, pady=(6, 0))
+            self._isos_v1_reveal_load_frame()
+            self._isos_v1_update_scan_warn()
         else:  # ISOS-L-1 (and future continuous protocols)
             self.isos_load_rb_oc.config(state=NORMAL)
             self.isos_load_rb_mpp.config(state=NORMAL)
+            self.isos_v1_subframe.pack_forget()
             self.isos_l1_subframe.pack(fill=X, pady=(6, 0))
             self._isos_l1_reveal_load_frame()
         self._isos_rebuild_plot_area()
 
     def _isos_on_load_change(self, *_):
-        """React to an OC ↔ MPP change while L-1 is the active protocol."""
-        if self.isos_protocol_var.get() == "ISOS-D-1":
+        """React to an OC ↔ MPP change while a continuous protocol is active."""
+        protocol = self.isos_protocol_var.get()
+        if protocol == "ISOS-D-1":
             return
         if self._measurement_running:
             return
-        self._isos_l1_reveal_load_frame()
+        if protocol == "ISOS-V-1":
+            self._isos_v1_reveal_load_frame()
+        else:
+            self._isos_l1_reveal_load_frame()
         self._isos_rebuild_plot_area()
+
+    def _isos_v1_reveal_load_frame(self):
+        """Show the MPP hold settings only when the V-1 load is MPP."""
+        if self.isos_load_var.get() == "MPP":
+            self.isos_v1_mpp_frame.grid(row=self._isos_v1_mpp_row, column=0,
+                                        columnspan=3, sticky="ew", padx=2, pady=2)
+        else:
+            self.isos_v1_mpp_frame.grid_remove()
 
     def _isos_l1_reveal_load_frame(self):
         """Show the MPP- or OC-specific settings frame to match the load."""
@@ -4396,8 +4655,11 @@ class JVMeasurementApp:
     # ── Dynamic plot area ──────────────────────────────────────────────────────
 
     def _isos_target_plot_layout(self):
-        if self.isos_protocol_var.get() == "ISOS-D-1":
+        protocol = self.isos_protocol_var.get()
+        if protocol == "ISOS-D-1":
             return "d1"
+        if protocol == "ISOS-V-1":
+            return "v1"
         return "mpp" if self.isos_load_var.get() == "MPP" else "oc"
 
     def _isos_rebuild_plot_area(self):
@@ -4418,6 +4680,7 @@ class JVMeasurementApp:
         except Exception:
             pass
         self.isos_l1_plot_axes = None
+        self.isos_v1_plot_axes = None
         self.isos_ax_pce = None
         self.isos_ax_jv  = None
 
@@ -4429,6 +4692,12 @@ class JVMeasurementApp:
             self.isos_fig    = panel["fig"]
             self.isos_canvas = panel["canvas"]
             self.isos_l1_plot_axes = panel
+        elif layout == "v1":
+            from app.gui.mpp_plot_factory import build_v1_diagnostic_panel
+            panel = build_v1_diagnostic_panel(self.isos_plot_frame)
+            self.isos_fig    = panel["fig"]
+            self.isos_canvas = panel["canvas"]
+            self.isos_v1_plot_axes = panel
         else:  # mpp
             from app.gui.mpp_plot_factory import build_mpp_continuous_panel
             panel = build_mpp_continuous_panel(self.isos_plot_frame)
@@ -4481,6 +4750,55 @@ class JVMeasurementApp:
             self._isos_recalculate_delay_from_scan_rate()
         else:
             self._isos_update_scan_rate()
+        self._isos_v1_update_scan_warn()
+
+    def _isos_current_scan_rate_mvs(self):
+        """Effective illuminated scan rate (mV/s), or None if not computable."""
+        try:
+            step_mv  = abs(self.isos_step_v_var.get()) * 1000.0
+            nplc_ms  = self.isos_nplc_var.get() * (1000.0 / 60.0)
+            delay_ms = self.isos_delay_ms_var.get()
+            t_per_pt = (delay_ms + nplc_ms + 50.0) / 1000.0
+            if t_per_pt <= 0 or step_mv <= 0:
+                return None
+            return step_mv / t_per_pt
+        except Exception:
+            return None
+
+    def _isos_v1_update_scan_warn(self, *_):
+        """Real-time illuminated scan-rate guard for V-1.
+
+        A too-slow illuminated scan exposes the cell to light long enough to
+        contaminate the dark-bias V-1 stress with L-1/T effects. Warn below
+        50 mV/s; block (and disable Run) below 25 mV/s.
+        """
+        if not hasattr(self, "isos_v1_scan_warn_var"):
+            return
+        active = self.isos_protocol_var.get() == "ISOS-V-1"
+        rate = self._isos_current_scan_rate_mvs()
+        blocked = False
+        if not active or rate is None:
+            self.isos_v1_scan_warn_var.set("")
+        elif rate < 25.0:
+            blocked = True
+            self.isos_v1_scan_warn_var.set(
+                f"⛔ {rate:.0f} mV/s — too slow. Illuminated scan would "
+                f"contaminate V-1 (light exposure). Run disabled until ≥ 25 mV/s.")
+            self._isos_v1_warn_lbl.config(fg="#B71C1C")
+        elif rate < 50.0:
+            self.isos_v1_scan_warn_var.set(
+                f"⚠ {rate:.0f} mV/s — slow illuminated scan may contaminate "
+                f"V-1 (light exposure). Aim for ≥ 50 mV/s.")
+            self._isos_v1_warn_lbl.config(fg="#E65100")
+        else:
+            self.isos_v1_scan_warn_var.set(f"✔ {rate:.0f} mV/s illuminated scan.")
+            self._isos_v1_warn_lbl.config(fg="#2E7D32")
+        self._isos_v1_scan_blocked = blocked
+        # Reflect the block on the Run button when V-1 is active and the
+        # instrument is connected (do not override the disconnected state).
+        if active and getattr(self, "instrument", None) is not None \
+                and not self._measurement_running:
+            self.isos_start_btn.config(state=DISABLED if blocked else NORMAL)
 
     def _isos_on_scan_mode_change(self):
         mode = self.isos_scan_rate_mode.get()
@@ -4576,6 +4894,7 @@ class JVMeasurementApp:
             f"Loaded: {os.path.basename(path)}  ({len(rows)} measurements)")
         if self._isos_plot_layout == "d1":
             try:
+                self._isos_d1_update_metrics(rows, persist=False)
                 self._isos_redraw_curves(path)
             except Exception:
                 pass
@@ -4644,6 +4963,51 @@ class JVMeasurementApp:
                 self.isos_l1_auto_stop_var.set(bool(auto_stop))
             except Exception:
                 pass
+        # ISOS-V-1 fields (nullable; blank in D-1 / L-1 files)
+        _set(self.isos_v1_total_h_var,            "total_duration_h",          float)
+        _set(self.isos_v1_interval_min_var,       "scan_interval_min",         float)
+        _set(self.isos_v1_relax_s_var,            "pre_scan_relaxation_s",     float)
+        _set(self.isos_v1_spo_s_var,              "spo_duration_s",            float)
+        _set(self.isos_v1_baseline_rest_s_var,    "baseline_rest_s",           float)
+        _set(self.isos_v1_baseline_n_var,         "baseline_n_scans",          int)
+        _set(self.isos_v1_fail_pct_var,           "failure_pce_threshold_pct", float)
+        _set(self.isos_v1_v_min_var,              "mpp_v_min",                 float)
+        _set(self.isos_v1_v_max_var,              "mpp_v_max",                 float)
+        _set(self.isos_v1_stress_log_interval_s_var, "mpp_log_interval_s",     float)
+        _set(self.isos_v1_dark_start_v_var,       "dark_start_voltage",        float)
+        _set(self.isos_v1_dark_end_v_var,         "dark_end_voltage",          float)
+        _set(self.isos_v1_dark_step_v_var,        "dark_step_voltage",         float)
+        _set(self.isos_v1_fit_vmin_var,           "dark_fit_v_min",            float)
+        _set(self.isos_v1_fit_vmax_var,           "dark_fit_v_max",            float)
+        v1_equil = cfg.get("equilibration_duration_h")
+        if v1_equil not in (None, ""):
+            try:
+                self.isos_v1_equil_h_var.set(float(v1_equil))
+                self.isos_v1_equil_enabled_var.set(float(v1_equil) > 0)
+            except Exception:
+                pass
+        if auto_stop is not None and auto_stop != "":
+            try:
+                self.isos_v1_auto_stop_var.set(bool(auto_stop))
+            except Exception:
+                pass
+        sched_mode = cfg.get("schedule_mode")
+        if sched_mode in ("fixed", "tiered", "custom"):
+            self.isos_v1_schedule_mode_var.set(sched_mode)
+        log_idark = cfg.get("log_i_dark_during_stress")
+        if log_idark is not None and log_idark != "":
+            try:
+                self.isos_v1_log_idark_var.set(bool(log_idark))
+            except Exception:
+                pass
+        sched_json = cfg.get("tiered_schedule_json")
+        if sched_json:
+            try:
+                tiers = json.loads(sched_json)
+                for (sv, ev, ivv), tier in zip(self.isos_v1_tier_vars, tiers):
+                    sv.set(float(tier[0])); ev.set(float(tier[1])); ivv.set(float(tier[2]))
+            except Exception:
+                pass
         # Restore scan rate mode last — triggers show/hide of the scan rate row
         mode = cfg.get("scan_rate_mode")
         if mode in ("advanced", "scan_rate"):
@@ -4681,7 +5045,8 @@ class JVMeasurementApp:
             "target_scan_rate":        self.isos_target_scan_rate_var.get(),
         }
         # ISOS-L-1-specific config fields (persisted to the Config sheet).
-        if self.isos_protocol_var.get() != "ISOS-D-1":
+        protocol = self.isos_protocol_var.get()
+        if protocol == "ISOS-L-1":
             cfg.update({
                 "total_duration_h":          self.isos_l1_total_h_var.get(),
                 "scan_interval_min":         self.isos_l1_interval_min_var.get(),
@@ -4700,6 +5065,33 @@ class JVMeasurementApp:
                 "mpp_v_max":                 self.isos_l1_v_max_var.get(),
                 "mpp_log_interval_s":        self.isos_l1_stress_log_interval_s_var.get(),
             })
+        elif protocol == "ISOS-V-1":
+            sched = self._isos_v1_build_schedule()
+            cfg.update({
+                "total_duration_h":          self.isos_v1_total_h_var.get(),
+                "scan_interval_min":         self.isos_v1_interval_min_var.get(),
+                "pre_scan_relaxation_s":     self.isos_v1_relax_s_var.get(),
+                "spo_duration_s":            self.isos_v1_spo_s_var.get(),
+                "equilibration_duration_h":  (self.isos_v1_equil_h_var.get()
+                                              if self.isos_v1_equil_enabled_var.get() else 0.0),
+                "baseline_n_scans":          self.isos_v1_baseline_n_var.get(),
+                "baseline_rest_s":           self.isos_v1_baseline_rest_s_var.get(),
+                "mpp_engine":                "HOLD",
+                "failure_pce_threshold_pct": self.isos_v1_fail_pct_var.get(),
+                "auto_stop_on_failure":      self.isos_v1_auto_stop_var.get(),
+                "mpp_v_min":                 self.isos_v1_v_min_var.get(),
+                "mpp_v_max":                 self.isos_v1_v_max_var.get(),
+                "mpp_log_interval_s":        self.isos_v1_stress_log_interval_s_var.get(),
+                "stress_with_light":         False,
+                "schedule_mode":             self.isos_v1_schedule_mode_var.get(),
+                "log_i_dark_during_stress":  self.isos_v1_log_idark_var.get(),
+                "dark_start_voltage":        self.isos_v1_dark_start_v_var.get(),
+                "dark_end_voltage":          self.isos_v1_dark_end_v_var.get(),
+                "dark_step_voltage":         self.isos_v1_dark_step_v_var.get(),
+                "dark_fit_v_min":            self.isos_v1_fit_vmin_var.get(),
+                "dark_fit_v_max":            self.isos_v1_fit_vmax_var.get(),
+                "tiered_schedule_json":      json.dumps(sched) if sched else "",
+            })
         return cfg
 
     def _isos_update_treeview(self, rows: list):
@@ -4716,6 +5108,206 @@ class JVMeasurementApp:
         if rows:
             last = self.isos_tree.get_children()[-1]
             self.isos_tree.see(last)
+
+    # ── Stability metrics panel ────────────────────────────────────────────────
+
+    def _build_isos_metrics_panel(self, parent):
+        """Live T80/T95/Ts80/T_S/PCE_S/n_1000 readout + burn-in controls."""
+        mf = LabelFrame(parent, text="Stability Metrics", padx=6, pady=4)
+        mf.pack(fill=X, padx=6, pady=(0, 4))
+        self.isos_metric_lbls = {}
+
+        def _row(r, c, key, caption, tip):
+            Label(mf, text=caption, font=("Arial", 9, "bold")
+                  ).grid(row=r, column=c * 2, sticky=W, padx=(4, 2), pady=1)
+            lbl = Label(mf, text="—", font=("Consolas", 9), fg="#999999",
+                        anchor=W, width=20)
+            lbl.grid(row=r, column=c * 2 + 1, sticky=W, padx=(0, 10), pady=1)
+            self.isos_metric_lbls[key] = lbl
+            ToolTip(lbl, tip)
+
+        _row(0, 0, "t80",  "T80",   "First time PCE/PCE₀ ≤ 0.80.")
+        _row(1, 0, "t95",  "T95",   "First time PCE/PCE₀ ≤ 0.95 (IEC-aligned).")
+        _row(2, 0, "ts80", "Ts80",  "Time from T_S until PCE ≤ 0.80·PCE_S.")
+        _row(0, 1, "ts",   "T_S",   "End of burn-in (stabilization time). "
+             "Not applicable to dark-storage (ISOS-D) protocols.")
+        _row(1, 1, "pces", "PCE_S", "PCE at the end of burn-in (t = T_S).")
+        _row(2, 1, "n1000", "n_1000",
+             "PCE(1000 h)/PCE(0); extrapolated when the run is < 1000 h.")
+
+        ctrl = Frame(mf)
+        ctrl.grid(row=3, column=0, columnspan=4, sticky=W, pady=(5, 0))
+        Label(ctrl, text="Burn-in:", font=("Arial", 9, "bold")
+              ).pack(side=LEFT, padx=(4, 4))
+        self.isos_burnin_mode_var = StringVar(value="auto")
+        for val, txt in (("auto", "Auto"), ("manual", "Manual"),
+                         ("fallback", "Fallback")):
+            Radiobutton(ctrl, text=txt, variable=self.isos_burnin_mode_var,
+                        value=val, command=self._isos_on_burnin_change
+                        ).pack(side=LEFT)
+        Label(ctrl, text="T_S (h):").pack(side=LEFT, padx=(8, 2))
+        self.isos_manual_ts_var = DoubleVar(value=0.0)
+        ts_entry = Entry(ctrl, textvariable=self.isos_manual_ts_var, width=7)
+        ts_entry.pack(side=LEFT)
+        ts_entry.bind("<Return>", lambda *_: self._isos_on_burnin_change())
+        Button(ctrl, text="Override…", command=self._isos_burnin_override
+               ).pack(side=LEFT, padx=(6, 0))
+
+    def _isos_reset_metrics_panel(self):
+        for lbl in getattr(self, "isos_metric_lbls", {}).values():
+            lbl.config(text="—", fg="#999999")
+
+    def _isos_update_metrics_panel(self, m):
+        lbls = getattr(self, "isos_metric_lbls", None)
+        if not lbls or m is None:
+            return
+
+        def _set_time(key, value, reached):
+            lbl = lbls.get(key)
+            if lbl is None:
+                return
+            if value is None:
+                lbl.config(text=("> experiment" if reached is False else "—"),
+                           fg="#999999")
+            else:
+                mark = " ✓" if reached else ""
+                lbl.config(text=f"{value:.1f} h{mark}",
+                           fg="#2E7D32" if reached else "#333333")
+
+        _set_time("t80",  m.t80_h,  m.t80_reached)
+        _set_time("t95",  m.t95_h,  m.t95_reached)
+
+        # Burn-in metrics (T_S / PCE_S / Ts80) do not apply to dark-storage
+        # protocols, where the runner reports burn_in_method == "none".
+        if getattr(m, "burn_in_method", "") == "none":
+            for key in ("ts", "pces", "ts80"):
+                lbls[key].config(text="n/a (dark)", fg="#999999")
+        else:
+            _set_time("ts80", m.ts80_h, m.ts80_reached)
+            if m.t_s_h is not None:
+                lbls["ts"].config(text=f"{m.t_s_h:.1f} h ({m.burn_in_method})",
+                                  fg="#333333")
+            else:
+                lbls["ts"].config(text="—", fg="#999999")
+            if m.pce_s is not None:
+                lbls["pces"].config(text=f"{m.pce_s:.2f} %", fg="#333333")
+            else:
+                lbls["pces"].config(text="—", fg="#999999")
+
+        if m.n_1000 is not None:
+            txt = f"{m.n_1000:.2f}"
+            if m.n_1000_extrapolated:
+                conf = m.n_1000_confidence
+                txt += (f" (extrap. ±{conf:.2f})" if conf is not None
+                        else " (extrap.)")
+            lbls["n1000"].config(text=txt, fg="#333333")
+        else:
+            lbls["n1000"].config(text="—", fg="#999999")
+
+    def _isos_on_metrics_updated(self, metrics):
+        """Runner-thread callback (posted to the GUI thread) for new metrics."""
+        self._isos_last_metrics = metrics
+        self._isos_update_metrics_panel(metrics)
+        self._isos_redraw_active_overlay()
+
+    def _isos_d1_update_metrics(self, rows, persist=True):
+        """Light-independent metrics (T80 + n_1000) for ISOS-D dark storage.
+
+        Burn-in (T_S / PCE_S / Ts80) is intentionally omitted — it is a
+        light-driven phenomenon, so an auto-detected burn-in on a dark-storage
+        curve would be spurious (see Khenkin et al., Nat. Energy 2020). Computed
+        on the GUI thread from the already-read log (D-1 measurements are sparse,
+        so this is cheap and there is no separate runner thread).
+        """
+        from app.measurement.stability_metrics import compute_stability_metrics
+        times, pce = [], []
+        for r in rows:
+            t = r.get("Elapsed_h")
+            p = r.get("PCE_rev (%)")
+            if t is None or p in (None, ""):
+                continue
+            try:
+                times.append(float(t))
+                pce.append(float(p))
+            except (TypeError, ValueError):
+                continue
+        if len(times) < 2:
+            self._isos_last_metrics = None
+            self._isos_reset_metrics_panel()
+            return None
+
+        metrics = compute_stability_metrics(
+            times, pce, None,
+            extrapolate_n1000=True,
+            pce_column_used="PCE_rev",
+            compute_burn_in=False,
+        )
+        self._isos_last_metrics = metrics
+        self._isos_update_metrics_panel(metrics)
+        if persist:
+            try:
+                append_metrics_row(self.isos_tracking_file, len(times),
+                                   float(times[-1]), metrics)
+            except Exception:
+                pass
+        return metrics
+
+    def _isos_on_burnin_change(self, *_):
+        """Recompute + redraw within ~200 ms when the burn-in mode/T_S changes."""
+        runner = getattr(self, "_isos_active_runner", None)
+        mode   = self.isos_burnin_mode_var.get()
+        try:
+            manual = float(self.isos_manual_ts_var.get())
+        except Exception:
+            manual = None
+        if runner is not None:
+            metrics = runner.recompute_metrics(burn_in_mode=mode,
+                                               manual_burn_in_h=manual)
+            if metrics is not None:
+                self._isos_last_metrics = metrics
+                self._isos_update_metrics_panel(metrics)
+                self._isos_redraw_active_overlay()
+        elif getattr(self, "_isos_last_metrics", None) is not None:
+            self._isos_update_metrics_panel(self._isos_last_metrics)
+
+    def _isos_burnin_override(self):
+        from tkinter import simpledialog
+        try:
+            cur = float(self.isos_manual_ts_var.get())
+        except Exception:
+            cur = 0.0
+        val = simpledialog.askfloat(
+            "Manual Burn-in T_S", "Burn-in end T_S (hours):",
+            initialvalue=cur, minvalue=0.0)
+        if val is not None:
+            self.isos_manual_ts_var.set(val)
+            self.isos_burnin_mode_var.set("manual")
+            self._isos_on_burnin_change()
+
+    def _isos_redraw_active_overlay(self):
+        """Redraw whichever continuous panel is live (applies the overlay)."""
+        try:
+            if getattr(self, "isos_v1_plot_axes", None):
+                self._isos_v1_redraw()
+            elif getattr(self, "isos_l1_plot_axes", None):
+                self._isos_l1_redraw_stress()
+        except Exception:
+            pass
+
+    def _isos_overlay_metrics(self, axes):
+        """Overlay the latest stability metrics on a panel's PCE axis, if any."""
+        m = getattr(self, "_isos_last_metrics", None)
+        if m is None or not axes or "ax_pce" not in axes:
+            return
+        from app.gui.mpp_plot_factory import overlay_stability_metrics
+        overlay_stability_metrics(axes["ax_pce"], m,
+                                  getattr(self, "_isos_total_h", 0.0))
+        canvas = axes.get("canvas")
+        if canvas is not None:
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
 
     def _isos_redraw_curves(self, tracking_path: str, new_measurement: bool = False):
         # ── Top: PCE_norm vs time ─────────────────────────────────────────────
@@ -4799,6 +5391,17 @@ class JVMeasurementApp:
         if fwd_curves or rev_curves:
             self.isos_ax_jv.legend(fontsize=9, loc="lower left")
 
+        # Overlay the light-independent stability markers (T80 / T95) on the
+        # normalized PCE axis — burn-in markers are absent for dark storage.
+        m = getattr(self, "_isos_last_metrics", None)
+        if m is not None and rows:
+            from app.gui.mpp_plot_factory import overlay_stability_metrics
+            total = max((float(r.get("Elapsed_h") or 0) for r in rows), default=0.0)
+            try:
+                overlay_stability_metrics(self.isos_ax_pce, m, total)
+            except Exception:
+                pass
+
         # Fixed axes — same as J-V Measurement mode
         self.isos_ax_jv.set_xlim(0.0, 1.2)
         self.isos_ax_jv.set_ylim(0.0, 30.0)
@@ -4821,12 +5424,27 @@ class JVMeasurementApp:
             return
         if self._measurement_running:
             return
+        protocol = self.isos_protocol_var.get()
+        # V-1: refuse to start while the illuminated scan rate is too slow.
+        if protocol == "ISOS-V-1":
+            self._isos_v1_update_scan_warn()
+            if self._isos_v1_scan_blocked:
+                rate = self._isos_current_scan_rate_mvs() or 0.0
+                messagebox.showwarning(
+                    "Scan Too Slow",
+                    f"The illuminated J-V scan rate is {rate:.0f} mV/s.\n\n"
+                    "ISOS-V-1 requires a fast illuminated scan (≥ 25 mV/s) so "
+                    "light exposure does not contaminate the dark-bias stress.\n"
+                    "Reduce the delay/NPLC or increase the step voltage.")
+                return
         self._measurement_running = True
         stop_event.clear()
         self.isos_start_btn.config(state=DISABLED)
         self.isos_stop_btn.config(state=NORMAL)
-        if self.isos_protocol_var.get() == "ISOS-D-1":
+        if protocol == "ISOS-D-1":
             target = self.run_isos_d1_measurement
+        elif protocol == "ISOS-V-1":
+            target = self.run_isos_v1_measurement
         else:
             target = self.run_isos_l1_measurement
         t = threading.Thread(target=target, daemon=True)
@@ -4848,6 +5466,8 @@ class JVMeasurementApp:
             ev.wait()
 
         try:
+            self._isos_last_metrics = None
+            self.root.after(0, self._isos_reset_metrics_panel)
             inst      = self.instrument
             folder    = self.isos_export_folder_var.get() or tempfile.gettempdir()
             name      = self.isos_sample_name_var.get().strip() or "Sample"
@@ -5013,6 +5633,7 @@ class JVMeasurementApp:
                 last  = rows[-1] if rows else {}
                 pce_r = last.get("PCE_rev (%)", "?")
                 self._isos_update_treeview(rows)
+                self._isos_d1_update_metrics(rows)
                 self._isos_redraw_curves(self.isos_tracking_file, new_measurement=True)
                 self._isos_add_to_log(lt)
                 self.isos_status_var.set(f"Done — PCE_rev = {pce_r}%")
@@ -5025,6 +5646,7 @@ class JVMeasurementApp:
             self.root.after(0, lambda: self.isos_status_var.set(f"Error: {exc}"))
         finally:
             self._measurement_running = False
+            self._isos_active_runner = None
             stop_event.clear()
             self.root.after(0, lambda: self.isos_start_btn.config(state=NORMAL))
             self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
@@ -5081,7 +5703,21 @@ class JVMeasurementApp:
             "prebias_t":                self.isos_prebias_duration_var.get(),
             "light_soaking_enabled":    self.isos_ls_enabled_var.get(),
             "light_soaking_duration":   self.isos_ls_duration_var.get(),
+            "burn_in_mode":             self._isos_burnin_mode(),
+            "manual_burn_in_h":         self._isos_manual_burnin_h(),
         }
+
+    def _isos_burnin_mode(self):
+        return getattr(self, "isos_burnin_mode_var", None).get() \
+            if getattr(self, "isos_burnin_mode_var", None) else "auto"
+
+    def _isos_manual_burnin_h(self):
+        if self._isos_burnin_mode() != "manual":
+            return None
+        try:
+            return float(self.isos_manual_ts_var.get())
+        except Exception:
+            return None
 
     def run_isos_l1_measurement(self):
         from app.measurement.isos_continuous_runner import ContinuousISOSRunner
@@ -5092,6 +5728,9 @@ class JVMeasurementApp:
         try:
             cfg = self._isos_build_l1_runner_config()
             self._isos_l1_active_load = cfg.get("load_mode", "OC")
+            self._isos_total_h = float(cfg.get("total_duration_h", 0) or 0)
+            self._isos_last_metrics = None
+            self.root.after(0, self._isos_reset_metrics_panel)
             # Fresh live buffers + a cleared plot for the new run.
             self._isos_l1_reset_traces()
             self._isos_l1_last_draw = 0.0
@@ -5102,12 +5741,14 @@ class JVMeasurementApp:
                 "on_log":              lambda m: _after(self._isos_add_to_log, m),
                 "on_stress_update":    self._isos_l1_stress_update,
                 "on_scan_done":        lambda meas: _after(self._isos_l1_on_scan_done, meas),
+                "on_metrics_updated":  lambda mtr: _after(self._isos_on_metrics_updated, mtr),
                 "on_baseline_done":    lambda b: _after(self._isos_l1_on_baseline_done, b),
                 "on_failure_detected": lambda r: _after(self._isos_l1_on_failure, r),
                 "on_complete":         lambda: _after(self.isos_status_var.set,
                                                       "ISOS-L-1 experiment complete."),
             }
             runner = ContinuousISOSRunner(self.instrument, cfg, callbacks, stop_event)
+            self._isos_active_runner = runner
             runner.run()
 
         except Exception as exc:
@@ -5116,6 +5757,7 @@ class JVMeasurementApp:
             self.root.after(0, lambda e=exc: self.isos_status_var.set(f"Error: {e}"))
         finally:
             self._measurement_running = False
+            self._isos_active_runner = None
             stop_event.clear()
             self.root.after(0, lambda: self.isos_start_btn.config(state=NORMAL))
             self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
@@ -5153,6 +5795,7 @@ class JVMeasurementApp:
                 update_mpp_plot(axes, list(self._isos_l1_t), list(self._isos_l1_v),
                                 list(self._isos_l1_j), list(self._isos_l1_pce),
                                 self._isos_l1_latest_jv)
+                self._isos_overlay_metrics(axes)
         except Exception:
             pass
 
@@ -5186,3 +5829,164 @@ class JVMeasurementApp:
             f"Cell failure detected: {reason}\n\nContinue the experiment?")
         if not cont:
             stop_event.set()
+
+    # ── ISOS-V-1 dark-bias continuous measurement ──────────────────────────────
+
+    def _isos_build_v1_runner_config(self) -> dict:
+        """Assemble the ContinuousISOSRunner config from the V-1 sub-frame vars."""
+        protocol = self.isos_protocol_var.get()
+        spec     = get_protocol(protocol)
+        try:
+            pin = self.isos_detector_power_var.get() / self.isos_detector_area_var.get()
+        except Exception:
+            pin = 0.0
+        load = self.isos_load_var.get()
+        sched = self._isos_v1_build_schedule()
+        return {
+            "protocol_id":              protocol,
+            "sample_name":              self.isos_sample_name_var.get().strip() or "Sample",
+            "folder":                   self.isos_export_folder_var.get() or tempfile.gettempdir(),
+            "tracking_file_path":       self.isos_tracking_file,
+            "instrument_idn":           self.instrument_idn or "",
+            "cell_area":                self.isos_cell_area_var.get(),
+            "pin":                      pin,
+            # Illuminated scan range (fast scan) — shared scan-parameter vars.
+            "start_v":                  self.isos_start_v_var.get(),
+            "end_v":                    self.isos_end_v_var.get(),
+            "step_v":                   self.isos_step_v_var.get(),
+            "delay_ms":                 self.isos_delay_ms_var.get(),
+            "nplc":                     self.isos_nplc_var.get(),
+            "four_wire":                self.isos_four_wire_var.get(),
+            # Dark scan range + ideality fit window.
+            "dark_start_v":             self.isos_v1_dark_start_v_var.get(),
+            "dark_end_v":               self.isos_v1_dark_end_v_var.get(),
+            "dark_step_v":              self.isos_v1_dark_step_v_var.get(),
+            "dark_fit_v_min":           self.isos_v1_fit_vmin_var.get(),
+            "dark_fit_v_max":           self.isos_v1_fit_vmax_var.get(),
+            # Stress / scheduling.
+            "total_duration_h":         self.isos_v1_total_h_var.get(),
+            "scan_interval_min":        self.isos_v1_interval_min_var.get(),
+            "tiered_schedule":          sched,
+            "schedule_mode":            self.isos_v1_schedule_mode_var.get(),
+            "load_mode":                load,
+            "mpp_engine":               "HOLD",
+            "stress_with_light":        spec.stress_with_light,   # False for V-1
+            "requires_dark_jv":         spec.requires_dark_jv,    # True for V-1
+            "log_i_dark_during_stress": self.isos_v1_log_idark_var.get(),
+            "pre_scan_relaxation_s":    self.isos_v1_relax_s_var.get(),
+            "spo_duration_s":           self.isos_v1_spo_s_var.get(),
+            "equilibration_duration_h": (self.isos_v1_equil_h_var.get()
+                                         if self.isos_v1_equil_enabled_var.get() else 0.0),
+            "baseline_n_scans":         self.isos_v1_baseline_n_var.get(),
+            "baseline_rest_s":          self.isos_v1_baseline_rest_s_var.get(),
+            "auto_stop_on_failure":     self.isos_v1_auto_stop_var.get(),
+            "failure_thresholds": {
+                "pce_norm":    self.isos_v1_fail_pct_var.get() / 100.0,
+                "idark_ratio": (self.isos_v1_fail_idark_mult_var.get()
+                                if self.isos_v1_fail_idark_mult_var.get() > 0 else None),
+                "rsh_dark":    (self.isos_v1_fail_rsh_dark_var.get()
+                                if self.isos_v1_fail_rsh_dark_var.get() > 0 else None),
+            },
+            "stress_log_interval_s":    self.isos_v1_stress_log_interval_s_var.get(),
+            "v_min":                    self.isos_v1_v_min_var.get(),
+            "v_max":                    self.isos_v1_v_max_var.get(),
+            "prebias_enabled":          self.isos_prebias_enabled_var.get(),
+            "prebias_v":                self.isos_prebias_voltage_var.get(),
+            "prebias_t":                self.isos_prebias_duration_var.get(),
+            "light_soaking_enabled":    self.isos_ls_enabled_var.get(),
+            "light_soaking_duration":   self.isos_ls_duration_var.get(),
+            "burn_in_mode":             self._isos_burnin_mode(),
+            "manual_burn_in_h":         self._isos_manual_burnin_h(),
+        }
+
+    def run_isos_v1_measurement(self):
+        from app.measurement.isos_continuous_runner import ContinuousISOSRunner
+
+        def _after(fn, *a):
+            self.root.after(0, lambda: fn(*a))
+
+        try:
+            cfg = self._isos_build_v1_runner_config()
+            self._isos_total_h = float(cfg.get("total_duration_h", 0) or 0)
+            self._isos_last_metrics = None
+            self.root.after(0, self._isos_reset_metrics_panel)
+            self._isos_v1_latest_illum_jv = None
+            self._isos_v1_latest_dark_jv  = None
+            self.root.after(0, self._isos_v1_redraw)
+
+            callbacks = {
+                "on_status":           lambda m: _after(self.isos_status_var.set, m),
+                "on_log":              lambda m: _after(self._isos_add_to_log, m),
+                "on_shutter":          lambda a: self._isos_v1_shutter_prompt(a),
+                "on_scan_done":        lambda meas: _after(self._isos_v1_on_scan_done, meas),
+                "on_metrics_updated":  lambda mtr: _after(self._isos_on_metrics_updated, mtr),
+                "on_stress_update":    self._isos_v1_stress_update,
+                "on_baseline_done":    lambda b: _after(self._isos_l1_on_baseline_done, b),
+                "on_failure_detected": lambda r: _after(self._isos_l1_on_failure, r),
+                "on_complete":         lambda: _after(self.isos_status_var.set,
+                                                      "ISOS-V-1 experiment complete."),
+            }
+            runner = ContinuousISOSRunner(self.instrument, cfg, callbacks, stop_event)
+            self._isos_active_runner = runner
+            runner.run()
+
+        except Exception as exc:
+            self.root.after(0, lambda e=exc: messagebox.showerror(
+                "ISOS-V-1 Measurement Error", str(e)))
+            self.root.after(0, lambda e=exc: self.isos_status_var.set(f"Error: {e}"))
+        finally:
+            self._measurement_running = False
+            self._isos_active_runner = None
+            stop_event.clear()
+            self.root.after(0, lambda: self.isos_start_btn.config(state=NORMAL))
+            self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
+
+    def _isos_v1_shutter_prompt(self, action):
+        """Modal shutter prompt fired from the runner thread (blocks until OK)."""
+        ev = threading.Event()
+        if action == "open":
+            title, body = ("Open Shutter", "Open the solar-simulator shutter for "
+                           "the illuminated J-V scan, then click OK.")
+        else:
+            title, body = ("Close Shutter", "Close the shutter — dark stress will "
+                           "resume after you click OK.")
+        self.root.after(0, lambda: (messagebox.showinfo(title, body), ev.set()))
+        ev.wait()
+
+    def _isos_v1_stress_update(self, t_s, v, j, pce):
+        """Show the latest dark-stress current in the status bar (live)."""
+        self.root.after(0, lambda: self.isos_status_var.set(
+            f"Dark stress — t = {t_s / 3600.0:.2f} h, I_dark = {j:.3e} mA/cm²"))
+
+    def _isos_v1_on_scan_done(self, meas):
+        v_r, j_r = meas.get("v_rev"), meas.get("j_rev")
+        if v_r is not None and j_r is not None:
+            self._isos_v1_latest_illum_jv = {"v": list(v_r), "j": list(j_r),
+                                             "vmpp": meas.get("Vmpp")}
+        dv, dj = meas.get("v_rev_dark"), meas.get("j_rev_dark")
+        if dv is not None and dj is not None:
+            self._isos_v1_latest_dark_jv = {"v": list(dv), "j": list(dj)}
+        try:
+            rows = read_isos_log(self.isos_tracking_file)
+            self._isos_update_treeview(rows)
+        except Exception:
+            pass
+        self._isos_v1_redraw()
+        play_completion_sound()
+
+    def _isos_v1_redraw(self):
+        axes = self.isos_v1_plot_axes
+        if not axes:
+            return
+        from app.gui.mpp_plot_factory import update_v1_plot
+        try:
+            rows = read_isos_log(self.isos_tracking_file) if self.isos_tracking_file else []
+        except Exception:
+            rows = []
+        try:
+            update_v1_plot(axes, rows,
+                           getattr(self, "_isos_v1_latest_illum_jv", None),
+                           getattr(self, "_isos_v1_latest_dark_jv", None))
+            self._isos_overlay_metrics(axes)
+        except Exception:
+            pass

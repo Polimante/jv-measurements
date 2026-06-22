@@ -39,6 +39,7 @@ from openpyxl.chart import ScatterChart, Reference, Series
 # Generic sheet names.
 _LOG_SHEET = "ISOS_Log"
 _CFG_SHEET = "ISOS_Config"
+_METRICS_SHEET = "ISOS_Metrics"
 
 # Legacy D-1 sheet names — read-only fallback so old files still open.
 _LEGACY_LOG_SHEET = "ISOS_D1_Log"
@@ -112,6 +113,10 @@ _CFG_KEYS = [
     "mpp_engine", "failure_pce_threshold_pct", "auto_stop_on_failure",
     "voc_read_interval_ms",
     "perturb_step_mv", "mpp_v_min", "mpp_v_max", "mpp_log_interval_s",
+    # ISOS-V-1 dark-bias columns (nullable; blank for D-1 / L-1 files)
+    "stress_with_light", "schedule_mode", "log_i_dark_during_stress",
+    "dark_start_voltage", "dark_end_voltage", "dark_step_voltage",
+    "dark_fit_v_min", "dark_fit_v_max",
 ]
 
 # Column headers for each per-measurement JV sheet — matches MeasurementData exactly
@@ -422,6 +427,17 @@ def append_isos_measurement(tracking_path: str, meas: dict) -> None:
     # Place chart to the right of the scalar data area (col AC + a gap → col AF)
     ws_jv.add_chart(chart, "AF1")
 
+    # ── Latest stability metrics row (ISOS_Metrics sheet) ──────────────────────
+    # The runner stuffs a StabilityMetrics object under "stability_metrics" so
+    # the rolling-best estimate is persisted on every scan completion.
+    metrics = meas.get("stability_metrics")
+    if metrics is not None:
+        try:
+            ws_metrics = _ensure_metrics_sheet(wb)
+            _append_metrics_to_ws(ws_metrics, m, elapsed_h, metrics)
+        except Exception:
+            pass
+
     wb.save(tracking_path)
     wb.close()
 
@@ -528,6 +544,134 @@ def read_isos_jv_curves(tracking_path: str) -> list:
         return []
 
 
+# Dark per-measurement JV sheet column headers. Cols A-F match MeasurementData
+# (V/J/P fwd & rev) so the Data Viewer can open the sheet; cols G+ carry the
+# dark-specific scalar diagnostics extracted by the V-1 runner.
+_JV_DARK_HEADERS = [
+    "Forward Voltage (V)", "Forward Current Density (mA.cm⁻²)",
+    "Forward Power Density (mW.cm⁻²)", "Reverse Voltage (V)",
+    "Reverse Current Density (mA.cm⁻²)", "Reverse Power Density (mW.cm⁻²)",
+    "Solar Cell Area (cm²)",
+    "R_s_dark_fwd (Ω.cm²)", "R_sh_dark_fwd (Ω.cm²)",
+    "R_s_dark_rev (Ω.cm²)", "R_sh_dark_rev (Ω.cm²)",
+    "n_dark_rev", "J_s_dark_rev (mA.cm⁻²)", "n_dark_rev_R²",
+    "HI_dark (%)", "I_dark (mA.cm⁻²)",
+    "Delay/point (ms)", "NPLC", "4-Wire Sensing",
+    "Instrument IDN", "Elapsed (h)", "Measurement #",
+]
+
+
+def append_dark_jv_sheet(tracking_path: str, sheet_name: str,
+                         meas_dark: dict, scalars: dict | None = None) -> None:
+    """Write a dark J-V sheet (``JV_Dark_#NNN_tXXXXh``) to the tracking file.
+
+    Columns A-F mirror the MeasurementData / illuminated JV layout (V/J/P fwd &
+    rev). Row 2 carries the dark scalar diagnostics; rows 3+ the arrays. A
+    scatter chart of the dark J-V curve is embedded to the right.
+
+    ``meas_dark`` supplies ``v_fwd``/``j_fwd``/``v_rev``/``j_rev`` plus the dark
+    diagnostics (``r_s_dark_fwd`` … ``hi_dark``/``i_dark``). ``scalars`` supplies
+    instrument-level extras (cell_area, delay_ms, nplc, four_wire,
+    instrument_idn, elapsed_h, measurement_n). Any pre-existing sheet of the
+    same name is replaced so re-runs stay idempotent.
+    """
+    s = dict(scalars or {})
+    wb = openpyxl.load_workbook(tracking_path)
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws = wb.create_sheet(sheet_name)
+    _header_row(ws, _JV_DARK_HEADERS, col_width=18)
+    for col_letter in ("A", "B", "C", "D", "E", "F"):
+        ws.column_dimensions[col_letter].width = 22
+
+    def _r(val, ndigits=None):
+        if val is None:
+            return None
+        try:
+            return round(float(val), ndigits) if ndigits is not None else float(val)
+        except (TypeError, ValueError):
+            return None
+
+    scalar_vals = [None] * len(_JV_DARK_HEADERS)
+    scalar_vals[6]  = _r(s.get("cell_area"))
+    scalar_vals[7]  = _r(meas_dark.get("r_s_dark_fwd"), 4)
+    scalar_vals[8]  = _r(meas_dark.get("r_sh_dark_fwd"), 4)
+    scalar_vals[9]  = _r(meas_dark.get("r_s_dark_rev"), 4)
+    scalar_vals[10] = _r(meas_dark.get("r_sh_dark_rev"), 4)
+    scalar_vals[11] = _r(meas_dark.get("n_dark_rev"), 4)
+    scalar_vals[12] = _r(meas_dark.get("j_s_dark_rev"))
+    scalar_vals[13] = _r(meas_dark.get("n_dark_rev_r2"), 4)
+    scalar_vals[14] = _r(meas_dark.get("hi_dark"), 2)
+    scalar_vals[15] = _r(meas_dark.get("i_dark"))
+    scalar_vals[16] = _r(s.get("delay_ms"))
+    scalar_vals[17] = _r(s.get("nplc"))
+    scalar_vals[18] = 1 if s.get("four_wire") else 0
+    scalar_vals[19] = s.get("instrument_idn", "")
+    scalar_vals[20] = _r(s.get("elapsed_h"), 4)
+    scalar_vals[21] = s.get("measurement_n")
+    ws.append(scalar_vals)
+    for c in range(1, len(_JV_DARK_HEADERS) + 1):
+        ws.cell(2, c).font      = _B_FONT
+        ws.cell(2, c).alignment = _C_ALIGN
+
+    v_fwd = list(meas_dark.get("v_fwd", []))
+    j_fwd = list(meas_dark.get("j_fwd", []))
+    v_rev = list(meas_dark.get("v_rev", []))
+    j_rev = list(meas_dark.get("j_rev", []))
+    p_fwd = [float(v) * float(j) for v, j in zip(v_fwd, j_fwd)]
+    p_rev = [float(v) * float(j) for v, j in zip(v_rev, j_rev)]
+
+    for i in range(max(len(v_fwd), len(v_rev))):
+        row_data = [None] * 6
+        if i < len(v_fwd):
+            row_data[0] = float(v_fwd[i])
+            row_data[1] = float(j_fwd[i])
+            row_data[2] = float(p_fwd[i])
+        if i < len(v_rev):
+            row_data[3] = float(v_rev[i])
+            row_data[4] = float(j_rev[i])
+            row_data[5] = float(p_rev[i])
+        ws.append(row_data)
+
+    for data_row in range(3, ws.max_row + 1):
+        for col in range(1, 7):
+            cell = ws.cell(data_row, col)
+            cell.font          = _DATA_FONT
+            cell.number_format = "0.000000"
+            cell.alignment     = _C_ALIGN
+
+    n_fwd = len(v_fwd)
+    n_rev = len(v_rev)
+    if n_fwd or n_rev:
+        chart = ScatterChart()
+        chart.title         = f"Dark J-V  {sheet_name}"
+        chart.scatterStyle  = "line"
+        chart.style         = 10
+        chart.x_axis.title  = "Voltage (V)"
+        chart.y_axis.title  = "J (mA/cm²)"
+        chart.width         = 18
+        chart.height        = 12
+        chart.legend.position = "b"
+        if n_fwd:
+            x_fwd = Reference(ws, min_col=1, min_row=3, max_row=2 + n_fwd)
+            y_fwd = Reference(ws, min_col=2, min_row=3, max_row=2 + n_fwd)
+            s_fwd = Series(y_fwd, x_fwd, title="Dark Forward")
+            s_fwd.graphicalProperties.line.solidFill = "1565C0"
+            s_fwd.graphicalProperties.line.width = 19050
+            chart.series.append(s_fwd)
+        if n_rev:
+            x_rev = Reference(ws, min_col=4, min_row=3, max_row=2 + n_rev)
+            y_rev = Reference(ws, min_col=5, min_row=3, max_row=2 + n_rev)
+            s_rev = Series(y_rev, x_rev, title="Dark Reverse")
+            s_rev.graphicalProperties.line.solidFill = "B71C1C"
+            s_rev.graphicalProperties.line.width = 19050
+            chart.series.append(s_rev)
+        ws.add_chart(chart, "AF1")
+
+    wb.save(tracking_path)
+    wb.close()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Generic auxiliary sheets (baseline scans, SPO traces, equilibration logs)
 #
@@ -591,6 +735,113 @@ def append_log_sheet_row(tracking_path: str, sheet_name: str,
 
     wb.save(tracking_path)
     wb.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stability metrics sheet (ISOS_Metrics) — one row per scan
+#
+# Each row carries the rolling-best estimate of all stability metrics computed
+# at that scan time (session 6). The runner attaches the latest StabilityMetrics
+# to the meas dict so append_isos_measurement() writes a row on every scan; the
+# standalone append_metrics_row() helper supports out-of-band / test writes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# (column header, StabilityMetrics attribute, round-digits or None)
+_METRICS_COLUMNS = [
+    ("scan_#",               None, None),    # supplied positionally
+    ("elapsed_h",            None, 4),       # supplied positionally
+    ("T80_h",                "t80_h", 4),
+    ("T80_reached",          "t80_reached", None),
+    ("T95_h",                "t95_h", 4),
+    ("T95_reached",          "t95_reached", None),
+    ("T_S_h",                "t_s_h", 4),
+    ("PCE_S",                "pce_s", 4),
+    ("Ts80_h",               "ts80_h", 4),
+    ("Ts80_reached",         "ts80_reached", None),
+    ("n_1000",               "n_1000", 4),
+    ("n_1000_extrapolated",  "n_1000_extrapolated", None),
+    ("n_1000_confidence",    "n_1000_confidence", 4),
+    ("burn_in_method",       "burn_in_method", None),
+    ("pce_column_used",      "pce_column_used", None),
+]
+
+_METRICS_HEADERS = [h for h, _, _ in _METRICS_COLUMNS]
+
+
+def _ensure_metrics_sheet(wb):
+    """Return the ISOS_Metrics worksheet, creating it (with headers) if absent."""
+    if _METRICS_SHEET in wb.sheetnames:
+        return wb[_METRICS_SHEET]
+    ws = wb.create_sheet(_METRICS_SHEET)
+    _header_row(ws, _METRICS_HEADERS, col_width=18)
+    ws.freeze_panes = "A2"
+    return ws
+
+
+def _metric_value(metrics, attr, ndigits):
+    """Read ``attr`` off a StabilityMetrics (duck-typed), rounding floats."""
+    val = getattr(metrics, attr, None)
+    if val is None:
+        return None
+    if ndigits is not None:
+        try:
+            return round(float(val), ndigits)
+        except (TypeError, ValueError):
+            return val
+    return val
+
+
+def _append_metrics_to_ws(ws, scan_n, elapsed_h, metrics):
+    """Append one metrics row to an already-opened ISOS_Metrics worksheet."""
+    row = []
+    for header, attr, ndigits in _METRICS_COLUMNS:
+        if header == "scan_#":
+            row.append(scan_n)
+        elif header == "elapsed_h":
+            row.append(round(float(elapsed_h), ndigits) if elapsed_h is not None
+                       else None)
+        else:
+            row.append(_metric_value(metrics, attr, ndigits))
+    ws.append(row)
+    r = ws.max_row
+    for c in range(1, len(row) + 1):
+        ws.cell(r, c).font      = _V_FONT
+        ws.cell(r, c).alignment = _C_ALIGN
+
+
+def append_metrics_row(tracking_path: str, scan_n, elapsed_h, metrics) -> None:
+    """Append a stability-metrics row to the ISOS_Metrics sheet.
+
+    Creates the sheet (with headers) if it does not exist yet. ``metrics`` is a
+    :class:`app.measurement.stability_metrics.StabilityMetrics` (read by
+    attribute, so any duck-typed object works).
+    """
+    wb = openpyxl.load_workbook(tracking_path)
+    ws = _ensure_metrics_sheet(wb)
+    _append_metrics_to_ws(ws, scan_n, elapsed_h, metrics)
+    wb.save(tracking_path)
+    wb.close()
+
+
+def read_isos_metrics(tracking_path: str) -> list:
+    """Read all rows from the ISOS_Metrics sheet. Returns list of dicts."""
+    try:
+        wb = openpyxl.load_workbook(tracking_path, data_only=True)
+        if _METRICS_SHEET not in wb.sheetnames:
+            wb.close()
+            return []
+        ws = wb[_METRICS_SHEET]
+        headers = _read_headers(ws)
+        rows = []
+        for r in range(2, ws.max_row + 1):
+            row = {headers[c - 1]: ws.cell(r, c).value
+                   for c in range(1, len(headers) + 1)}
+            if row.get("scan_#") is not None:
+                rows.append(row)
+        wb.close()
+        return rows
+    except Exception:
+        return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

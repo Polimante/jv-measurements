@@ -176,12 +176,19 @@ The available protocols live in a registry: `app/measurement/isos_protocols.py` 
 - `ISOS_Config` — experiment metadata (one header row + one data row); `protocol_id` is column 1 (legacy files used `ISOS_D1_Config`)
 - `ISOS_Log` — one row per measurement; columns defined in `_LOG_HEADERS` (legacy files used `ISOS_D1_Log`). Many trailing columns are nullable and reserved for sessions 4–6.
 - `JV_#NNN_tXXXXh` — one combined sheet per measurement (cols A–F = V/J/P fwd & rev), MeasurementData-compatible
+- `ISOS_Metrics` — one row per scan, the rolling-best stability metrics (T80, T95, T_S, PCE_S, Ts80, n_1000…) computed at that scan time. Written by `append_isos_measurement()` when the meas dict carries a `stability_metrics` object; `append_metrics_row()` / `read_isos_metrics()` are the standalone helpers.
 
 For long continuous stress runs, `isos_autosave.py` provides `CSVStream` (append-only, fsync'd per row) and `consolidate_csv_into_xlsx()`, which folds the CSV into the tracking workbook as a new sheet and renames the CSV to `.consumed`.
 
 `PCE_fwd_norm` and `PCE_rev_norm` are always relative to the **first** measurement (`t₀`) — stored as a **ratio** (1.0 = baseline, not percent; e.g. 0.80 means T80). `elapsed_h` is wall-clock time since `t0_timestamp` stored in the config sheet. Individual backup files are also saved via `save_data()` (standard illuminated J-V format).
 
 The GUI panel (Alt+F8) has three tabs: Experiment (sample name, folder, "New / Load"), Measurement Parameters (voltage range, illumination, scan settings), and Conditions (pre-bias, light soaking). The panel shows a live treeview of the log and two plots: PCE stability (normalized, top) and the latest J-V curves (bottom).
+
+### Stability metrics — `stability_metrics.py`
+
+`app/measurement/stability_metrics.py` is pure math: `compute_stability_metrics(times_h, pce_values, pce_0, …)` returns a `StabilityMetrics` dataclass with **T80/T95** (first time `PCE/PCE₀ ≤ 0.80 / 0.95`, sub-sample interpolated), **T_S** (burn-in end — most-positive 2nd derivative of Savitzky-Golay-smoothed normalized PCE, with auto/manual/fallback modes), **PCE_S** (mean PCE in a window around T_S), **Ts80** (time *from* T_S to `0.80·PCE_S`), and **n_1000** (`PCE(1000 h)/PCE(0)`, linearly extrapolated from the stable region with a confidence std-error when the run is < 1000 h). Unreached metrics are `None` with `*_reached=False`.
+
+The canonical PCE column is `PCE_SPO` (stabilized power output) when available, else `PCE_rev`. `ContinuousISOSRunner` accumulates the per-scan canonical PCE, recomputes after every scan (runner thread only — never the GUI thread), stuffs the result into the meas dict for the `ISOS_Metrics` sheet, and forwards it via the `on_metrics_updated(metrics)` callback. The GUI's Stability Metrics panel (live ✓/—/`> experiment` readout + Auto/Manual/Fallback burn-in radios) calls `runner.recompute_metrics()` on a burn-in-mode change for an instant recompute + redraw. `mpp_plot_factory.overlay_stability_metrics(ax_pce, metrics, total_h)` draws the threshold/marker lines on a normalized PCE axis.
 
 ### Measurement sequence (J-V mode)
 

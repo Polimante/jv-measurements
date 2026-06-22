@@ -38,13 +38,24 @@ class FakeKeithley:
     """
 
     def __init__(self, cell: DummyCell | None = None, area: float = 0.07,
-                 voc: float = 1.0):
+                 voc: float = 1.0, dark_factor: float = 1e-6):
         self.cell = cell if cell is not None else DummyCell(mode="ideal_stable")
         self.area = area
         self.voc  = voc
         self.v    = 0.0
         self.func = "VOLT"
         self.writes: list[str] = []
+        self._dark_factor = float(dark_factor)
+        self._illuminated = True
+
+    def set_light(self, on: bool) -> None:
+        """Toggle illumination (V-1 shutter). Off → near-zero photocurrent.
+
+        Wire this to the runner's ``on_shutter`` callback so dark scans/stress
+        read a pure-diode dark curve and illuminated scans read the lit curve.
+        """
+        self._illuminated = bool(on)
+        self.cell.set_illumination_factor(1.0 if on else self._dark_factor)
 
     def write(self, cmd: str) -> None:
         self.writes.append(cmd)
@@ -96,5 +107,35 @@ def make_runner_config(tmp_path, **overrides) -> dict:
         "stress_log_interval_s":  6.0,
         "clock":                  VirtualClock(),
     }
+    cfg.update(overrides)
+    return cfg
+
+
+def make_v1_runner_config(tmp_path, **overrides) -> dict:
+    """Base config for a fast, deterministic ISOS-V-1 (dark bias) run.
+
+    Dark stress with periodic dark + illuminated J-V. Baseline / equilibration
+    are off by default so the cell's light state is governed purely by the
+    shutter callbacks. A wider dark scan range and the standard 0.5–0.8 V fit
+    window let the dark ideality fit recover finite parameters.
+    """
+    cfg = make_runner_config(
+        tmp_path,
+        protocol_id="ISOS-V-1",
+        sample_name="V1Test",
+        stress_with_light=False,
+        requires_dark_jv=True,
+        load_mode="OC",
+        baseline_n_scans=0,
+        equilibration_duration_h=0.0,
+        spo_duration_s=0.0,
+        pre_scan_relaxation_s=0.0,
+        log_i_dark_during_stress=True,
+        dark_start_v=-0.2,
+        dark_end_v=1.10,
+        dark_step_v=0.025,
+        dark_fit_v_min=0.5,
+        dark_fit_v_max=0.8,
+    )
     cfg.update(overrides)
     return cfg

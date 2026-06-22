@@ -45,13 +45,16 @@ from app.measurement.analysis import (
     calculate_jv_parameters,
     calculate_resistances,
     calculate_hysteresis_index,
+    fit_dark_ideality,
 )
 from app.io.isos_tracking import (
     create_isos_tracking_file,
     append_isos_measurement,
     append_curve_sheet,
+    append_dark_jv_sheet,
     append_log_sheet_row,
 )
+from app.measurement.stability_metrics import compute_stability_metrics
 from app.io.isos_autosave import CSVStream, consolidate_csv_into_xlsx
 
 try:  # exporter is xlsxwriter-based and GUI-independent
@@ -105,6 +108,12 @@ class ContinuousISOSRunner:
         self.last_voc        = None
         self.scan_count      = 0
         self.i_dark_trace    = []      # [(elapsed_s, j)] for V-1 plotting
+        self._idark_mark     = 0       # index into i_dark_trace at last scan
+        # Cumulative canonical PCE(t) series for the stability metrics.
+        self._metric_times   = []      # elapsed_h per scan
+        self._metric_pce     = []      # canonical PCE per scan
+        self._metric_pce_col = "PCE_SPO"
+        self.last_metrics    = None    # latest StabilityMetrics
 
     # ── Callback / timing helpers ──────────────────────────────────────────
 
@@ -199,10 +208,16 @@ class ContinuousISOSRunner:
                 if not with_light:
                     self._prompt_close_shutter()
 
+                metrics = self._update_stability_metrics(meas, spo)
+                if metrics is not None:
+                    meas["stability_metrics"] = metrics
+
                 self._merge_dark(meas, meas_dark)
                 self._append_to_tracking_file(meas, meas_dark, spo)
                 self.scan_count += 1
                 self._emit("on_scan_done", meas)
+                if metrics is not None:
+                    self._emit("on_metrics_updated", metrics)
 
                 failed, reason = self._check_failure(meas)
                 if failed:
@@ -390,6 +405,67 @@ class ContinuousISOSRunner:
         meas["failure_reason"]   = reason
         return failed, reason
 
+    # ── Stability metrics ────────────────────────────────────────────────────
+
+    def _update_stability_metrics(self, meas, spo):
+        """Append this scan's canonical PCE and recompute stability metrics.
+
+        Canonical PCE prefers the stabilized power output (``PCE_SPO``) and falls
+        back to the reverse-scan ``PCE_rev`` when SPO is unavailable. Returns the
+        latest :class:`StabilityMetrics`, or ``None`` if no PCE is available.
+        Runs entirely in the runner thread — never the GUI thread.
+        """
+        spo_pce = spo.get("PCE_SPO") if spo else None
+        if spo_pce is not None:
+            pce_val, col = float(spo_pce), "PCE_SPO"
+        elif meas.get("PCE_rev") is not None:
+            pce_val, col = float(meas["PCE_rev"]), "PCE_rev"
+        else:
+            return None
+
+        self._metric_times.append(self._elapsed_h())
+        self._metric_pce.append(pce_val)
+        self._metric_pce_col = col
+        return self._compute_metrics()
+
+    def _compute_metrics(self):
+        """Recompute StabilityMetrics from the cumulative series (thread-safe).
+
+        Snapshots the parallel series to a common length so a concurrent append
+        from the runner thread cannot mismatch them mid-call.
+        """
+        n = min(len(self._metric_times), len(self._metric_pce))
+        if n == 0:
+            return None
+        times = list(self._metric_times[:n])
+        pce   = list(self._metric_pce[:n])
+        try:
+            metrics = compute_stability_metrics(
+                times, pce, self.pce_0,
+                burn_in_mode=self.cfg.get("burn_in_mode", "auto"),
+                manual_burn_in_h=self.cfg.get("manual_burn_in_h"),
+                extrapolate_n1000=bool(self.cfg.get("extrapolate_n1000", True)),
+                pce_column_used=self._metric_pce_col,
+            )
+        except Exception as exc:
+            self._emit("on_log", f"Stability metrics failed: {exc}")
+            return None
+        self.last_metrics = metrics
+        return metrics
+
+    def recompute_metrics(self, burn_in_mode=None, manual_burn_in_h=None):
+        """Recompute metrics after a live burn-in-mode change (GUI thread).
+
+        Updates the runner config so subsequent scans use the new settings, then
+        returns the freshly computed :class:`StabilityMetrics` (or ``None`` when
+        no scans have been recorded yet).
+        """
+        if burn_in_mode is not None:
+            self.cfg["burn_in_mode"] = burn_in_mode
+        if manual_burn_in_h is not None:
+            self.cfg["manual_burn_in_h"] = manual_burn_in_h
+        return self._compute_metrics()
+
     # ── Stress phase ─────────────────────────────────────────────────────────
 
     def _apply_stress_until(self, target_h):
@@ -542,6 +618,9 @@ class ContinuousISOSRunner:
         hi   = calculate_hysteresis_index(PCE_f, PCE_r)
         Vmpp = self._vmpp(v_r, j_r)
         self.last_vmpp = Vmpp
+        # Latest open-circuit voltage — the V-1 dark-hold setpoint when load=OC.
+        if np.isfinite(Voc_r):
+            self.last_voc = float(Voc_r)
         scan_rate = self._scan_rate()
 
         meas = {
@@ -583,17 +662,21 @@ class ContinuousISOSRunner:
     def _perform_dark_jv_scan(self):
         c = self.cfg
         area = float(c.get("cell_area", 0.07))
+        # Dark scans use their own (typically wider) voltage range so the
+        # exponential diode region is well sampled. Falls back to the
+        # illuminated range when the dark range is not configured.
+        start = float(c.get("dark_start_v", c["start_v"]))
+        end   = float(c.get("dark_end_v",   c["end_v"]))
+        step  = abs(float(c.get("dark_step_v", c["step_v"])))
         init_instrument(self.inst, float(c.get("nplc", 1.0)),
                         float(c.get("delay_ms", 20)) / 1000.0,
                         bool(c.get("four_wire", False)))
         self._status("Dark forward scan…")
-        v_f, j_f = measure_scan(self.inst, c["start_v"], c["end_v"], c["step_v"],
-                                area, self.stop_event)
+        v_f, j_f = measure_scan(self.inst, start, end, step, area, self.stop_event)
         if v_f is None or self.stop_event.is_set():
             return None
         self._status("Dark reverse scan…")
-        v_r, j_r = measure_scan(self.inst, c["end_v"], c["start_v"], -c["step_v"],
-                                area, self.stop_event)
+        v_r, j_r = measure_scan(self.inst, end, start, -step, area, self.stop_event)
         if v_r is None or self.stop_event.is_set():
             return None
         try:
@@ -602,11 +685,56 @@ class ContinuousISOSRunner:
         except Exception:
             pass
 
-        # Dark shunt resistance near 0 V; ideality reserved for later sessions.
-        _, Rsh_dark_f = calculate_resistances(v_f, j_f, 0.0)
-        _, Rsh_dark_r = calculate_resistances(v_r, j_r, 0.0)
-        # Dark current at the highest forward bias (proxy for leakage growth).
-        i_dark = float(j_r[np.argmax(v_r)]) if len(v_r) else None
+        # Dark Rsh near 0 V; Rs from the high-forward-bias slope (Voc=None).
+        Rs_dark_f, Rsh_dark_f = calculate_resistances(v_f, j_f, None)
+        Rs_dark_r, Rsh_dark_r = calculate_resistances(v_r, j_r, None)
+
+        # Dark ideality factor + saturation current from the reverse scan.
+        v_min = float(c.get("dark_fit_v_min", 0.5))
+        v_max = float(c.get("dark_fit_v_max", 0.8))
+        T_k   = float(c.get("temperature_k", 298.15))
+        n_dark = j_s_dark = n_dark_r2 = None
+        try:
+            fit = fit_dark_ideality(v_r, j_r, v_min, v_max, T=T_k)
+            n_dark, j_s_dark, n_dark_r2 = fit.n_idd, fit.J_s, fit.r_squared
+        except Exception as exc:
+            self._emit("on_log", f"Dark ideality fit failed: {exc}")
+
+        # Dark "hysteresis" — fwd vs rev current at the highest forward bias.
+        i_dark_f = float(j_f[int(np.argmax(v_f))]) if len(v_f) else None
+        i_dark_r = float(j_r[int(np.argmax(v_r))]) if len(v_r) else None
+        i_dark   = i_dark_r
+        hi_dark  = None
+        if i_dark_f is not None and i_dark_r:
+            hd = calculate_hysteresis_index(i_dark_f, i_dark_r)
+            hi_dark = float(hd) if np.isfinite(hd) else None
+
+        meas_dark = {
+            "v_fwd": v_f, "j_fwd": j_f, "v_rev": v_r, "j_rev": j_r,
+            "r_s_dark_fwd": Rs_dark_f, "r_sh_dark_fwd": Rsh_dark_f,
+            "r_s_dark_rev": Rs_dark_r, "r_sh_dark_rev": Rsh_dark_r,
+            "n_dark_rev": n_dark, "j_s_dark_rev": j_s_dark,
+            "n_dark_rev_r2": n_dark_r2,
+            "hi_dark": hi_dark, "i_dark": i_dark,
+        }
+
+        # Per-cycle dark JV sheet (JV_Dark_#NNN_tXXXXh), MeasurementData-compatible.
+        if self._tracking_path:
+            try:
+                elapsed_h = self._elapsed_h()
+                m = self.scan_count + 1
+                sheet = f"JV_Dark_#{m:03d}_t{int(elapsed_h):04d}h"
+                append_dark_jv_sheet(self._tracking_path, sheet, meas_dark, {
+                    "cell_area": area,
+                    "delay_ms":  c.get("delay_ms"),
+                    "nplc":      c.get("nplc"),
+                    "four_wire": c.get("four_wire"),
+                    "instrument_idn": c.get("instrument_idn", ""),
+                    "elapsed_h": elapsed_h,
+                    "measurement_n": m,
+                })
+            except Exception as exc:
+                self._emit("on_log", f"Dark JV sheet write failed: {exc}")
 
         if save_dark_jv_data is not None:
             try:
@@ -619,11 +747,7 @@ class ContinuousISOSRunner:
             except Exception as exc:
                 self._emit("on_log", f"Dark backup save failed: {exc}")
 
-        return {
-            "v_fwd": v_f, "j_fwd": j_f, "v_rev": v_r, "j_rev": j_r,
-            "r_sh_dark_fwd": Rsh_dark_f, "r_sh_dark_rev": Rsh_dark_r,
-            "i_dark": i_dark,
-        }
+        return meas_dark
 
     # ── Persistence helpers ──────────────────────────────────────────────────
 
@@ -662,6 +786,15 @@ class ContinuousISOSRunner:
             "baseline_n_scans":       c.get("baseline_n_scans"),
             "baseline_rest_s":        c.get("baseline_rest_s"),
             "tiered_schedule_json":   json.dumps(sched) if sched else "",
+            "stress_with_light":      bool(c.get("stress_with_light", True)),
+            "schedule_mode":          c.get("schedule_mode",
+                                            "tiered" if sched else "fixed"),
+            "log_i_dark_during_stress": c.get("log_i_dark_during_stress"),
+            "dark_start_voltage":     c.get("dark_start_v"),
+            "dark_end_voltage":       c.get("dark_end_v"),
+            "dark_step_voltage":      c.get("dark_step_v"),
+            "dark_fit_v_min":         c.get("dark_fit_v_min"),
+            "dark_fit_v_max":         c.get("dark_fit_v_max"),
         }
 
     def _open_csv(self):
@@ -697,11 +830,19 @@ class ContinuousISOSRunner:
         if spo:
             merged["pce_spo"]     = spo.get("PCE_SPO")
             merged["pce_spo_std"] = spo.get("PCE_SPO_std")
+        # Stress setpoints (dark hold target for V-1; informational for L-1).
+        merged["voc_setpoint"]  = self.last_voc
+        merged["vmpp_setpoint"] = self.last_vmpp
+        # Mean dark current sampled during the stress segment since the last scan.
+        idark_mean = self._mean_idark_since_last_scan()
+        if idark_mean is not None:
+            merged["i_dark_during_stress_mean"] = idark_mean
         if meas_dark:
-            merged["r_s_dark_fwd"]  = meas_dark.get("r_s_dark_fwd")
-            merged["r_sh_dark_fwd"] = meas_dark.get("r_sh_dark_fwd")
-            merged["r_s_dark_rev"]  = meas_dark.get("r_s_dark_rev")
-            merged["r_sh_dark_rev"] = meas_dark.get("r_sh_dark_rev")
+            for k in ("r_s_dark_fwd", "r_sh_dark_fwd",
+                      "r_s_dark_rev", "r_sh_dark_rev",
+                      "n_dark_rev", "j_s_dark_rev", "n_dark_rev_r2",
+                      "hi_dark"):
+                merged[k] = meas_dark.get(k)
         try:
             append_isos_measurement(self._tracking_path, merged)
         except Exception as exc:
@@ -732,9 +873,31 @@ class ContinuousISOSRunner:
 
     def _merge_dark(self, meas, meas_dark):
         if meas_dark:
-            for k in ("r_sh_dark_rev", "r_sh_dark_fwd", "i_dark"):
+            for k in ("r_s_dark_fwd", "r_sh_dark_fwd",
+                      "r_s_dark_rev", "r_sh_dark_rev",
+                      "n_dark_rev", "j_s_dark_rev", "n_dark_rev_r2",
+                      "hi_dark", "i_dark"):
                 if k in meas_dark:
                     meas[k] = meas_dark[k]
+            # Dark J-V arrays under suffixed keys so the V-1 panel can plot the
+            # latest dark curve (ignored by the illuminated JV-sheet writer).
+            for src, dst in (("v_fwd", "v_fwd_dark"), ("j_fwd", "j_fwd_dark"),
+                             ("v_rev", "v_rev_dark"), ("j_rev", "j_rev_dark")):
+                if src in meas_dark:
+                    meas[dst] = meas_dark[src]
+
+    def _mean_idark_since_last_scan(self):
+        """Mean |J| of dark-stress samples collected since the previous scan.
+
+        Returns None when no samples were logged (e.g. L-1, or I_dark logging
+        disabled). Advances the trace marker so each segment is counted once.
+        """
+        trace = self.i_dark_trace
+        seg = trace[self._idark_mark:]
+        self._idark_mark = len(trace)
+        if not seg:
+            return None
+        return float(np.mean([j for _, j in seg]))
 
     def _safe_read_voc(self):
         try:

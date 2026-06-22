@@ -33,7 +33,8 @@ class ProtocolSpec:
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
-# Only ISOS-D-1 is registered for now. L-1 and V-1 are added in later sessions.
+# ISOS-D-1 (shelf), ISOS-L-1 (light soak) and ISOS-V-1 (dark electrical bias)
+# are registered. Further protocols (LC-1, …) are added in later sessions.
 PROTOCOLS = [
     ProtocolSpec(
         id="ISOS-D-1",
@@ -65,6 +66,20 @@ PROTOCOLS = [
         default_total_duration_h=24.0,
         stress_with_light=True,
         notes="Light soaking at ambient T, OC or MPP load.",
+    ),
+    ProtocolSpec(
+        id="ISOS-V-1",
+        label="ISOS-V-1",
+        is_continuous=True,
+        supports_oc=True,
+        supports_mpp=True,
+        supports_bias_v1=False,
+        requires_dark_jv=True,
+        requires_illuminated_jv=True,
+        default_interval_min=60.0,
+        default_total_duration_h=24.0,
+        stress_with_light=False,
+        notes="Electrical bias stress in dark. Periodic dark + illum. J-V.",
     ),
 ]
 

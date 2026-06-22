@@ -63,13 +63,24 @@ def calculate_jv_parameters(voltages, currents, illumination):
     return Voc, abs(Jsc), FF, PCE
 
 
-def calculate_resistances(voltages, currents, Voc, n=5):
+def calculate_resistances(voltages, currents, Voc=None, n=5):
+    """Estimate series (Rs) and shunt (Rsh) resistance in Ω·cm².
+
+    Rsh comes from the inverse slope near V = 0; Rs from the inverse slope near
+    Voc. For dark J-V curves there is no Voc, so pass ``Voc=None`` — Rs is then
+    extracted from the high-forward-bias slope (the highest measured voltage).
+    """
     try:
+        voltages = np.asarray(voltages, dtype=float)
+        currents = np.asarray(currents, dtype=float)
         zi       = np.argmin(np.abs(voltages))
         s0, e0   = max(0, zi - n//2), min(len(voltages), zi - n//2 + n)
         m_rsh, _ = np.polyfit(voltages[s0:e0], currents[s0:e0], 1)
         Rsh      = abs(1000 / m_rsh) if m_rsh else float("inf")
-        vi       = np.argmin(np.abs(voltages - Voc))
+        if Voc is None:
+            vi = int(np.argmax(voltages))      # high forward bias (dark J-V)
+        else:
+            vi = int(np.argmin(np.abs(voltages - Voc)))
         s1, e1   = max(0, vi - n), min(len(voltages), vi + 1)
         m_rs, _  = np.polyfit(voltages[s1:e1], currents[s1:e1], 1)
         Rs       = (1 / abs(m_rs)) * 1000 if m_rs else float("inf")
