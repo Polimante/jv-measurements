@@ -3937,6 +3937,12 @@ class JVMeasurementApp:
         # ── Notebook tabs ─────────────────────────────────────────────────────
         nb = ttk.Notebook(self.isos_panel)
         nb.pack(fill=X, padx=6, pady=(6, 4))
+        self.isos_nb = nb
+        # Fit the notebook to the active tab's height so short tabs (Experiment)
+        # do not inherit the tall Conditioning tab's height (see _isos_fit_notebook).
+        # Deferred to after_idle so the newly-shown page is laid out before measuring.
+        nb.bind("<<NotebookTabChanged>>",
+                lambda _e: self.root.after_idle(self._isos_fit_notebook))
 
         # Tab 1: Experiment
         tab_exp = Frame(nb, padx=6, pady=4, bg="#ececec")
@@ -4159,9 +4165,10 @@ class JVMeasurementApp:
         # ── ISOS-V-1 dark-bias sub-frame (shown only for V-1) ───────────────────
         self._build_isos_v1_subframe(tab_cond)
 
-        # ── History Treeview ──────────────────────────────────────────────────
+        # ── History Treeview (shown only for ISOS-D-1) ────────────────────────
         hist_f = LabelFrame(self.isos_panel, text="Measurement History", padx=4, pady=4)
         hist_f.pack(fill=X, padx=6, pady=(0, 4))
+        self.isos_hist_frame = hist_f
 
         cols = ("#", "Date", "Elapsed_h", "PCE_rev", "PCE_norm")
         self.isos_tree = ttk.Treeview(hist_f, columns=cols, show="headings", height=5)
@@ -4618,7 +4625,44 @@ class JVMeasurementApp:
             self.isos_v1_subframe.pack_forget()
             self.isos_l1_subframe.pack(fill=X, pady=(6, 0))
             self._isos_l1_reveal_load_frame()
+        self._isos_toggle_history(protocol == "ISOS-D-1")
         self._isos_rebuild_plot_area()
+        self.root.after_idle(self._isos_fit_notebook)
+
+    def _isos_toggle_history(self, show: bool):
+        """Show the Measurement History panel only for ISOS-D-1.
+
+        The per-measurement history table is the primary readout for the sparse
+        dark-storage D-1 campaign. For the continuous L-1 / V-1 protocols the
+        live plots and the Stability Metrics panel carry the information, so the
+        table is hidden to declutter the panel.
+        """
+        hist = getattr(self, "isos_hist_frame", None)
+        if hist is None:
+            return
+        if show:
+            if not hist.winfo_manager():     # currently hidden → restore order
+                hist.pack(before=self.isos_metrics_frame, fill=X,
+                          padx=6, pady=(0, 4))
+        else:
+            hist.pack_forget()
+
+    def _isos_fit_notebook(self, *_):
+        """Resize the ISOS notebook to the active tab's natural height.
+
+        ``ttk.Notebook`` otherwise reserves the height of its tallest tab (the
+        Conditioning tab with the L-1/V-1 sub-frames), leaving a large empty gap
+        below shorter tabs such as Experiment. Fitting per tab removes that gap.
+        """
+        nb = getattr(self, "isos_nb", None)
+        if nb is None:
+            return
+        try:
+            nb.update_idletasks()
+            page = nb.nametowidget(nb.select())
+            nb.configure(height=max(page.winfo_reqheight(), 1))
+        except Exception:
+            pass
 
     def _isos_on_load_change(self, *_):
         """React to an OC ↔ MPP change while a continuous protocol is active."""
@@ -5115,6 +5159,7 @@ class JVMeasurementApp:
         """Live T80/T95/Ts80/T_S/PCE_S/n_1000 readout + burn-in controls."""
         mf = LabelFrame(parent, text="Stability Metrics", padx=6, pady=4)
         mf.pack(fill=X, padx=6, pady=(0, 4))
+        self.isos_metrics_frame = mf
         self.isos_metric_lbls = {}
 
         def _row(r, c, key, caption, tip):
