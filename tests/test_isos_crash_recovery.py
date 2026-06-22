@@ -15,6 +15,7 @@ import threading
 from unittest.mock import patch
 
 import openpyxl
+import pytest
 
 from app.io import isos_recovery
 from app.io.isos_recovery import (
@@ -168,7 +169,10 @@ def test_crashed_runner_leaves_recoverable_csv(tmp_path):
     assert os.path.exists(csv_path + ".consumed")
 
 
+@pytest.mark.windows_only
 def test_gui_exposes_recovery_dialog_method():
+    # Importing main_window pulls in winsound, which is Windows-only; this check
+    # therefore runs on the Windows CI job and is skipped on Linux/macOS.
     from app.gui.main_window import JVMeasurementApp
     # The startup scanner and the recovery-dialog method are offered by the GUI.
     assert callable(getattr(JVMeasurementApp, "_scan_for_inprogress_isos", None))
