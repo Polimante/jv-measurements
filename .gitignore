@@ -32,3 +32,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# ISOS-D-1 demo simulation (local-only — not committed)
+simulate_isos_d1.py
+isos_d1_simulation/
