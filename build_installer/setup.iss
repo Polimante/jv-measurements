@@ -40,6 +40,7 @@ Source: "..\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\launcher.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\install.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Samples\*"; DestDir: "{app}\Samples"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{group}\JV Measurements"; Filename: "{app}\launcher.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\icon.ico"

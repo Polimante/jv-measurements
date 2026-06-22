@@ -582,6 +582,8 @@ class JVMeasurementApp:
 
         help_menu = Menu(menubar, tearoff=0)
         help_menu.add_command(label="Documentation", command=self._show_help)
+        help_menu.add_command(label="Open Samples Folder",
+                              command=self._open_samples_folder)
         help_menu.add_separator()
         help_menu.add_command(
             label="Check for Updates",
@@ -772,6 +774,25 @@ class JVMeasurementApp:
         )
         abs_path = os.path.abspath(help_path).replace("\\", "/")
         webbrowser.open(f"file:///{abs_path}")
+
+    def _open_samples_folder(self):
+        """Open the bundled Samples/ folder of example measurement files."""
+        import os
+        samples_path = os.path.abspath(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "Samples"
+        ))
+        if not os.path.isdir(samples_path):
+            messagebox.showinfo(
+                "Samples",
+                "The Samples folder was not found next to the application.\n\n"
+                f"Expected at:\n{samples_path}")
+            return
+        try:
+            os.startfile(samples_path)            # Windows file explorer
+        except Exception:
+            import webbrowser
+            webbrowser.open(f"file:///{samples_path.replace(os.sep, '/')}")
 
     def _show_about(self):
         version = get_local_version()
@@ -971,7 +992,7 @@ class JVMeasurementApp:
         self.ax.clear()
         self.ax2.clear()
         self.ax2.yaxis.set_label_position("right")
-        self.ax.set_xlim(0, 1.1)
+        self.ax.set_xlim(0, 1.2)
         self.ax.set_ylim(0, 30)
         self.ax2.set_ylim(0, 30)
         self.ax.set_xlabel("Voltage (V)", fontsize=12, labelpad=10)
@@ -1331,7 +1352,7 @@ class JVMeasurementApp:
             self.ax.set_ylim(0, 30)
             self.ax2.set_ylim(0, 30)
 
-        self.ax.set_xlim(left=0)   # X axis always starts at 0 V
+        self.ax.set_xlim(0, 1.2)   # 0–1.2 V — wide enough not to clip Voc
 
         all_lines   = []   # every line object (for mplcursors + legend map)
         jv_lines    = []   # J-V lines only (hover attached here)
