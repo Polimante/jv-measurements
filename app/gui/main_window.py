@@ -11,10 +11,10 @@ from tkinter import (
     ttk, Menu, filedialog, Label, Entry, Button,
     StringVar, DoubleVar, IntVar, Text, messagebox,
     Frame, LabelFrame, Checkbutton, BooleanVar, Radiobutton,
-    Listbox, Scrollbar,
+    Listbox, Scrollbar, Toplevel,
     LEFT, RIGHT, BOTH, X, Y, W, E, END, DISABLED, NORMAL, BOTTOM,
 )
-from datetime import datetime
+from datetime import datetime, timedelta
 import pyvisa
 
 PLOT_COLORS = [
@@ -63,6 +63,10 @@ from app.io.isos_tracking import (
     append_metrics_row,
 )
 from app.measurement.isos_protocols import list_protocol_labels, get_protocol
+from app.io.isos_recovery import (
+    add_recent_folder, load_recent_folders, find_orphan_stress_csvs,
+    consolidate_orphan, discard_orphan,
+)
 from app.gui.data_viewer import DataViewerWindow
 from app.measurement.light_intensity_jv import LightIntensityJVMeasurement
 from app.instrument.keithley_smu import Keithley2400SourceMeter
@@ -4227,6 +4231,12 @@ class JVMeasurementApp:
         isos_sb = Frame(self.isos_panel, bg="#37474F", height=24)
         isos_sb.pack(fill=X, side="bottom")
         isos_sb.pack_propagate(False)
+        # Autosave health dot (gray idle / green flushing / red on error).
+        self.isos_autosave_dot = Label(isos_sb, text="●", bg="#37474F",
+                                       fg="#607D8B", font=("Arial", 11))
+        self.isos_autosave_dot.pack(side=RIGHT, padx=(0, 10))
+        self._isos_autosave_tip = ToolTip(self.isos_autosave_dot, "Autosave idle")
+        self._isos_autosave_reset_id = None
         self.isos_status_var = StringVar(value="Ready")
         Label(isos_sb, textvariable=self.isos_status_var,
               bg="#37474F", fg="#CFD8DC",
@@ -4279,25 +4289,151 @@ class JVMeasurementApp:
     # ── ISOS helper methods ───────────────────────────────────────────────────
 
     def _scan_for_inprogress_isos(self):
-        """Look for interrupted ISOS stress runs and note them in the status bar.
+        """Offer to recover interrupted ISOS stress runs at startup.
 
         Continuous runs (L-1 / V-1) stream to ``*_stress_inprogress_*.csv`` files
         that are renamed to ``.consumed`` once consolidated. A leftover file means
-        a run was interrupted. The recovery dialog is a later session — here we
-        only count and report so the data is not silently forgotten.
+        a run was interrupted. We scan every recent ISOS folder (plus the current
+        export folder), pair each orphan with its tracking workbook, and offer a
+        recovery dialog. Detection lives in ``app.io.isos_recovery`` so it is
+        unit-testable without Tk; this method is just the GUI wrapper.
         """
-        import glob
-        folder = self.isos_export_folder_var.get().strip()
-        if not folder or not os.path.isdir(folder):
-            return
+        folders = list(load_recent_folders())
         try:
-            stale = glob.glob(os.path.join(folder, "*_stress_inprogress_*.csv"))
+            cur = self.isos_export_folder_var.get().strip()
         except Exception:
-            return
-        if stale:
-            self.status_var.set(
-                f"{len(stale)} interrupted ISOS stress run(s) found in "
-                f"{os.path.basename(folder)} — recovery available in a future update.")
+            cur = ""
+        if cur and cur not in folders:
+            folders.append(cur)
+        try:
+            orphans = find_orphan_stress_csvs(folders)
+        except Exception:
+            orphans = []
+        if orphans:
+            self._show_recovery_dialog(orphans)
+
+    def _show_recovery_dialog(self, orphans):
+        """Modal recovery dialog for a list of ``(csv_path, xlsx_path)`` orphans."""
+        # Group orphans by their tracking workbook for the summary list.
+        by_xlsx = {}
+        for csv_path, xlsx_path in orphans:
+            by_xlsx.setdefault(xlsx_path, []).append(csv_path)
+
+        win = Toplevel(self.root)
+        win.title("Recover Unsaved Stress Logs")
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        Label(win, text=f"Found {len(orphans)} unsaved stress log(s) from a "
+              "previous run:", font=("Arial", 10, "bold"),
+              anchor=W, justify=LEFT).pack(fill=X, padx=14, pady=(14, 6))
+
+        listbox = Frame(win)
+        listbox.pack(fill=X, padx=20, pady=(0, 8))
+        for xlsx_path, csvs in by_xlsx.items():
+            name = os.path.basename(xlsx_path) if xlsx_path else "(no tracking file)"
+            Label(listbox, text=f"• {name}  →  {len(csvs)} orphan CSV(s)",
+                  anchor=W, justify=LEFT, font=("Consolas", 9)).pack(fill=X)
+
+        Label(win, text="Consolidate them into the tracking files now?",
+              anchor=W, justify=LEFT).pack(fill=X, padx=14, pady=(4, 10))
+
+        btns = Frame(win)
+        btns.pack(fill=X, padx=14, pady=(0, 14))
+
+        def _finish(consolidated, discarded, errors):
+            win.grab_release()
+            win.destroy()
+            parts = []
+            if consolidated:
+                parts.append(f"{consolidated} consolidated")
+            if discarded:
+                parts.append(f"{discarded} discarded")
+            if errors:
+                parts.append(f"{errors} failed")
+            self.status_var.set("ISOS recovery: " + (", ".join(parts)
+                                if parts else "nothing to do") + ".")
+
+        def _consolidate_all():
+            done = err = 0
+            for csv_path, xlsx_path in orphans:
+                if not xlsx_path:
+                    continue
+                try:
+                    consolidate_orphan(csv_path, xlsx_path)
+                    done += 1
+                except Exception:
+                    err += 1
+            _finish(done, 0, err)
+
+        def _discard_all():
+            done = err = 0
+            for csv_path, _ in orphans:
+                try:
+                    discard_orphan(csv_path)
+                    done += 1
+                except Exception:
+                    err += 1
+            _finish(0, done, err)
+
+        def _decide_individually():
+            win.grab_release()
+            win.destroy()
+            self._show_recovery_individual_dialog(orphans, _finish)
+
+        Button(btns, text="Consolidate all", command=_consolidate_all,
+               width=16).pack(side=LEFT, padx=4)
+        Button(btns, text="Discard all", command=_discard_all,
+               width=14).pack(side=LEFT, padx=4)
+        Button(btns, text="Decide individually…",
+               command=_decide_individually, width=18).pack(side=LEFT, padx=4)
+
+    def _show_recovery_individual_dialog(self, orphans, finish_cb):
+        """Per-file checkbox dialog: checked = consolidate, unchecked = discard."""
+        win = Toplevel(self.root)
+        win.title("Recover Stress Logs — Choose")
+        win.transient(self.root)
+        win.grab_set()
+
+        Label(win, text="Check the logs to consolidate; unchecked logs are "
+              "discarded (preserved as .discarded).", anchor=W, justify=LEFT
+              ).pack(fill=X, padx=14, pady=(12, 8))
+
+        rows = []
+        body = Frame(win)
+        body.pack(fill=BOTH, expand=True, padx=18, pady=(0, 8))
+        for csv_path, xlsx_path in orphans:
+            var = BooleanVar(value=bool(xlsx_path))   # only check if pairable
+            label = os.path.basename(csv_path)
+            if xlsx_path:
+                label += f"  →  {os.path.basename(xlsx_path)}"
+            else:
+                label += "  (no tracking file — can only discard)"
+            cb = Checkbutton(body, text=label, variable=var, anchor=W,
+                             font=("Consolas", 9))
+            cb.pack(fill=X)
+            if not xlsx_path:
+                cb.config(state=DISABLED)
+            rows.append((csv_path, xlsx_path, var))
+
+        def _apply():
+            done = disc = err = 0
+            for csv_path, xlsx_path, var in rows:
+                try:
+                    if var.get() and xlsx_path:
+                        consolidate_orphan(csv_path, xlsx_path)
+                        done += 1
+                    else:
+                        discard_orphan(csv_path)
+                        disc += 1
+                except Exception:
+                    err += 1
+            win.grab_release()
+            win.destroy()
+            finish_cb(done, disc, err)
+
+        Button(win, text="Apply", command=_apply, width=12).pack(pady=(0, 14))
 
     def _build_isos_l1_subframe(self, parent):
         """Build the ISOS-L-1 continuous-stress controls (hidden until L-1)."""
@@ -4902,6 +5038,7 @@ class JVMeasurementApp:
             messagebox.showerror("Error", f"Could not create tracking file:\n{exc}")
             return
         self.isos_tracking_file = path
+        add_recent_folder(folder)
         self.isos_t0_var.set(
             f"Tracking file: {os.path.basename(path)}\nt₀: {config.get('t0_timestamp', '')}")
         self.isos_status_var.set(f"New experiment: {os.path.basename(path)}")
@@ -4927,6 +5064,7 @@ class JVMeasurementApp:
         self._isos_on_protocol_change()
         self.isos_tracking_file = path
         self.isos_export_folder_var.set(os.path.dirname(path))
+        add_recent_folder(os.path.dirname(path))
         self._isos_populate_from_config(cfg)
         self.root.update_idletasks()
         rows = read_isos_log(path)
@@ -5198,6 +5336,74 @@ class JVMeasurementApp:
         Button(ctrl, text="Override…", command=self._isos_burnin_override
                ).pack(side=LEFT, padx=(6, 0))
 
+        ctrl2 = Frame(mf)
+        ctrl2.grid(row=4, column=0, columnspan=4, sticky=W, pady=(4, 0))
+        self.isos_overlay_var = BooleanVar(value=True)
+        Checkbutton(ctrl2, text="Show overlay on plot",
+                    variable=self.isos_overlay_var,
+                    command=self._isos_on_overlay_toggle).pack(side=LEFT, padx=(4, 8))
+        Button(ctrl2, text="Copy metrics to clipboard",
+               command=self._isos_copy_metrics).pack(side=LEFT)
+
+    def _isos_on_overlay_toggle(self):
+        """Redraw the active panel so the overlay appears/disappears at once."""
+        self._isos_redraw_active_overlay()
+
+    def _isos_copy_metrics(self):
+        """Copy a formatted stability-metrics text block to the clipboard."""
+        m = getattr(self, "_isos_last_metrics", None)
+        if m is None:
+            self.isos_status_var.set("No stability metrics to copy yet.")
+            return
+        proto  = self.isos_protocol_var.get()
+        sample = self.isos_sample_name_var.get().strip() or "(unnamed)"
+
+        def _h(value, reached):
+            if value is None:
+                return "not reached" if reached is False else "—"
+            return f"{value:.1f} h"
+
+        lines = [f"{proto} Stability Metrics", f"Sample: {sample}"]
+        # PCE_0 ± std — std comes from the active runner's baseline when available.
+        pce_0 = getattr(m, "pce_0", None)
+        std = None
+        runner = getattr(self, "_isos_active_runner", None)
+        if runner is not None and getattr(runner, "baseline", None):
+            std = runner.baseline.get("PCE_0_std")
+        if pce_0 is not None:
+            if std is not None:
+                lines.append(f"PCE_0 = {pce_0:.2f} ± {std:.2f} %")
+            else:
+                lines.append(f"PCE_0 = {pce_0:.2f} %")
+        lines.append(f"T80   = {_h(m.t80_h, m.t80_reached)}")
+        lines.append(f"T95   = {_h(m.t95_h, m.t95_reached)}")
+        if getattr(m, "burn_in_method", "") == "none":
+            lines.append("T_S   = n/a (dark)")
+            lines.append("PCE_S = n/a (dark)")
+            lines.append("Ts80  = n/a (dark)")
+        else:
+            lines.append(f"T_S   = {_h(m.t_s_h, None)}")
+            lines.append(f"PCE_S = {m.pce_s:.2f} %" if m.pce_s is not None
+                         else "PCE_S = —")
+            lines.append(f"Ts80  = {_h(m.ts80_h, m.ts80_reached)}")
+        if m.n_1000 is not None:
+            tag = ""
+            if m.n_1000_extrapolated:
+                conf = m.n_1000_confidence
+                tag = (f" (extrapolated, ±{conf:.2f})" if conf is not None
+                       else " (extrapolated)")
+            lines.append(f"n_1000 = {m.n_1000:.2f}{tag}")
+        else:
+            lines.append("n_1000 = —")
+
+        text = "\n".join(lines)
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.isos_status_var.set("Stability metrics copied to clipboard.")
+        except Exception:
+            self.isos_status_var.set("Could not access clipboard.")
+
     def _isos_reset_metrics_panel(self):
         for lbl in getattr(self, "isos_metric_lbls", {}).values():
             lbl.config(text="—", fg="#999999")
@@ -5341,6 +5547,9 @@ class JVMeasurementApp:
 
     def _isos_overlay_metrics(self, axes):
         """Overlay the latest stability metrics on a panel's PCE axis, if any."""
+        overlay_var = getattr(self, "isos_overlay_var", None)
+        if overlay_var is not None and not overlay_var.get():
+            return
         m = getattr(self, "_isos_last_metrics", None)
         if m is None or not axes or "ax_pce" not in axes:
             return
@@ -5764,6 +5973,90 @@ class JVMeasurementApp:
         except Exception:
             return None
 
+    # ── Status-bar ETA + autosave indicator ────────────────────────────────────
+
+    @staticmethod
+    def _fmt_duration_h(hours):
+        """Format a duration in hours as ``Xh Ym`` / ``Xh`` / ``Ym``."""
+        total_min = int(round(max(0.0, float(hours)) * 60))
+        h, m = divmod(total_min, 60)
+        if h and m:
+            return f"{h}h {m}m"
+        if h:
+            return f"{h}h"
+        return f"{m}m"
+
+    def _isos_format_eta(self, elapsed_h):
+        """Build the continuous-experiment ETA status string, or ``None``.
+
+        Example: ``"L-1 running — 3h 24m of 24h — next scan in 12m —
+        ETA 2026-05-16 14:30"``.
+        """
+        total_h = float(getattr(self, "_isos_total_h", 0) or 0)
+        if total_h <= 0:
+            return None
+        proto = self.isos_protocol_var.get().replace("ISOS-", "")
+        next_txt = ""
+        runner = getattr(self, "_isos_active_runner", None)
+        if runner is not None:
+            try:
+                next_h = runner.next_scan_time(elapsed_h)
+                next_txt = (" — next scan in "
+                            f"{self._fmt_duration_h(max(0.0, next_h - elapsed_h))}")
+            except Exception:
+                next_txt = ""
+        eta = datetime.now() + timedelta(hours=max(0.0, total_h - elapsed_h))
+        return (f"{proto} running — {self._fmt_duration_h(elapsed_h)} of "
+                f"{self._fmt_duration_h(total_h)}{next_txt} — "
+                f"ETA {eta.strftime('%Y-%m-%d %H:%M')}")
+
+    def _isos_update_eta(self, t_s, force=False):
+        """Refresh the ETA status (at most once / 10 s unless ``force``)."""
+        self._isos_last_stress_t_s = t_s
+        now = time.time()
+        if not force and (now - getattr(self, "_isos_eta_last", 0.0)) < 10.0:
+            return
+        self._isos_eta_last = now
+        txt = self._isos_format_eta(t_s / 3600.0)
+        if txt:
+            self.isos_status_var.set(txt)
+
+    def _isos_refresh_eta(self):
+        """Force an ETA refresh (e.g. right after a scan completes)."""
+        t_s = getattr(self, "_isos_last_stress_t_s", None)
+        if t_s is not None:
+            self._isos_update_eta(t_s, force=True)
+
+    def _isos_on_autosave(self, ok, error):
+        """Runner-thread autosave callback → flash the status-bar dot."""
+        self.root.after(0, lambda: self._isos_set_autosave_dot(ok, error))
+
+    def _isos_set_autosave_dot(self, ok, error):
+        dot = getattr(self, "isos_autosave_dot", None)
+        if dot is None:
+            return
+        if self._isos_autosave_reset_id is not None:
+            try:
+                self.root.after_cancel(self._isos_autosave_reset_id)
+            except Exception:
+                pass
+            self._isos_autosave_reset_id = None
+        if ok:
+            dot.config(fg="#43A047")                 # green — flushing
+            self._isos_autosave_tip.text = "Autosaving…"
+            self._isos_autosave_reset_id = self.root.after(
+                1200, self._isos_reset_autosave_dot)
+        else:
+            dot.config(fg="#E53935")                 # red — last flush failed
+            self._isos_autosave_tip.text = f"Autosave error: {error}"
+
+    def _isos_reset_autosave_dot(self):
+        self._isos_autosave_reset_id = None
+        dot = getattr(self, "isos_autosave_dot", None)
+        if dot is not None:
+            dot.config(fg="#607D8B")                 # gray — idle
+            self._isos_autosave_tip.text = "Autosave idle"
+
     def run_isos_l1_measurement(self):
         from app.measurement.isos_continuous_runner import ContinuousISOSRunner
 
@@ -5785,6 +6078,7 @@ class JVMeasurementApp:
                 "on_status":           lambda m: _after(self.isos_status_var.set, m),
                 "on_log":              lambda m: _after(self._isos_add_to_log, m),
                 "on_stress_update":    self._isos_l1_stress_update,
+                "on_autosave":         self._isos_on_autosave,
                 "on_scan_done":        lambda meas: _after(self._isos_l1_on_scan_done, meas),
                 "on_metrics_updated":  lambda mtr: _after(self._isos_on_metrics_updated, mtr),
                 "on_baseline_done":    lambda b: _after(self._isos_l1_on_baseline_done, b),
@@ -5821,6 +6115,8 @@ class JVMeasurementApp:
         else:
             self._isos_l1_t.append(t_s / 3600.0)
             self._isos_l1_voc.append(v)
+        # ETA refresh (self-throttled to 10 s on the GUI thread).
+        self.root.after(0, lambda ts=t_s: self._isos_update_eta(ts))
         now = time.time()
         if now - self._isos_l1_last_draw < 0.2:
             return
@@ -5856,6 +6152,7 @@ class JVMeasurementApp:
         except Exception:
             pass
         self._isos_l1_redraw_stress()
+        self._isos_refresh_eta()
         play_completion_sound()
 
     def _isos_l1_on_baseline_done(self, baseline):
@@ -5966,6 +6263,7 @@ class JVMeasurementApp:
                 "on_scan_done":        lambda meas: _after(self._isos_v1_on_scan_done, meas),
                 "on_metrics_updated":  lambda mtr: _after(self._isos_on_metrics_updated, mtr),
                 "on_stress_update":    self._isos_v1_stress_update,
+                "on_autosave":         self._isos_on_autosave,
                 "on_baseline_done":    lambda b: _after(self._isos_l1_on_baseline_done, b),
                 "on_failure_detected": lambda r: _after(self._isos_l1_on_failure, r),
                 "on_complete":         lambda: _after(self.isos_status_var.set,
@@ -5999,9 +6297,12 @@ class JVMeasurementApp:
         ev.wait()
 
     def _isos_v1_stress_update(self, t_s, v, j, pce):
-        """Show the latest dark-stress current in the status bar (live)."""
-        self.root.after(0, lambda: self.isos_status_var.set(
-            f"Dark stress — t = {t_s / 3600.0:.2f} h, I_dark = {j:.3e} mA/cm²"))
+        """Refresh the live ETA during dark stress (throttled to ≤ 5 Hz)."""
+        now = time.time()
+        if now - getattr(self, "_isos_v1_last_update", 0.0) < 0.2:
+            return
+        self._isos_v1_last_update = now
+        self.root.after(0, lambda ts=t_s: self._isos_update_eta(ts))
 
     def _isos_v1_on_scan_done(self, meas):
         v_r, j_r = meas.get("v_rev"), meas.get("j_rev")
@@ -6017,6 +6318,7 @@ class JVMeasurementApp:
         except Exception:
             pass
         self._isos_v1_redraw()
+        self._isos_refresh_eta()
         play_completion_sound()
 
     def _isos_v1_redraw(self):

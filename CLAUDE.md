@@ -150,7 +150,7 @@ When adding new code that uses J0 or n, update both the local-derivative methods
 | Stabilized Current | Alt+F6 | inline in `main_window.py` |
 | Pure MPP Tracking (P&O) | Alt+F7 | `PureMPPTracker` in `pure_mpp_tracker.py` |
 | Data Curation | Alt+F8 | `switch_mode("curation")` in `main_window.py` |
-| ISOS Protocols (D-1) | Alt+F9 | `run_isos_d1_measurement()` in `main_window.py` |
+| ISOS Protocols (D-1 / L-1 / V-1) | Alt+F9 | `run_isos_d1_measurement()` (D-1) / `ContinuousISOSRunner` (L-1, V-1) in `main_window.py` |
 
 Mode panels are shown/hidden by `switch_mode()` using `pack()`/`pack_forget()`. The active panel name is stored in `self._current_mode` (`"jv"`, `"mpp"`, `"stab"`, `"pure_mpp"`).
 
@@ -164,31 +164,47 @@ SPO plot uses **accumulated SPO-only time** on the X-axis (J-V scan time is excl
 
 Runs one initial reverse J-V scan (using `scan_start_v`, `scan_end_v`, `scan_step_v`) to find the real Vmpp, then enters a continuous P&O loop. `t_start` is set after the initial scan so t=0 on the plot corresponds to the start of P&O. Direction reverses whenever power drops. The inter-step sleep is broken into 50 ms chunks so `stop_event` is checked frequently. Callbacks: `on_status`, `on_update(t, v, j, pce)`, `on_jv_done(v_arr, j_arr, vmpp)`, `on_complete`.
 
-### ISOS Protocols — `isos_tracking.py` + `isos_protocols.py` + `main_window.py`
+### ISOS Protocols — Architecture
 
-ISOS-D-1 is a light-stability protocol: the cell is measured periodically under illumination while kept at open-circuit between measurements. Each run performs the same sequence as J-V mode (optional dark J-V → shutter prompt → light soaking → fwd scan → pre-bias → rev scan) and then appends one row to a cumulative tracking workbook.
+The ISOS Protocols mode (Alt+F9) supports 3 variants registered in `app/measurement/isos_protocols.py` (a frozen `ProtocolSpec` dataclass + `PROTOCOLS` list + `get_protocol(id)` / `list_protocol_ids()` / `list_protocol_labels()`; the GUI dropdown is populated from `list_protocol_labels()`):
+- **ISOS-D-1** — manual-trigger dark storage. Cell kept at open-circuit in the dark between periodic illuminated J-V characterisations. Runs via `run_isos_d1_measurement()` in `main_window.py` (same sequence as J-V mode), appending one row per trigger to the tracking workbook.
+- **ISOS-L-1** — continuous light soaking at ambient T, OC or MPP load.
+- **ISOS-V-1** — dark electrical-bias stress, with periodic dark + illuminated J-V.
 
-The available protocols live in a registry: `app/measurement/isos_protocols.py` exposes a frozen `ProtocolSpec` dataclass, the `PROTOCOLS` list, and `get_protocol(id)` / `list_protocol_ids()` / `list_protocol_labels()`. Only **ISOS-D-1** is registered today (L-1 and V-1 are added in later sessions); the GUI dropdown is populated from `list_protocol_labels()`.
+Continuous protocols (L-1 / V-1) run via `ContinuousISOSRunner` (`isos_continuous_runner.py`), which drives the raw-SCPI interface like the other trackers and orchestrates: optional dark equilibration → baseline conditioning (N scans, first discarded, median PCE₀) → main loop of [stress → pre-scan relaxation → (optional dark J-V) → illuminated J-V → SPO → append → failure check]. Time is read through an injectable clock so tests run instantly. L-1 stresses with light (OC `read_voc` or MPP perturb-and-observe); V-1 stresses in the dark (hold setpoint) and fires shutter prompts around each illuminated scan.
 
-`isos_tracking.py` holds the generic tracking-file API — `create_isos_tracking_file`, `append_isos_measurement`, `read_isos_config`, `read_isos_log`, `read_isos_jv_curves` — plus thin `*_isos_d1_*` compatibility shims that forward with `protocol_id="ISOS-D-1"`. The config sheet carries `protocol_id` in column 1; the readers fall back to the legacy `ISOS_D1_*` sheet names so old D-1 files still open.
+### Tracking File Format
 
-**Tracking file layout** (openpyxl):
-- `ISOS_Config` — experiment metadata (one header row + one data row); `protocol_id` is column 1 (legacy files used `ISOS_D1_Config`)
-- `ISOS_Log` — one row per measurement; columns defined in `_LOG_HEADERS` (legacy files used `ISOS_D1_Log`). Many trailing columns are nullable and reserved for sessions 4–6.
-- `JV_#NNN_tXXXXh` — one combined sheet per measurement (cols A–F = V/J/P fwd & rev), MeasurementData-compatible
-- `ISOS_Metrics` — one row per scan, the rolling-best stability metrics (T80, T95, T_S, PCE_S, Ts80, n_1000…) computed at that scan time. Written by `append_isos_measurement()` when the meas dict carries a `stability_metrics` object; `append_metrics_row()` / `read_isos_metrics()` are the standalone helpers.
+`isos_tracking.py` holds the generic, protocol-agnostic API — `create_isos_tracking_file`, `append_isos_measurement`, `append_curve_sheet`, `append_dark_jv_sheet`, `append_log_sheet_row`, `append_metrics_row`, and the `read_isos_*` readers — plus thin `*_isos_d1_*` shims that forward with `protocol_id="ISOS-D-1"`. The config sheet carries `protocol_id` in column 1; readers fall back to the legacy `ISOS_D1_*` sheet names so old D-1 files still open. Sheets (openpyxl):
+- `ISOS_Config` — experiment metadata (header row + one data row). `_CFG_KEYS` order is fixed; trailing columns are nullable.
+- `ISOS_Log` — one row per illuminated scan; columns in `_LOG_HEADERS` (`_LOG_HEADERS_CORE` positions 1-22 are fixed, `_LOG_EXTRA` appends the continuous-protocol columns).
+- `JV_#NNN_tXXXXh` — illuminated per-scan sheet (cols A–F = V/J/P fwd & rev + scalars + embedded chart), MeasurementData-compatible.
+- `JV_Dark_#NNN_tXXXXh` — dark per-scan sheet (V-1) with dark diagnostics (`n_dark_rev`, `J_s_dark_rev`, `R_s/R_sh_dark`, `HI_dark`, `I_dark`).
+- `SPO_#NNN_tXXXXh` — stabilized-power-output trace (Time, PCE) after each scan.
+- `Baseline_#NN` — each baseline-conditioning scan.
+- `Equilibration_log` — one row per dark-equilibration phase.
+- `Stress_<HHMMSS>` — the consolidated stress autosave (see below).
+- `ISOS_Metrics` — one row per scan, the rolling-best stability metrics (T80, T95, T_S, PCE_S, Ts80, n_1000…). Written by `append_isos_measurement()` when the meas dict carries a `stability_metrics` object; `append_metrics_row()` / `read_isos_metrics()` are standalone helpers.
 
-For long continuous stress runs, `isos_autosave.py` provides `CSVStream` (append-only, fsync'd per row) and `consolidate_csv_into_xlsx()`, which folds the CSV into the tracking workbook as a new sheet and renames the CSV to `.consumed`.
+`PCE_fwd_norm` / `PCE_rev_norm` are ratios relative to the **first** measurement (1.0 = baseline; 0.80 means T80). `elapsed_h` is wall-clock since `t0_timestamp`. Individual backup files are also saved via `save_data()` / `save_dark_jv_data()`.
 
-`PCE_fwd_norm` and `PCE_rev_norm` are always relative to the **first** measurement (`t₀`) — stored as a **ratio** (1.0 = baseline, not percent; e.g. 0.80 means T80). `elapsed_h` is wall-clock time since `t0_timestamp` stored in the config sheet. Individual backup files are also saved via `save_data()` (standard illuminated J-V format).
+The GUI panel has Experiment / Measurement-Parameters / Conditions tabs plus protocol sub-frames (L-1, V-1). It shows a live treeview of the log, a Stability Metrics panel (live readout + Auto/Manual/Fallback burn-in radios + "Show overlay on plot" toggle + "Copy metrics to clipboard"), an ETA + autosave-dot status bar, and a protocol-specific plot panel (`mpp_plot_factory.py`).
 
-The GUI panel (Alt+F8) has three tabs: Experiment (sample name, folder, "New / Load"), Measurement Parameters (voltage range, illumination, scan settings), and Conditions (pre-bias, light soaking). The panel shows a live treeview of the log and two plots: PCE stability (normalized, top) and the latest J-V curves (bottom).
+### Autosave & Crash Recovery
 
-### Stability metrics — `stability_metrics.py`
+During continuous stress, every sample is streamed to a durable `*_stress_inprogress_*.csv` (`isos_autosave.CSVStream`, fsync'd per row). On a clean finish the runner's `_cleanup()` folds the **whole** CSV into the workbook as a single `Stress_<HHMMSS>` sheet via `consolidate_csv_into_xlsx()` and renames the CSV `.consumed`. Consolidation is **end-of-run / on-recovery**, not per scan boundary — one CSV ⇒ one Stress sheet (per-segment consolidation is a deferred idea, intentionally not implemented, because the one-CSV-per-run model is what makes recovery tractable). The runner emits `on_autosave(ok, error)` per flush so the GUI can show a green/red/gray health dot.
+
+On startup `JVMeasurementApp._scan_for_inprogress_isos` scans every folder in `~/.jv-measurement/recent_folders.json` (updated by `_isos_new_experiment` / `_isos_load_experiment`) for orphan in-progress CSVs whose paired tracking xlsx still exists, and offers a recovery dialog (Consolidate all / Discard all / Decide individually). Detection lives in the Tk-free `app/io/isos_recovery.py` (`load_recent_folders`, `add_recent_folder`, `find_orphan_stress_csvs`, `consolidate_orphan`, `discard_orphan`) so it is unit-testable; "Discard" renames the CSV `.discarded` (never deletes).
+
+### Stability Metrics — `stability_metrics.py`
 
 `app/measurement/stability_metrics.py` is pure math: `compute_stability_metrics(times_h, pce_values, pce_0, …)` returns a `StabilityMetrics` dataclass with **T80/T95** (first time `PCE/PCE₀ ≤ 0.80 / 0.95`, sub-sample interpolated), **T_S** (burn-in end — most-positive 2nd derivative of Savitzky-Golay-smoothed normalized PCE, with auto/manual/fallback modes), **PCE_S** (mean PCE in a window around T_S), **Ts80** (time *from* T_S to `0.80·PCE_S`), and **n_1000** (`PCE(1000 h)/PCE(0)`, linearly extrapolated from the stable region with a confidence std-error when the run is < 1000 h). Unreached metrics are `None` with `*_reached=False`.
 
-The canonical PCE column is `PCE_SPO` (stabilized power output) when available, else `PCE_rev`. `ContinuousISOSRunner` accumulates the per-scan canonical PCE, recomputes after every scan (runner thread only — never the GUI thread), stuffs the result into the meas dict for the `ISOS_Metrics` sheet, and forwards it via the `on_metrics_updated(metrics)` callback. The GUI's Stability Metrics panel (live ✓/—/`> experiment` readout + Auto/Manual/Fallback burn-in radios) calls `runner.recompute_metrics()` on a burn-in-mode change for an instant recompute + redraw. `mpp_plot_factory.overlay_stability_metrics(ax_pce, metrics, total_h)` draws the threshold/marker lines on a normalized PCE axis.
+The canonical PCE column is `PCE_SPO` (stabilized power output) when available, else `PCE_rev`. `ContinuousISOSRunner` accumulates the per-scan canonical PCE, recomputes after every scan (runner thread only — never the GUI thread), stuffs the result into the meas dict for the `ISOS_Metrics` sheet, and forwards it via the `on_metrics_updated(metrics)` callback. The GUI's Stability Metrics panel (live ✓/—/`> experiment` readout + Auto/Manual/Fallback burn-in radios) calls `runner.recompute_metrics()` on a burn-in-mode change for an instant recompute + redraw. `mpp_plot_factory.overlay_stability_metrics(ax_pce, metrics, total_h)` draws the threshold/marker lines on a normalized PCE axis; the "Show overlay on plot" toggle gates `_isos_overlay_metrics` for clean screenshots, and "Copy metrics to clipboard" exports a formatted text block.
+
+### Future ISOS Protocols
+
+D-2/D-3 (high T, damp heat), L-2/L-3 (T-controlled light soaking), LC-* (light cycling), T-* (thermal cycling), V-2/V-3 (alternative bias loads), and O-* (outdoor) are all unimplemented — they require additional hardware (thermal chamber, motorized shutter, outdoor enclosure, etc.). Do not register them in `isos_protocols.py` without the corresponding runner support.
 
 ### Measurement sequence (J-V mode)
 

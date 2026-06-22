@@ -557,8 +557,9 @@ class ContinuousISOSRunner:
                     "t_s":       round(t_s, 3),
                     "v":         v, "j": j, "pce": pce, "phase": phase,
                 })
-            except Exception:
-                pass
+                self._emit("on_autosave", True, None)
+            except Exception as exc:
+                self._emit("on_autosave", False, str(exc))
         self._emit("on_stress_update", t_s, v, j, pce)
 
     # ── Shutter prompts ──────────────────────────────────────────────────────
