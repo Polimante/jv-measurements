@@ -81,13 +81,26 @@ V_GRID = np.round(np.arange(-0.10, 1.20 + 1e-9, 0.02), 4)
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
+def _display_path(path: str) -> str:
+    """Path relative to ROOT for tidy logs, falling back to the absolute path.
+
+    os.path.relpath raises ValueError on Windows when the two paths are on
+    different drives (e.g. a temp dir on C: vs. a repo checkout on D:), so this
+    must never be allowed to break generation.
+    """
+    try:
+        return os.path.relpath(path, ROOT)
+    except ValueError:
+        return path
+
+
 def _rename(fp: str, dest_dir: str, name: str) -> str:
     """Move an exporter's timestamped output to a clean, stable filename."""
     dst = os.path.join(dest_dir, name)
     if os.path.exists(dst):
         os.remove(dst)
     shutil.move(fp, dst)        # shutil.move copes with a cross-volume temp dir
-    print("  wrote", os.path.relpath(dst, ROOT))
+    print("  wrote", _display_path(dst))
     return dst
 
 
@@ -468,7 +481,7 @@ def main() -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
             gen(work)
 
-    print("\nSamples written to", os.path.relpath(SAMPLES_DIR, ROOT))
+    print("\nSamples written to", _display_path(SAMPLES_DIR))
 
 
 if __name__ == "__main__":
