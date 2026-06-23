@@ -463,8 +463,9 @@ def main() -> None:
         # The runner writes its tracking file + per-scan backups + autosave CSV
         # into its config folder; run it in a throwaway temp dir so only the
         # final tracking workbook (copied out by _run_continuous_sample) lands in
-        # Samples/.
-        with tempfile.TemporaryDirectory() as work:
+        # Samples/. ignore_cleanup_errors keeps a Windows AV file-lock during
+        # rmtree from aborting the run.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
             gen(work)
 
     print("\nSamples written to", os.path.relpath(SAMPLES_DIR, ROOT))
