@@ -25,14 +25,16 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 
-# Shared colours (match the existing Pure-MPP panel).
-_C_PCE   = "#1565C0"
-_C_J     = "#E65100"
-_C_V     = "#4A148C"
-_C_FWD   = "#1565C0"
-_C_REV   = "#B71C1C"
-_C_VMPP  = "#E65100"
-_C_IDARK = "#37474F"
+# Shared colours (centralised in app.gui.theme; match the Pure-MPP panel).
+from app.gui.theme import (
+    COLOR_PCE as _C_PCE,
+    COLOR_J as _C_J,
+    COLOR_V as _C_V,
+    COLOR_FWD as _C_FWD,
+    COLOR_REV as _C_REV,
+    COLOR_VMPP as _C_VMPP,
+    COLOR_IDARK as _C_IDARK,
+)
 
 
 def _make_canvas(fig, parent_frame):

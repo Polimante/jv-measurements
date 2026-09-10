@@ -27,6 +27,8 @@ from tkinter import (
 )
 from tkinter import ttk
 
+from app.gui.theme import PLOT_COLORS as _COLORS
+
 _ILLUMINATED_SHEET = "MeasurementData"
 _DARK_SHEET        = "Dark_JV_Data"
 _STAB_SHEET        = "StabCurrent_Data"
@@ -40,11 +42,6 @@ _DARK_IDEALITY_SHEET    = "DarkIdealityFit"
 _LIGHT_JV_CONFIG_SHEET  = "Config"
 _LIGHT_JV_SUMMARY_SHEET = "Summary"
 _LIGHT_JV_IDEALITY_SHEET = "LightIdealityAnalysis"
-
-_COLORS = [
-    "#1565C0", "#B71C1C", "#1B5E20", "#E65100", "#4A148C",
-    "#006064", "#3E2723", "#37474F", "#880E4F", "#004D40",
-]
 
 _FIT_PARAM_NAMES = ("J_ph", "J0", "n", "Rs", "Rsh")
 _FIT_PARAM_UNITS = {

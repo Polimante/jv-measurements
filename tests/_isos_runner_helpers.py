@@ -12,6 +12,10 @@ This module is intentionally NOT named ``test_*`` so pytest does not collect it.
 from __future__ import annotations
 
 from app.simulation.dummy_cell import DummyCell
+# FakeKeithley now lives in production (app/simulation) so the live GUI can inject
+# it as a simulated instrument. Re-exported here so the runner tests keep importing
+# it from this helper module unchanged.
+from app.simulation.fake_keithley import FakeKeithley  # noqa: F401
 
 
 class VirtualClock:
@@ -26,55 +30,6 @@ class VirtualClock:
     def sleep(self, seconds: float) -> None:
         if seconds and seconds > 0:
             self.t += seconds
-
-
-class FakeKeithley:
-    """SCPI-style fake backed by a DummyCell.
-
-    ``:READ?`` returns ``Voc`` in field 0 when in current-source (OC) mode, and
-    the cell current (A) in field 1 when in voltage-source mode. Field 1 is
-    pre-negated and scaled so the keithley/runner sign convention recovers the
-    DummyCell's positive photocurrent (mA/cm²).
-    """
-
-    def __init__(self, cell: DummyCell | None = None, area: float = 0.07,
-                 voc: float = 1.0, dark_factor: float = 1e-6):
-        self.cell = cell if cell is not None else DummyCell(mode="ideal_stable")
-        self.area = area
-        self.voc  = voc
-        self.v    = 0.0
-        self.func = "VOLT"
-        self.writes: list[str] = []
-        self._dark_factor = float(dark_factor)
-        self._illuminated = True
-
-    def set_light(self, on: bool) -> None:
-        """Toggle illumination (V-1 shutter). Off → near-zero photocurrent.
-
-        Wire this to the runner's ``on_shutter`` callback so dark scans/stress
-        read a pure-diode dark curve and illuminated scans read the lit curve.
-        """
-        self._illuminated = bool(on)
-        self.cell.set_illumination_factor(1.0 if on else self._dark_factor)
-
-    def write(self, cmd: str) -> None:
-        self.writes.append(cmd)
-        if cmd.startswith(":SOUR:FUNC"):
-            self.func = "CURR" if "CURR" in cmd else "VOLT"
-        elif cmd.startswith(":SOUR:VOLT"):
-            try:
-                self.v = float(cmd.split()[1])
-            except (IndexError, ValueError):
-                pass
-
-    def query(self, cmd: str) -> str:
-        if cmd == ":READ?":
-            if self.func == "CURR":          # OC mode → Voc in field 0
-                return f"{self.voc:.6f},0,0,0,0"
-            j = self.cell.current_density(self.v, scan_direction="reverse")
-            raw_a = -(j * self.area / 1000.0)  # invert runner's transform
-            return f"{self.v:.6f},{raw_a:.9e},0,0,0"
-        return "0,0,0,0,0"
 
 
 def make_runner_config(tmp_path, **overrides) -> dict:
