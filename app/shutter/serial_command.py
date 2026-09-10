@@ -76,14 +76,20 @@ class SerialCommandShutter(Shutter):
         """Open the port on first use and keep it open."""
         if self._port is not None:
             return self._port
+
+        # Configuration is checked before the dependency, deliberately. Telling
+        # someone who has not chosen a port yet to install pyserial sends them
+        # off to fix the wrong thing — and which message they saw would depend
+        # on whether pyserial happened to be installed.
+        if not self.port:
+            raise ShutterError("No serial port is configured for the shutter.")
+
         try:
             import serial                       # pyserial, imported on demand
         except ImportError as exc:
             raise ShutterError(
                 "This shutter backend needs pyserial, which is not installed.\n"
                 "Install it with:  pip install pyserial") from exc
-        if not self.port:
-            raise ShutterError("No serial port is configured for the shutter.")
         try:
             self._port = serial.Serial(self.port, self.baudrate,
                                        timeout=self.timeout_s)

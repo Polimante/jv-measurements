@@ -1,9 +1,15 @@
 """Hardware-free tests for the serial / Arduino shutter backend.
 
 A fake ``serial`` module is installed in ``sys.modules`` so the real pyserial
-never has to be present — which is also the point of the last test here: a
+never has to be present — which is also the point of one of the tests here: a
 stored configuration naming this backend must not stop the application from
 starting on a machine without pyserial.
+
+pyserial is an **optional** dependency and is deliberately absent from
+requirements.txt, so CI runs without it. Every test that reaches
+``_connect()`` must therefore either use the ``fake_serial`` fixture or install
+its own stand-in — otherwise it passes or fails depending on what happens to be
+installed, which is how a real ordering bug in ``_connect()`` reached CI.
 """
 
 import sys
@@ -185,11 +191,25 @@ def test_a_port_that_will_not_open_is_reported_with_its_reason(monkeypatch):
         _shutter(port="COM3").open()
 
 
-def test_no_port_configured_is_not_ready():
+def test_no_port_configured_is_not_ready(fake_serial):
     s = _shutter(port="")
     assert s.ready is False
     with pytest.raises(ShutterError, match="No serial port"):
         s.open()
+
+
+def test_a_missing_port_is_reported_even_without_pyserial(monkeypatch):
+    """Configuration is checked before the dependency.
+
+    Regression: _connect() used to import pyserial first, so an unconfigured
+    port produced "install pyserial" — sending the user off to fix the wrong
+    thing, and making the message depend on whether pyserial happened to be
+    installed. CI (which does not install it) and a developer machine (which
+    might) disagreed about what this backend said.
+    """
+    monkeypatch.setitem(sys.modules, "serial", None)
+    with pytest.raises(ShutterError, match="No serial port"):
+        _shutter(port="").open()
 
 
 def test_missing_pyserial_is_reported_only_when_used(monkeypatch):
