@@ -48,20 +48,10 @@ class FakeTSP:
         pass
 
 
-@pytest.fixture(scope="module")
-def app():
-    import tkinter as tk
-    import app.gui.main_window as mw
-
-    mw.play_completion_sound = lambda: None  # type: ignore[assignment]
-    root = tk.Tk()
-    root.withdraw()
-    application = mw.JVMeasurementApp(root)
-    try:
-        yield application
-    finally:
-        root.update_idletasks()
-        root.destroy()
+@pytest.fixture
+def app(jv_app):
+    """The session-wide JVMeasurementApp (see tests/conftest.py)."""
+    return jv_app
 
 
 @pytest.fixture(autouse=True)

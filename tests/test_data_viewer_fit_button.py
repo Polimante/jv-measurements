@@ -3,9 +3,9 @@
 Focus: data-flow correctness (file reading, SingleDiodeFitWindow creation).
 No pixel position assertions.
 
-These tests create a real (hidden) Tk root and Toplevel.
-On Windows this is always available; on CI headless Linux the tests are
-skipped if Tk cannot initialise.
+These tests open real (hidden) Toplevels on the session's shared Tk root
+(``tk_root`` in tests/conftest.py), which is created once and destroyed only at
+the end of the session. The fixture skips when Tk cannot initialise.
 """
 
 from __future__ import annotations
@@ -16,20 +16,7 @@ import pytest
 
 # ── Tk availability guard ─────────────────────────────────────────────────────
 
-def _tk_available() -> bool:
-    try:
-        import tkinter as tk
-        r = tk.Tk()
-        r.destroy()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not _tk_available(), reason="Tk not available in this environment"),
-]
+pytestmark = pytest.mark.gui
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -107,28 +94,36 @@ class TestLoadJvFileNoTk:
         assert abs(r2 - 0.9998) < 0.0001
 
 
+def _close_toplevels(root):
+    """Destroy every Toplevel on the shared root, leaving the root itself alive.
+
+    Replaces the root.destroy() these tests used to do in their finally blocks:
+    the root now outlives the session (see tests/conftest.py), so only the
+    windows a test opened get cleaned up.
+    """
+    import tkinter as tk
+    for widget in root.winfo_children():
+        if isinstance(widget, tk.Toplevel):
+            widget.destroy()
+
+
 # ── DataViewerWindow: fit button state ───────────────────────────────────────
 
 class TestFitButtonState:
     """Verify that the fit button is enabled/disabled correctly."""
 
-    def test_fit_button_enabled_for_illuminated(self, tmp_path):
-        import tkinter as tk
+    def test_fit_button_enabled_for_illuminated(self, tk_root, tmp_path):
         from app.gui.data_viewer import DataViewerWindow
 
-        root = tk.Tk()
-        root.withdraw()
+        fp  = _make_illuminated_xlsx(tmp_path)
+        win = DataViewerWindow(tk_root, fp)
         try:
-            fp  = _make_illuminated_xlsx(tmp_path)
-            win = DataViewerWindow(root, fp)
             state = win._fit_btn.cget("state")
-            win.win.destroy()
         finally:
-            root.destroy()
+            win.win.destroy()
         assert str(state) == "normal"
 
-    def test_fit_button_disabled_for_dark_jv(self, tmp_path):
-        import tkinter as tk
+    def test_fit_button_disabled_for_dark_jv(self, tk_root, tmp_path):
         from app.io.exporter import save_dark_jv_data
         from app.gui.data_viewer import DataViewerWindow
 
@@ -136,26 +131,22 @@ class TestFitButtonState:
         j = np.zeros_like(v)
         fp = save_dark_jv_data(str(tmp_path), "DarkTest", v, j, v, j,
                                0.07, 100, 1.0, False, "TEST")
-        root = tk.Tk()
-        root.withdraw()
+        win = DataViewerWindow(tk_root, fp)
         try:
-            win   = DataViewerWindow(root, fp)
             state = win._fit_btn.cget("state")
-            win.win.destroy()
         finally:
-            root.destroy()
+            win.win.destroy()
         assert str(state) == "disabled"
 
 
 # ── SingleDiodeFitWindow: instantiation and data wiring ──────────────────────
 
 class TestSingleDiodeFitWindow:
-    def test_window_opens_without_error(self, tmp_path):
+    def test_window_opens_without_error(self, tk_root, tmp_path):
         import tkinter as tk
         from app.gui.data_viewer import DataViewerWindow
 
-        root = tk.Tk()
-        root.withdraw()
+        root = tk_root
         try:
             fp  = _make_illuminated_xlsx(tmp_path)
             win = DataViewerWindow(root, fp)
@@ -169,15 +160,14 @@ class TestSingleDiodeFitWindow:
                 tl.destroy()
             win.win.destroy()
         finally:
-            root.destroy()
+            _close_toplevels(root)
 
-    def test_fit_window_receives_correct_arrays(self, tmp_path):
+    def test_fit_window_receives_correct_arrays(self, tk_root, tmp_path):
         """The v and j arrays passed to SingleDiodeFitWindow must match the file data."""
         import tkinter as tk
         from app.gui.data_viewer import DataViewerWindow, SingleDiodeFitWindow
 
-        root = tk.Tk()
-        root.withdraw()
+        root = tk_root
         try:
             fp   = _make_illuminated_xlsx(tmp_path)
             dwin = DataViewerWindow(root, fp)
@@ -215,15 +205,14 @@ class TestSingleDiodeFitWindow:
 
             dwin.win.destroy()
         finally:
-            root.destroy()
+            _close_toplevels(root)
 
-    def test_fit_window_loads_initial_fit_from_file(self, tmp_path):
+    def test_fit_window_loads_initial_fit_from_file(self, tk_root, tmp_path):
         """When file has SingleDiodeFit sheet, window shows those parameters."""
         import tkinter as tk
         from app.gui.data_viewer import DataViewerWindow, SingleDiodeFitWindow
 
-        root = tk.Tk()
-        root.withdraw()
+        root = tk_root
         try:
             fp   = _make_illuminated_xlsx(tmp_path, with_fit=True)
             dwin = DataViewerWindow(root, fp)
@@ -233,7 +222,7 @@ class TestSingleDiodeFitWindow:
 
             dwin.win.destroy()
         finally:
-            root.destroy()
+            _close_toplevels(root)
 
 
 # ── Regression: Refit with unchanged default bounds must match None-bounds fit ─
@@ -269,19 +258,18 @@ class TestRefitBoundsRegression:
         win._build_ui()
         return win, v, j
 
-    def test_default_bounds_are_numerically_correct(self):
+    def test_default_bounds_are_numerically_correct(self, tk_root):
         """_parse_bounds() with unchanged defaults must equal the None-bounds set."""
         import tkinter as tk
         import numpy as np
 
-        root = tk.Tk()
-        root.withdraw()
+        root = tk_root
         try:
             win, v, j = self._make_win_with_defaults(root)
             parsed = win._parse_bounds()
             win.win.destroy()
         finally:
-            root.destroy()
+            _close_toplevels(root)
 
         j_sc = float(abs(j[np.argmin(np.abs(v))]))
         expected = {
@@ -298,20 +286,19 @@ class TestRefitBoundsRegression:
             assert got_hi == pytest.approx(exp_hi, rel=1e-6), \
                 f"{name} upper: got {got_hi:.4g}, expected {exp_hi:.4g}"
 
-    def test_refit_with_default_bounds_matches_none_bounds(self):
+    def test_refit_with_default_bounds_matches_none_bounds(self, tk_root):
         """Refit with untouched defaults must produce the same R2 as initial fit."""
         import tkinter as tk
         import numpy as np
         from app.measurement.analysis import fit_single_diode
 
-        root = tk.Tk()
-        root.withdraw()
+        root = tk_root
         try:
             win, v, j = self._make_win_with_defaults(root)
             parsed_bounds = win._parse_bounds()
             win.win.destroy()
         finally:
-            root.destroy()
+            _close_toplevels(root)
 
         r_none  = fit_single_diode(v, j, T=298.15, bounds=None)
         r_refit = fit_single_diode(v, j, T=298.15, bounds=parsed_bounds)

@@ -5,6 +5,11 @@ These exercise the real ``JVMeasurementApp`` window against a ``FakeKeithley``
 full J-V measurement that must append to ``session_data`` and write a reloadable
 xlsx. Marked ``gui`` so they auto-skip in CI / headless environments (see
 tests/conftest.py) and run locally on a machine with a display.
+
+The Tk root and the JVMeasurementApp are shared across the whole test
+session (see tests/conftest.py): repeated Tk() / destroy() cycles corrupt
+the Tcl interpreter state, which used to make these tests pass, skip or
+error depending on which GUI module ran first.
 """
 
 from __future__ import annotations
@@ -15,29 +20,10 @@ import pytest
 pytestmark = pytest.mark.gui
 
 
-@pytest.fixture(scope="module")
-def app():
-    """One withdrawn JVMeasurementApp for the whole module.
-
-    A single Tk root is reused across tests: creating and destroying multiple
-    ``Tk()`` instances in one process corrupts the Tcl interpreter state
-    (``invalid command name "tcl_findLibrary"``). The per-test ``_clean_app``
-    fixture resets the shared instance between tests.
-    """
-    import tkinter as tk
-    import app.gui.main_window as mw
-
-    # Silence the completion beep so the suite stays quiet.
-    mw.play_completion_sound = lambda: None  # type: ignore[assignment]
-
-    root = tk.Tk()
-    root.withdraw()
-    application = mw.JVMeasurementApp(root)
-    try:
-        yield application
-    finally:
-        root.update_idletasks()
-        root.destroy()
+@pytest.fixture
+def app(jv_app):
+    """The session-wide JVMeasurementApp (see tests/conftest.py)."""
+    return jv_app
 
 
 @pytest.fixture(autouse=True)

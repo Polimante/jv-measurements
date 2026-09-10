@@ -10,39 +10,17 @@ from __future__ import annotations
 import pytest
 
 
-def _tk_available() -> bool:
-    try:
-        import tkinter as tk
-        r = tk.Tk()
-        r.destroy()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not _tk_available(), reason="Tk not available in this environment"),
-]
+pytestmark = pytest.mark.gui
 
 
 @pytest.fixture
-def app():
-    import tkinter as tk
-    from app.gui.main_window import JVMeasurementApp
-
-    root = tk.Tk()
-    root.withdraw()
-    application = JVMeasurementApp(root)
-    application.switch_mode("isos")
-    application.isos_protocol_var.set("ISOS-V-1")
-    application._isos_on_protocol_change()
-    root.update_idletasks()
-    yield application
-    try:
-        root.destroy()
-    except Exception:
-        pass
+def app(jv_app):
+    """The shared app, put on the ISOS panel with ISOS-V-1 selected."""
+    jv_app.switch_mode("isos")
+    jv_app.isos_protocol_var.set("ISOS-V-1")
+    jv_app._isos_on_protocol_change()
+    jv_app.root.update_idletasks()
+    return jv_app
 
 
 def test_v1_selected_shows_subframe_and_v1_panel(app):

@@ -1,12 +1,9 @@
 """Light GUI tests for the Dark Ideality Fit button in DataViewerWindow.
 
-These tests create a real (hidden) Tk root and Toplevel.
-Skipped automatically when Tk is not available.
-
-A module-scoped Tk root is shared across all tests so that Tk is created
-and destroyed only once per test module.  This avoids a known Python 3.14 /
-Tcl 9 issue on Windows where repeated Tk().destroy() cycles corrupt the
-Tcl init path.
+These tests open a real (hidden) Toplevel on the session's shared Tk root
+(``tk_root`` in tests/conftest.py), which is created once and destroyed only at
+the end of the session: repeated Tk() / destroy() cycles corrupt the Tcl
+interpreter state. The fixture skips when Tk cannot initialise.
 """
 
 from __future__ import annotations
@@ -17,32 +14,7 @@ import pytest
 
 # ── Tk availability guard ─────────────────────────────────────────────────────
 
-def _tk_available() -> bool:
-    try:
-        import tkinter as tk
-        r = tk.Tk()
-        r.destroy()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not _tk_available(), reason="Tk not available in this environment"),
-]
-
-
-# ── Module-scoped Tk root (created once, shared by all tests) ─────────────────
-
-@pytest.fixture(scope="module")
-def tk_root():
-    """Single hidden Tk root for the whole module."""
-    import tkinter as tk
-    root = tk.Tk()
-    root.withdraw()
-    yield root
-    root.destroy()
+pytestmark = pytest.mark.gui
 
 
 # ── File creation helpers ─────────────────────────────────────────────────────

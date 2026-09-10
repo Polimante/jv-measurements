@@ -422,8 +422,19 @@ Both workflows trigger on every `push` and `pull_request` to any branch.
 - `windows_only` — test requires Windows; auto-skipped on Linux/macOS.
 - `gui` — test requires a live Tk display; auto-skipped in CI and on headless Linux (no `DISPLAY`).
 
-Currently no tests carry `windows_only` (all hardware is mocked). Two tests carry `gui`:
-`test_data_viewer_fit_button.py` and `test_data_viewer_dark_ideality_button.py`.
+`windows_only` is carried only by the crash-recovery test that imports
+`main_window` (which imports `winsound`). `gui` is carried by seven modules:
+the two data-viewer button tests, `test_isos_l1_gui`, `test_v1_scan_rate_warning`,
+`test_gui_smoke`, `test_gui_shutter_dialog` and `test_gui_shutter_wiring`.
+
+**All GUI tests share one Tk root and one `JVMeasurementApp`**, created by the
+session-scoped `tk_root` / `jv_app` fixtures in `tests/conftest.py` and destroyed
+only at the end of the session. Repeated `Tk()` / `destroy()` cycles corrupt the
+Tcl interpreter state (`invalid command name "tcl_findLibrary"` on Tcl 9), which
+made the suite pass, skip or error depending on which GUI module ran first. Do
+not create a `Tk()` in a test — ask for `tk_root`. Because the app is shared, a
+module must establish its own preconditions rather than assume pristine state;
+`jv_app_defaults` holds the values captured before any test ran.
 
 **Run the same checks locally before pushing:**
 

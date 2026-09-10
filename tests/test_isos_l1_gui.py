@@ -1,8 +1,12 @@
 """Light GUI tests for the ISOS-L-1 panel wiring.
 
 Focus: protocol/load switching reconfigures the sub-frame and swaps the plot
-layout. No pixel assertions. A real (hidden) Tk root is created; the test is
-skipped where Tk cannot initialise (headless CI).
+layout. No pixel assertions.
+
+The Tk root and the JVMeasurementApp are shared across the whole test
+session (see tests/conftest.py): repeated Tk() / destroy() cycles corrupt
+the Tcl interpreter state, which used to make these tests pass, skip or
+error depending on which GUI module ran first.
 """
 
 from __future__ import annotations
@@ -10,41 +14,27 @@ from __future__ import annotations
 import pytest
 
 
-def _tk_available() -> bool:
-    try:
-        import tkinter as tk
-        r = tk.Tk()
-        r.destroy()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = [
-    pytest.mark.gui,
-    pytest.mark.skipif(not _tk_available(), reason="Tk not available in this environment"),
-]
+pytestmark = pytest.mark.gui
 
 
 @pytest.fixture
-def app():
-    import tkinter as tk
-    from app.gui.main_window import JVMeasurementApp
+def app(jv_app, jv_app_defaults):
+    """The shared app, put back on the ISOS panel at its default protocol.
 
-    root = tk.Tk()
-    root.withdraw()
-    application = JVMeasurementApp(root)
-    application.switch_mode("isos")
-    root.update_idletasks()
-    yield application
-    try:
-        root.destroy()
-    except Exception:
-        pass
+    The app is shared across the session, so this establishes the
+    precondition rather than assuming it.
+    """
+    jv_app.switch_mode("isos")
+    jv_app.isos_protocol_var.set(jv_app_defaults["isos_protocol"])
+    jv_app._isos_on_protocol_change()
+    jv_app.root.update_idletasks()
+    return jv_app
 
 
-def test_d1_default_layout_is_d1_and_subframe_hidden(app):
-    assert app.isos_protocol_var.get() == "ISOS-D-1"
+def test_d1_default_layout_is_d1_and_subframe_hidden(app, jv_app_defaults):
+    # Captured from a freshly-built app, so this still checks the real default
+    # even though the fixture above re-selects it on the shared instance.
+    assert jv_app_defaults["isos_protocol"] == "ISOS-D-1"
     assert app._isos_plot_layout == "d1"
     assert app.isos_l1_subframe.winfo_manager() == ""   # not packed
 
