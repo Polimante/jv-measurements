@@ -312,38 +312,39 @@
       <li><a href="#modes">7. Measurement Modes Overview</a></li>
       <li><a href="#jv-params">8. J-V Measurement Parameters</a></li>
       <li><a href="#instrument-settings">9. Instrument Settings</a></li>
-      <li><a href="#prebias">10. Pre-bias Conditioning</a></li>
-      <li><a href="#running-jv">11. Running a J-V Measurement</a></li>
-      <li><a href="#light-jv">12. Light-Intensity J-V</a></li>
-      <li><a href="#stab">13. Stabilized Current</a></li>
-      <li><a href="#mpp">14. MPP Tracking (JV-SPO)</a></li>
-      <li><a href="#pure-mpp">15. Pure MPP Tracking (P&amp;O)</a></li>
-      <li><a href="#dark-jv">16. Dark J-V Measurement</a></li>
+      <li><a href="#shutter">10. Shutter Control</a></li>
+      <li><a href="#prebias">11. Pre-bias Conditioning</a></li>
+      <li><a href="#running-jv">12. Running a J-V Measurement</a></li>
+      <li><a href="#light-jv">13. Light-Intensity J-V</a></li>
+      <li><a href="#stab">14. Stabilized Current</a></li>
+      <li><a href="#mpp">15. MPP Tracking (JV-SPO)</a></li>
+      <li><a href="#pure-mpp">16. Pure MPP Tracking (P&amp;O)</a></li>
+      <li><a href="#dark-jv">17. Dark J-V Measurement</a></li>
 
       <div class="sidebar-group">ISOS Stability Protocols</div>
-      <li><a href="#isos-overview">17. ISOS Protocols Overview</a></li>
-      <li><a href="#isos-common">18. Shared ISOS Parameters</a></li>
-      <li><a href="#isos-d1">19. ISOS-D-1 — Dark Storage</a></li>
-      <li><a href="#isos-l1">20. ISOS-L-1 — Light Soaking</a></li>
-      <li><a href="#isos-v1">21. ISOS-V-1 — Electrical Bias</a></li>
-      <li><a href="#isos-metrics">22. Stability Metrics</a></li>
-      <li><a href="#isos-autosave">23. Autosave &amp; Crash Recovery</a></li>
+      <li><a href="#isos-overview">18. ISOS Protocols Overview</a></li>
+      <li><a href="#isos-common">19. Shared ISOS Parameters</a></li>
+      <li><a href="#isos-d1">20. ISOS-D-1 — Dark Storage</a></li>
+      <li><a href="#isos-l1">21. ISOS-L-1 — Light Soaking</a></li>
+      <li><a href="#isos-v1">22. ISOS-V-1 — Electrical Bias</a></li>
+      <li><a href="#isos-metrics">23. Stability Metrics</a></li>
+      <li><a href="#isos-autosave">24. Autosave &amp; Crash Recovery</a></li>
 
       <div class="sidebar-group">Data &amp; Analysis</div>
-      <li><a href="#data-curation">24. Data Curation</a></li>
-      <li><a href="#data-viewer">25. Data Viewer &amp; Visualization</a></li>
-      <li><a href="#diode-fit">26. Single-Diode Fit</a></li>
-      <li><a href="#dark-ideality">27. Dark J-V Ideality Fit</a></li>
-      <li><a href="#light-ideality">28. Light Ideality Factor</a></li>
-      <li><a href="#excel-format">29. Excel File Format</a></li>
-      <li><a href="#results">30. Understanding J-V Results</a></li>
-      <li><a href="#pv-parameters">31. Photovoltaic Parameters</a></li>
-      <li><a href="#circuit-model">32. Equivalent Circuit Model</a></li>
-      <li><a href="#hysteresis">33. Hysteresis in Perovskites</a></li>
+      <li><a href="#data-curation">25. Data Curation</a></li>
+      <li><a href="#data-viewer">26. Data Viewer &amp; Visualization</a></li>
+      <li><a href="#diode-fit">27. Single-Diode Fit</a></li>
+      <li><a href="#dark-ideality">28. Dark J-V Ideality Fit</a></li>
+      <li><a href="#light-ideality">29. Light Ideality Factor</a></li>
+      <li><a href="#excel-format">30. Excel File Format</a></li>
+      <li><a href="#results">31. Understanding J-V Results</a></li>
+      <li><a href="#pv-parameters">32. Photovoltaic Parameters</a></li>
+      <li><a href="#circuit-model">33. Equivalent Circuit Model</a></li>
+      <li><a href="#hysteresis">34. Hysteresis in Perovskites</a></li>
 
       <div class="sidebar-group">Support</div>
-      <li><a href="#troubleshooting">34. Troubleshooting</a></li>
-      <li><a href="#references">35. References</a></li>
+      <li><a href="#troubleshooting">35. Troubleshooting</a></li>
+      <li><a href="#references">36. References</a></li>
     </ul>
   </nav>
 </aside>
@@ -901,10 +902,622 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       10. PRE-BIAS CONDITIONING
+       10. SHUTTER CONTROL
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="shutter">
+    <h2>10. Shutter Control</h2>
+
+    <p>Almost every measurement in this software depends on knowing whether the cell is
+       illuminated. A dark J-V that silently ran under light looks perfectly plausible in the
+       data — nothing about the curve announces the mistake. The software therefore treats the
+       shutter as something to be <em>commanded and asserted</em>, not assumed.</p>
+
+    <p>Shutter support is <strong>pluggable</strong>. The software ships with three backends and
+       is designed so that a lab with different hardware can add its own, or in the common case
+       simply configure the generic serial backend and write no code at all.</p>
+
+    <div class="info-box">
+      <div class="box-label">Where to find it</div>
+      <strong>Instrument → Shutter Control…</strong> on the menu bar. It lives there rather than
+      inside one measurement panel because the shutter belongs to the rig: one configuration
+      serves J-V, Light-Intensity, MPP, Pure MPP, Stabilized Current and every ISOS protocol.
+      The setting is saved to <code>~/.jv-measurement/settings.json</code> and restored the next
+      time the software starts.
+    </div>
+
+    <h3>The Shutter Control window</h3>
+
+    <div class="param-block">
+      <div class="param-name">System</div>
+      <p style="margin-top:8px;">Chooses the backend. The settings shown underneath change to
+         match — each backend declares its own options, so the form is different for each one.</p>
+      <div class="param-row"><span class="param-key">Manual:</span><span class="param-val">the software prompts you; you move the shutter by hand</span></div>
+      <div class="param-row"><span class="param-key">Keithley 2600 digital I/O:</span><span class="param-val">a digital I/O line of the SourceMeter drives the shutter</span></div>
+      <div class="param-row"><span class="param-key">Serial / Arduino:</span><span class="param-val">text commands over a serial port</span></div>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Apply &amp; Save</div>
+      <p style="margin-top:8px;">Validates the form, activates the backend and writes the
+         configuration to disk. Out-of-range values are refused with an explanation rather than
+         silently clamped.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Test: Open / Test: Close / Self-test</div>
+      <p style="margin-top:8px;">Move the shutter right now, so you can confirm the wiring
+         without starting a measurement. <strong>Self-test</strong> performs close → open → close
+         and reports how long each step took. All three <em>apply the form first</em>, so there is
+         no "I forgot to click Apply" failure mode — what you see on screen is what gets tested.</p>
+      <p style="margin-top:8px;">The buttons are refused while a measurement is running: the
+         shutter shares the instrument's connection, and moving it mid-scan would corrupt the
+         data even if it were electrically safe.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Status badge</div>
+      <p style="margin-top:8px;">Top right of the window. Reads
+         <strong>CLOSED</strong> (green), <strong>OPEN</strong> (orange),
+         <strong>manual</strong>, or <strong>unknown (connect instrument)</strong> in grey.
+         "Unknown" is honest rather than defensive: before the SourceMeter is connected, a
+         backend that borrows its connection genuinely cannot know where the shutter is.</p>
+    </div>
+
+    <h3>When the shutter moves</h3>
+
+    <p>Once an automatic backend is configured, the software drives the shutter at every
+       boundary, in every mode:</p>
+
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>Shutter behaviour</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>J-V (with Dark J-V)</td><td>Closed for the dark scans → opens → illuminated scans → closed</td></tr>
+        <tr><td>J-V (illuminated only)</td><td>Opens at the start → closed at the end</td></tr>
+        <tr><td>Light-Intensity J-V</td><td>Opens at the start → closed at the end</td></tr>
+        <tr><td>MPP / Pure MPP / Stabilized Current</td><td>Opens at the start → closed at the end</td></tr>
+        <tr><td>ISOS-D-1</td><td>Same as J-V: dark scans closed, illuminated scans open</td></tr>
+        <tr><td>ISOS-L-1</td><td>Open for the whole light-soaking run → closed at the end</td></tr>
+        <tr><td>ISOS-V-1</td><td>Closed during dark stress; opens for each periodic illuminated scan, closes again</td></tr>
+      </tbody>
+    </table>
+
+    <p>Every measurement ends with the shutter closed, and it stays closed until the next
+       measurement asks for light. Disconnecting the instrument and quitting the application
+       also close it.</p>
+
+    <div class="info-box">
+      <div class="box-label">Nothing changes if you do not configure a shutter</div>
+      With the default <strong>Manual</strong> backend the software behaves exactly as it always
+      has: it prompts you at the dark/illuminated handover in J-V and ISOS-D-1, and at the
+      ISOS-V-1 scan boundaries — no more dialogs than before, and no fewer. The extra boundaries
+      in the table above are driven only by backends that can actuate on their own.
+    </div>
+
+    <h3>10.1 Manual backend</h3>
+
+    <p>The default. At each dark/illuminated boundary the software pauses, shows a dialog asking
+       you to open or close the shutter, and waits for OK. Choose this if your simulator's
+       shutter has no remote input, or while you are still wiring up an automatic one.</p>
+
+    <h3>10.2 Keithley 2600 digital I/O backend</h3>
+
+    <p>The SourceMeter's own rear-panel <strong>DIGITAL I/O</strong> connector drives the
+       shutter. This needs no extra instrument and no extra software, which is why it is the
+       first automatic backend the software shipped with.</p>
+
+    <h4>The connector</h4>
+
+    <p>A 25-pin female D-sub on the rear panel of any Series 2600 instrument:</p>
+
+    <table>
+      <thead><tr><th>Pins</th><th>Function</th></tr></thead>
+      <tbody>
+        <tr><td>1 – 14</td><td>Digital I/O lines #1 – #14 (the line number equals the pin number)</td></tr>
+        <tr><td>15 – 21</td><td>Ground</td></tr>
+        <tr><td>22, 23, 25</td><td>+5 V output (600 mA total, self-resetting fuse)</td></tr>
+        <tr><td>24</td><td>Interlock (2611/2612/2635/2636) or Output Enable (2601/2602) — <strong>not</strong> a digital I/O line; the software never writes it</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Electrical behaviour — read this before wiring</h4>
+
+    <p>Each line is an <strong>open-drain output with a 5.1 kΩ pull-up to +5 V</strong>. Three
+       consequences follow, and every one of them matters:</p>
+
+    <ul>
+      <li><strong>A line idles HIGH.</strong> Nothing driving it means +5 V, not 0 V.</li>
+      <li><strong>It can barely source current.</strong> About 960 µA maximum flows <em>out</em>
+          of a line when high. That is enough for a high-impedance TTL input and nothing else.</li>
+      <li><strong>It sinks far more than it sources.</strong> Up to 5 mA at 0.7 V, 11 mA absolute
+          maximum, flowing <em>into</em> the line. This is why interface boxes are normally built
+          so that the Keithley pulls a line low to activate an opto-isolator or relay powered
+          from the port's own +5 V pin.</li>
+    </ul>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ The fail-safe question</div>
+      Because the lines idle high, a <strong>non-inverting</strong> interface leaves the shutter
+      <strong>OPEN</strong> whenever the SourceMeter is powered on and nothing is driving the
+      line. That is the opposite of fail-safe, and it is a property of the wiring, not of the
+      software. An <strong>inverting</strong> interface (Keithley pulls low to open) idles closed
+      and is the safer arrangement. Use <code>probe_shutter.py</code> (below) to find out which
+      one you have — the software reports it too, and says so explicitly in the result.
+    </div>
+
+    <p>A useful guarantee on the instrument side: the Series 2600 reference manual states that
+       <em>"the reset function does not affect the present state of the digital I/O lines"</em>.
+       The <code>*RST</code> the software sends before every scan therefore never disturbs the
+       shutter.</p>
+
+    <h4>ABET Sun 2000 / Sun 3000 wiring</h4>
+
+    <p>ABET simulators expose a <strong>SHUTTER INPUT</strong> BNC whose meaning depends on the
+       front-panel <strong>SHUTTER CONTROL</strong> switch:</p>
+
+    <table>
+      <thead><tr><th>Switch position</th><th>What the BNC does</th></tr></thead>
+      <tbody>
+        <tr><td><strong>EXTERNAL</strong></td><td><strong>Level</strong> sensitive: the shutter stays open as long as a TTL +5 V signal is present. <strong>This is the mode to use.</strong></td></tr>
+        <tr><td>INTERNAL / TIMED</td><td><strong>Edge</strong> trigger: a switch closure or a low TTL state fires one exposure of the built-in timer's duration, then the shutter closes by itself.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ Put the switch in EXTERNAL</div>
+      The software cannot see the position of that switch. Left in INTERNAL/TIMED, an "open"
+      command becomes a timed exposure that ends on its own part-way through your scan — with no
+      error, just wrong data. Check it before every session, or leave it taped in place.
+    </div>
+
+    <p>ABET also warns that running the shutter faster than <strong>3 Hz</strong> for extended
+       periods overheats the solenoid. Normal use here is far below that: at most one open and
+       one close per measurement.</p>
+
+    <h4>Finding your line and polarity — <code>probe_shutter.py</code></h4>
+
+    <p>You cannot guess which digital I/O line is wired, or which level opens the shutter. The
+       repository includes a bench tool that finds out without touching the instrument's front
+       panel. Run it from the project folder:</p>
+
+    <pre>python probe_shutter.py            # manual: watch the simulator's LED
+python probe_shutter.py --auto     # automatic: the SMU watches, via cell current
+python probe_shutter.py --read     # read the port state only, write nothing
+python probe_shutter.py --poke 3 0 # hold one line at one level until you press Enter
+python probe_shutter.py --lines 1-8  # restrict the range if other kit shares the port</pre>
+
+    <p>It perturbs one line at a time, restores each one immediately, and always restores the
+       whole port on exit — including on <kbd>Ctrl+C</kbd>. Start with <code>--read</code>, which
+       writes nothing at all.</p>
+
+    <p><strong>Manual mode</strong> asks you to watch the red SHUTTER LED on the simulator and
+       answer y/n per line; run it with the lamp <em>off</em> so nothing gets illuminated.
+       <strong><code>--auto</code></strong> is more reliable: with the lamp on and a cell
+       connected, the SourceMeter itself detects the change in photocurrent, needs no operator
+       input, and additionally times how long the blade takes to travel.</p>
+
+    <p>The result is printed in the form the Shutter Control window wants:</p>
+
+    <pre>  Digital I/O line ......... #1  (DB-25 pin 1)
+  Opens the shutter ........ digio.writebit(1, 1)
+  Closes the shutter ....... digio.writebit(1, 0)
+  Polarity ................. ACTIVE HIGH
+  Resting state ............ OPEN    -> NOT fail-safe
+  Mechanical settling ...... 68 ms
+
+      line       = 1
+      active_low = False
+      settle_ms  = 68</pre>
+
+    <h4>Settings</h4>
+
+    <div class="param-block">
+      <div class="param-name">Digital I/O line</div>
+      <div class="param-row"><span class="param-key">Range:</span><span class="param-val">1 – 14</span></div>
+      <p style="margin-top:8px;">Which line is wired to the shutter. Equals the DB-25 pin number.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">HIGH opens the shutter</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">checked</span></div>
+      <p style="margin-top:8px;">Checked for a non-inverting interface (write 1 to open);
+         unchecked for an inverting one (write 0 to open). See the fail-safe warning above.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Settling time (ms)</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">300 ms</span></div>
+      <p style="margin-top:8px;">How long to wait after commanding, for the blade to finish
+         moving. Measure it with <code>probe_shutter.py --auto</code> and then use a comfortable
+         multiple: this happens once or twice per measurement, not once per point, so margin
+         costs nothing. A typical ABET Sun 2000 blade takes about 70 ms; 300 ms is the default.</p>
+      <div class="info-box">
+        <div class="box-label">This is the blade, not the cell</div>
+        Settling time covers the mechanical travel only. A perovskite's own response to light is
+        a separate, far slower effect measured in seconds to minutes — that is what the
+        <em>Light Soaking</em> setting is for. Do not use one in place of the other.
+      </div>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Verify the line after writing</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">checked</span></div>
+      <p style="margin-top:8px;">Reads the line back with <code>digio.readbit</code> and fails if
+         it did not take the commanded level. Catches a write-protected line
+         (<code>digio.writeprotect</code>) or one being held by another device. Costs one extra
+         query per move.</p>
+    </div>
+
+    <h3>10.3 Serial / Arduino backend</h3>
+
+    <p>This is the generic backend, and the reason the abstraction exists. Rather than shipping
+       "an Arduino driver", the software ships a <strong>configurable text-command</strong>
+       backend: you type the words your controller expects into the settings form. The same code
+       therefore drives a home-made Arduino box and most commercial shutter controllers, which
+       are all ASCII over a serial port with different vocabulary.</p>
+
+    <div class="info-box">
+      <div class="box-label">Requires pyserial</div>
+      <pre>pip install pyserial</pre>
+      It is imported only when the backend is actually used, so a machine without it still runs
+      the software normally — including with this backend stored in the settings file.
+    </div>
+
+    <h4>Settings</h4>
+
+    <table>
+      <thead><tr><th>Field</th><th>Meaning</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td>Serial port</td><td>Port name. Device Manager shows which one an Arduino enumerated as.</td><td><code>COM3</code>, <code>/dev/ttyACM0</code></td></tr>
+        <tr><td>Baud rate</td><td>Must match the controller.</td><td><code>9600</code></td></tr>
+        <tr><td>Open command</td><td>Text sent to open, without the line ending.</td><td><code>OPEN</code></td></tr>
+        <tr><td>Close command</td><td>Text sent to close.</td><td><code>CLOSE</code></td></tr>
+        <tr><td>Line ending</td><td>Appended to every command.</td><td><code>LF</code>, <code>CRLF</code>, <code>CR</code>, <code>none</code></td></tr>
+        <tr><td>Settling time</td><td>Wait after commanding, in ms.</td><td><code>300</code></td></tr>
+        <tr><td>State query</td><td><em>Optional.</em> Text that asks the controller what it did.</td><td><code>STATE</code></td></tr>
+        <tr><td>Reply meaning 'open'</td><td>Substring of the reply that means open.</td><td><code>OPEN</code></td></tr>
+        <tr><td>Reply timeout</td><td>How long to wait for that answer, in seconds.</td><td><code>2.0</code></td></tr>
+        <tr><td>Delay after opening the port</td><td>Pause for boards that reset when the port opens.</td><td><code>2.0</code></td></tr>
+      </tbody>
+    </table>
+
+    <div class="tip-box">
+      <div class="box-label">Tip — set the State query if your controller can answer</div>
+      Without it, the software sends a command and trusts that it worked. With it, the controller
+      is asked to confirm, and a disagreement stops the measurement instead of quietly recording
+      a scan under the wrong illumination. It is the single most valuable field in this form.
+    </div>
+
+    <h4>Building an Arduino shutter controller</h4>
+
+    <p>An example sketch ships with the software at <code>docs/arduino_shutter.ino</code>. It
+       answers <code>OPEN</code>, <code>CLOSE</code> and <code>STATE</code> at 9600 baud, and
+       needs no modification for the default settings above.</p>
+
+    <p><strong>Wiring.</strong> The sketch drives pin 8. An Arduino pin sources about 20 mA at
+       5 V, which is enough for:</p>
+    <ul>
+      <li>a TTL input such as the ABET SHUTTER INPUT BNC (centre pin to the Arduino pin through a
+          series resistor, shield to Arduino GND — <strong>grounds must be common</strong>);</li>
+      <li>the input of an opto-isolator or a relay <em>module</em> (a board with its own driver
+          transistor).</li>
+    </ul>
+    <p>It is <strong>not</strong> enough to drive a solenoid or a bare relay coil directly. Those
+       need a driver board, and the solenoid needs its own supply.</p>
+
+    <p><strong>Polarity and fail-safe.</strong> The sketch closes the shutter in
+       <code>setup()</code> before doing anything else, so a power cycle or a reset leaves the
+       cell dark. If your interface inverts the signal, change <code>ACTIVE_HIGH</code> to
+       <code>false</code> in the sketch rather than swapping the OPEN and CLOSE commands in the
+       software — swapping the words would leave the sketch closing the shutter into the wrong
+       physical state at reset, defeating the fail-safe.</p>
+
+    <h4>Commercial controllers</h4>
+
+    <p>These are starting points, not guarantees — always confirm against your unit's manual,
+       then use <strong>Self-test</strong> to verify.</p>
+
+    <table>
+      <thead><tr><th>Controller</th><th>Typical settings</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Thorlabs SC10</strong></td>
+          <td>9600 baud, line ending <code>CR</code>. The unit <em>toggles</em> with
+              <code>ens</code>, so both Open and Close are <code>ens</code> and you should set a
+              State query (<code>ens?</code>) so the software can tell which state resulted.
+              Prefer the SC10's own "manual/auto" mode set to the one that holds the blade
+              open while asserted.</td>
+        </tr>
+        <tr>
+          <td><strong>Uniblitz VMM-D1 / VCM-D1</strong></td>
+          <td>Usually driven by a TTL level on a BNC rather than serial. Use the
+              <strong>Keithley digital I/O</strong> backend for these, or an Arduino as a level
+              translator.</td>
+        </tr>
+        <tr>
+          <td><strong>USB relay boards</strong></td>
+          <td>Highly vendor-specific; many accept short ASCII commands at 9600 baud. Set the
+              open/close strings to whatever the vendor documents, line ending usually
+              <code>CRLF</code>, and set <em>Delay after opening the port</em> to 0 if the board
+              does not reset on DTR.</td>
+        </tr>
+        <tr>
+          <td><strong>Anything else with an ASCII protocol</strong></td>
+          <td>If it opens and closes on two text commands over a serial port, this backend
+              already supports it. No code change is needed.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>10.4 Verification with an SMU reading</h3>
+
+    <p>A shutter can only report what it was <em>told</em> to do. The SourceMeter can report what
+       the cell actually sees, and that is the only closed-loop check available.</p>
+
+    <p>Tick <strong>"Confirm the light state with an SMU reading"</strong> in the Shutter Control
+       window and, after every move, the software reads the cell current at 0 V and checks it
+       against the state it asked for: bright when opened, dark when closed. A dark cell reads
+       nanoamps and a lit one milliamps, so the default threshold of 0.001 mA (1 µA) sits three
+       orders of magnitude from both.</p>
+
+    <p>This is the check that catches the dangerous case on non-fail-safe wiring: a
+       <em>dark</em> scan that silently ran illuminated. A mismatch asks whether to continue or
+       abort; a failure of the check itself never fails a run.</p>
+
+    <div class="info-box">
+      <div class="box-label">Off by default</div>
+      It needs a cell connected and the lamp on, which is not true of every session — a dark-only
+      characterisation, for instance. Turn it on for unattended or long-running work, where
+      nobody is watching the simulator.
+    </div>
+
+    <h3>10.5 Startup, connect and shutdown</h3>
+
+    <p>The software asserts a closed shutter as early as the hardware allows:</p>
+
+    <ul>
+      <li><strong>Backends that need no SourceMeter</strong> (the serial one) are closed about
+          200 ms after the application starts, before anything is connected. This is the full
+          form of the guarantee.</li>
+      <li><strong>Backends that borrow the SourceMeter's connection</strong> (the Keithley
+          digital I/O one) are closed the moment the instrument connects — the first point at
+          which they can be commanded at all.</li>
+      <li>On disconnect and on exit, the shutter is closed <em>before</em> the connection is
+          released. Afterwards there would be no way to command it.</li>
+    </ul>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ The gap the software cannot close</div>
+      With a non-fail-safe Keithley wiring, the shutter may already be open between switching the
+      SourceMeter on and connecting to it in the software. No program can prevent that — nothing
+      is listening yet. The status badge reads "unknown (connect instrument)" for exactly this
+      period rather than pretending otherwise. If it matters for your samples, either connect
+      before switching the lamp on, or have the interface box inverted so the resting state is
+      closed.
+    </div>
+
+    <h3>10.6 Adding support for other hardware</h3>
+
+    <p>For developers: a backend is <strong>one module plus one entry</strong> in
+       <code>app/shutter/__init__.py</code>, and <strong>no GUI code at all</strong>. The
+       Shutter Control window builds its settings form from the backend's declared
+       <code>fields</code> tuple, so a contributor who can write sixty lines of Python can add
+       their own hardware without touching tkinter.</p>
+
+    <pre>app/shutter/
+  base.py             Shutter ABC + ConfigField / BackendSpec metadata
+  __init__.py         the BACKENDS registry
+  manual.py           prompts the operator (the default)
+  keithley_digio.py   digio.writebit on a 2600
+  serial_command.py   configurable text commands over serial
+  manager.py          locking, retries, persistence, state reporting</pre>
+
+    <p>A backend implements <code>open()</code>, <code>close()</code> and <code>describe()</code>.
+       Both actuation methods must <strong>block until the shutter has settled</strong> and must
+       be <strong>idempotent</strong>. Declare <code>requires_instrument</code> if the backend
+       borrows the SourceMeter session, and <code>is_automatic=False</code> only for backends
+       that need a human.</p>
+
+    <h3>10.7 Shutter troubleshooting</h3>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter does not move at all</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> SHUTTER CONTROL switch not in
+          EXTERNAL; wrong digital I/O line; the interface box has no power; the cable does not
+          carry the ground or +5 V pin the box needs.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ol>
+            <li>Put the simulator's SHUTTER CONTROL switch in <strong>EXTERNAL</strong>.</li>
+            <li>Run <code>python probe_shutter.py --read</code> to confirm the software can talk
+                to the port at all (it writes nothing).</li>
+            <li>Run <code>python probe_shutter.py</code> and let it scan all 14 lines. If no line
+                responds, the problem is on the wiring side, not in the software.</li>
+            <li>Try <code>--auto</code> with the lamp on: a cell current reading is a far more
+                reliable witness than an LED at the edge of your vision.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter opens when it should close, and vice versa</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> The polarity setting does not match
+          your interface box.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Toggle
+          <strong>"HIGH opens the shutter"</strong> in the Shutter Control window and click
+          <strong>Apply &amp; Save</strong>, then <strong>Self-test</strong>. If in doubt, let
+          <code>probe_shutter.py</code> determine it — it reports the polarity explicitly.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "Digital I/O line N was set to X but reads back as Y"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> the line is write-protected
+          (<code>digio.writeprotect</code> is non-zero), or another device on the port is holding
+          it.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Run <code>python probe_shutter.py --read</code>; it prints the write-protect mask.</li>
+            <li>Check whether another instrument shares the DB-25. If so, use
+                <code>--lines</code> to keep the probe away from its line, and make sure the
+                shutter is configured for a line nothing else drives.</li>
+            <li>As a last resort the check can be switched off with <strong>"Verify the line
+                after writing"</strong> — but you then lose the only warning you would get about
+                a stuck line.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter is open whenever the Keithley is switched on</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Not a fault. The 2600's digital I/O
+          lines idle HIGH through a 5.1 kΩ pull-up, so a non-inverting interface holds the
+          shutter open whenever nothing is driving the line.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Connect the instrument in the software — it closes the shutter immediately on
+                connect.</li>
+            <li>For a permanent fix, have the interface box inverted so that the Keithley pulls
+                the line <em>low</em> to open. The resting state then becomes closed, and the
+                software configuration is simply "HIGH opens" unchecked.</li>
+            <li>Switch the SourceMeter off when leaving the bench: with no power there is no
+                pull-up, and the line falls.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ A dark measurement looks illuminated (or the reverse)</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> SHUTTER CONTROL left in
+          INTERNAL/TIMED, so the "open" became a timed exposure that ended mid-scan; the beam is
+          blocked by something other than the shutter; the lamp is off.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ol>
+            <li>Enable <strong>"Confirm the light state with an SMU reading"</strong>. This is
+                exactly the failure it exists to catch, and it will stop the run instead of
+                saving a plausible-looking wrong curve.</li>
+            <li>Check the SHUTTER CONTROL switch is in EXTERNAL.</li>
+            <li>Run <code>python probe_smu.py</code> with the lamp on and the shutter open. It
+                steps through voltages on both SMU channels and says whether it is seeing a lit
+                cell, a dark cell, or nothing connected.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Serial backend: "Could not open serial port"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> wrong port name; the Arduino IDE's
+          Serial Monitor (or another program) already has the port open; missing driver.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Close the Arduino Serial Monitor. Windows gives a serial port to one program at a time.</li>
+            <li>Confirm the port name in Device Manager under <em>Ports (COM &amp; LPT)</em>.</li>
+            <li>Install the board's USB-serial driver (CH340 clones in particular need one).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Serial backend: "did not answer within N s"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> wrong baud rate; wrong line ending;
+          the controller has no state query; the reply arrives after the timeout.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Check baud rate and line ending against the controller's manual. An Arduino using
+                <code>readStringUntil('\n')</code> needs <strong>LF</strong>.</li>
+            <li>Raise <em>Reply timeout</em>.</li>
+            <li>If the controller genuinely cannot report its state, clear the <em>State query</em>
+                field. The software will then trust the command instead of verifying it.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Arduino: the first command after connecting is lost</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Most Arduino boards <strong>reset</strong>
+          when the serial port is opened (the DTR line is wired to reset), and then spend a second
+          or two in the bootloader, discarding anything sent meanwhile.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Raise <em>Delay after opening the
+          port</em> to 2 s or more. The software opens the port once and keeps it open, so this
+          cost is paid a single time per session, not per shutter movement. Boards that do not
+          reset on DTR can use 0.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "This shutter backend needs pyserial"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> pyserial is not installed in the
+          Python environment running the software.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> <code>pip install pyserial</code>,
+          then restart the software. It is deliberately an optional dependency: the import happens
+          only when the backend is actually used, so its absence never prevents the application
+          from starting.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The Test buttons do nothing and say a measurement is running</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Not a fault. The shutter shares the
+          instrument's connection, and moving it mid-scan would invalidate the data.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Stop the measurement first. If no
+          measurement is actually running, the software may have been left in that state by an
+          error — Instrument → Disconnect and reconnect clears it.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "The shutter could not be opened automatically"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Two consecutive failures — the software
+          already retried once before asking.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> The dialog offers to continue with
+          a hand-moved shutter (OK) or abort the measurement (Cancel). Both are safe choices;
+          what the software will never do is carry on silently with an unknown illumination
+          state. Afterwards, use <strong>Self-test</strong> to reproduce the failure with its full
+          error message.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter chatters, or the solenoid gets hot</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Too many open/close cycles. ABET warns
+          against sustained operation above 3 Hz.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Normal use is far below that
+          limit — one open and one close per measurement. If you see rapid cycling, something is
+          calling the shutter in a loop: check that an ISOS protocol is not configured with a
+          scan interval of seconds, and report it as a bug if not.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       11. PRE-BIAS CONDITIONING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="prebias">
-    <h2>10. Pre-bias Conditioning</h2>
+    <h2>11. Pre-bias Conditioning</h2>
 
     <h3>Physical motivation</h3>
     <p>
@@ -950,10 +1563,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       11. RUNNING A J-V MEASUREMENT
+       12. RUNNING A J-V MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="running-jv">
-    <h2>11. Running a J-V Measurement <span class="mode-badge jv">Alt+F2</span></h2>
+    <h2>12. Running a J-V Measurement <span class="mode-badge jv">Alt+F2</span></h2>
 
     <h3>Measurement sequence (automated)</h3>
     <div class="seq-flow">
@@ -1059,10 +1672,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       12. LIGHT-INTENSITY J-V
+       13. LIGHT-INTENSITY J-V
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="light-jv">
-    <h2>12. Light-Intensity J-V <span class="mode-badge jv">Alt+F3</span></h2>
+    <h2>13. Light-Intensity J-V <span class="mode-badge jv">Alt+F3</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -1131,7 +1744,7 @@
     <p>
       Output is a consolidated workbook containing all J-V curves, the per-intensity PV parameters,
       and the fitted n<sub>idL</sub> with its standard error and R². The fit is also viewable later in
-      the Data Viewer (Section 25).
+      the Data Viewer (Section 26).
     </p>
     <div class="tip-box">
       <div class="box-label">Tip — clean fits</div>
@@ -1141,10 +1754,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       13. STABILIZED CURRENT MEASUREMENT
+       14. STABILIZED CURRENT MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="stab">
-    <h2>13. Stabilized Current Measurement <span class="mode-badge stab">Alt+F6</span></h2>
+    <h2>14. Stabilized Current Measurement <span class="mode-badge stab">Alt+F6</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -1260,10 +1873,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       13. MPP TRACKING — JV-SPO CYCLING
+       14. MPP TRACKING — JV-SPO CYCLING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="mpp">
-    <h2>14. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F5</span></h2>
+    <h2>15. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F5</span></h2>
 
     <h3>Protocol overview</h3>
     <p>
@@ -1395,10 +2008,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       14. PURE MPP TRACKING — P&O
+       15. PURE MPP TRACKING — P&O
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="pure-mpp">
-    <h2>15. Pure MPP Tracking — Perturb &amp; Observe <span class="mode-badge pmpp">Alt+F7</span></h2>
+    <h2>16. Pure MPP Tracking — Perturb &amp; Observe <span class="mode-badge pmpp">Alt+F7</span></h2>
 
     <h3>Algorithm description</h3>
     <p>
@@ -1542,10 +2155,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       15. DARK J-V MEASUREMENT
+       16. DARK J-V MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="dark-jv">
-    <h2>16. Dark J-V Measurement <span class="mode-badge jv">Alt+F2 (within J-V mode)</span></h2>
+    <h2>17. Dark J-V Measurement <span class="mode-badge jv">Alt+F2 (within J-V mode)</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -1588,10 +2201,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       17. ISOS PROTOCOLS OVERVIEW
+       18. ISOS PROTOCOLS OVERVIEW
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="isos-overview">
-    <h2>17. ISOS Protocols Overview <span class="mode-badge" style="background:#00695C;">Alt+F9</span></h2>
+    <h2>18. ISOS Protocols Overview <span class="mode-badge" style="background:#00695C;">Alt+F9</span></h2>
 
     <h3>What ISOS is</h3>
     <p>
@@ -1674,7 +2287,7 @@
           (e.g. the next day) — elapsed time keeps counting from the original t₀, and the
           measurement history and stability metrics are reconstructed from the file.</li>
       <li>The folder of each experiment is remembered so the software can offer
-          <strong>crash recovery</strong> (Section 23) the next time it starts.</li>
+          <strong>crash recovery</strong> (Section 24) the next time it starts.</li>
     </ul>
 
     <h3>The ISOS panel</h3>
@@ -1693,10 +2306,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       18. SHARED ISOS PARAMETERS
+       19. SHARED ISOS PARAMETERS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="isos-common">
-    <h2>18. Shared ISOS Parameters</h2>
+    <h2>19. Shared ISOS Parameters</h2>
     <p>These controls apply to all three protocols. Protocol-specific parameters are documented
        in Sections 19–21.</p>
 
@@ -1751,7 +2364,7 @@
     <div class="param-block">
       <div class="param-name">Pre-bias</div>
       <p style="margin-top:8px;">Optional conditioning hold before the reverse scan, identical to
-         Section 10. Use the same setting on every point for reproducible HI.</p>
+         Section 11. Use the same setting on every point for reproducible HI.</p>
     </div>
     <div class="param-block">
       <div class="param-name">Light Soaking</div>
@@ -1761,10 +2374,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       19. ISOS-D-1
+       20. ISOS-D-1
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="isos-d1">
-    <h2>19. ISOS-D-1 — Dark Storage / Shelf Life</h2>
+    <h2>20. ISOS-D-1 — Dark Storage / Shelf Life</h2>
 
     <h3>Protocol</h3>
     <p>
@@ -1779,7 +2392,7 @@
     <ol>
       <li>Select <strong>ISOS-D-1</strong>, set sample name and export folder, then click
           <strong>New Experiment</strong>. This stamps t₀.</li>
-      <li>Set the scan, illumination, instrument, and conditioning parameters (Section 18).</li>
+      <li>Set the scan, illumination, instrument, and conditioning parameters (Section 19).</li>
       <li>Press <strong>Run ISOS</strong>. The software runs the same sequence as a normal J-V
           measurement (optional dark J-V → optional light soak → forward → optional pre-bias →
           reverse) and appends one row to the tracking workbook with the elapsed time and all PV
@@ -1792,7 +2405,7 @@
     <p>
       For D-1 the panel shows a live table of every point: index, date, elapsed hours, reverse-scan
       PCE, and PCE normalised to the first measurement (PCE/PCE₀). A normalised value of 0.80 marks
-      T80 — the canonical lifetime endpoint (Section 22).
+      T80 — the canonical lifetime endpoint (Section 23).
     </p>
     <div class="tip-box">
       <div class="box-label">Tip — keep the cadence regular</div>
@@ -1803,10 +2416,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       20. ISOS-L-1
+       21. ISOS-L-1
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="isos-l1">
-    <h2>20. ISOS-L-1 — Continuous Light Soaking</h2>
+    <h2>21. ISOS-L-1 — Continuous Light Soaking</h2>
 
     <h3>Protocol</h3>
     <p>
@@ -1875,7 +2488,7 @@
       <div class="param-name">MPP load — Engine, Perturb step, V min/max, MPP log interval</div>
       <p style="margin-top:8px;">When load = MPP, the cell is held near maximum power during stress.
          The <strong>Engine</strong> is either <strong>P&amp;O</strong> (continuous perturb-and-observe,
-         Section 15) or <strong>JV-SPO</strong> (periodic mini J-V then hold V<sub>mpp</sub>).
+         Section 16) or <strong>JV-SPO</strong> (periodic mini J-V then hold V<sub>mpp</sub>).
          <strong>Perturb step</strong> (default 10 mV) is the P&amp;O voltage increment;
          <strong>V min/max</strong> (0–1.2 V) clamp the tracked voltage to a safe window; and the
          <strong>MPP log interval</strong> (default 2 s) sets how often a stress sample is streamed
@@ -1898,10 +2511,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       21. ISOS-V-1
+       22. ISOS-V-1
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="isos-v1">
-    <h2>21. ISOS-V-1 — Dark Electrical-Bias Stress</h2>
+    <h2>22. ISOS-V-1 — Dark Electrical-Bias Stress</h2>
 
     <h3>Protocol</h3>
     <p>
@@ -1930,7 +2543,7 @@
       <div class="param-name">Start / End / Step (V) and Fit V_min / V_max</div>
       <p style="margin-top:8px;">The dark sweep range (default −0.2 V → 1.1 V, 25 mV) and the voltage
          window used to fit the dark ideality factor (default 0.5–0.8 V). The window should sit in the
-         exponential injection region — see Section 27 for how to choose it.</p>
+         exponential injection region — see Section 28 for how to choose it.</p>
     </div>
     <div class="param-block">
       <div class="param-name">Log I_dark during stress</div>
@@ -1941,7 +2554,7 @@
     <h3>Timing, baseline &amp; load</h3>
     <p>Total duration, pre-scan relaxation, SPO after scan, equilibration (default <em>on</em>, 12 h —
        bias cells benefit from a long dark settle), and baseline scans / rest behave as in L-1
-       (Section 20). When load = MPP, V-1 simply <em>holds the last V<sub>mpp</sub></em> from the most
+       (Section 21). When load = MPP, V-1 simply <em>holds the last V<sub>mpp</sub></em> from the most
        recent scan as a constant dark bias (with the same V min/max clamp and I_dark log interval).</p>
 
     <h3>Failure detection (three independent triggers)</h3>
@@ -1970,10 +2583,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       22. STABILITY METRICS
+       23. STABILITY METRICS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="isos-metrics">
-    <h2>22. Stability Metrics</h2>
+    <h2>23. Stability Metrics</h2>
 
     <p>
       After every characterisation the software recomputes a set of stability metrics from the
@@ -2026,10 +2639,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       23. AUTOSAVE & CRASH RECOVERY
+       24. AUTOSAVE & CRASH RECOVERY
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="isos-autosave">
-    <h2>23. Autosave &amp; Crash Recovery</h2>
+    <h2>24. Autosave &amp; Crash Recovery</h2>
 
     <p>
       Continuous ISOS runs can last days, so the software is built to survive a crash or power loss
@@ -2068,10 +2681,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       24. DATA CURATION
+       25. DATA CURATION
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="data-curation">
-    <h2>24. Data Curation <span class="mode-badge curation">Alt+F8</span></h2>
+    <h2>25. Data Curation <span class="mode-badge curation">Alt+F8</span></h2>
 
     <p>
       Data Curation is a post-processing tool for batch analysis of multiple J-V measurement files.
@@ -2222,10 +2835,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       17. DATA VIEWER
+       18. DATA VIEWER
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="data-viewer">
-    <h2>25. Data Viewer &amp; Visualization</h2>
+    <h2>26. Data Viewer &amp; Visualization</h2>
 
     <h3>Opening the Data Viewer</h3>
     <p>Go to <strong>File → Open Data File…</strong>. A file dialog opens; select any
@@ -2302,12 +2915,12 @@
     <ul>
       <li><strong>Single-Diode Fit</strong> (illuminated J-V files) — opens the interactive
           five-parameter fit window with overlay, residuals, editable temperature and bounds, re-fit,
-          CSV export, and save-to-file (Section 26).</li>
+          CSV export, and save-to-file (Section 27).</li>
       <li><strong>Dark Ideality Fit</strong> (dark J-V files) — opens the log<sub>10</sub>|J|-vs-V
-          ideality fit with an adjustable voltage window (Section 27).</li>
+          ideality fit with an adjustable voltage window (Section 28).</li>
       <li><strong>Light-intensity workbooks</strong> additionally display the fitted light ideality
           factor n<sub>idL</sub> and its V<sub>oc</sub>-vs-ln(L) regression directly in the metadata
-          panel and plot (Section 28).</li>
+          panel and plot (Section 29).</li>
     </ul>
     <p>Any saved fit (auto-fit or interactive) is re-read and shown automatically when the file is
        reopened, so an analysis only needs to be done once.</p>
@@ -2322,24 +2935,24 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       26. SINGLE-DIODE FIT
+       27. SINGLE-DIODE FIT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="diode-fit">
-    <h2>26. Single-Diode Fit</h2>
+    <h2>27. Single-Diode Fit</h2>
 
     <h3>What it does</h3>
     <p>
       The single-diode fit extracts the five physical device parameters
       (J<sub>ph</sub>, J<sub>0</sub>, n, R<sub>s</sub>, R<sub>sh</sub>) by fitting the full
       implicit diode equation to a measured illuminated J-V curve. Unlike the local-slope
-      estimates of R<sub>s</sub> and R<sub>sh</sub> (Section 31), the fit uses the
+      estimates of R<sub>s</sub> and R<sub>sh</sub> (Section 32), the fit uses the
       <em>entire</em> curve at once, so the parameters are mutually consistent and come with
       statistical uncertainties.
     </p>
 
     <h3>Theory — the implicit equation</h3>
     <p>The cell is modelled as a photocurrent source in parallel with a diode and a shunt
-       resistance, in series with R<sub>s</sub> (Section 32). In the software's unit convention
+       resistance, in series with R<sub>s</sub> (Section 33). In the software's unit convention
        (J in mA/cm², R in Ω·cm²):</p>
     <div class="equation">
       J = J<sub>ph</sub> − J<sub>0</sub>·[exp((V + J·R<sub>s</sub>·10<sup>−3</sup>)/(n·V<sub>T</sub>)) − 1]
@@ -2403,10 +3016,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       27. DARK J-V IDEALITY FIT
+       28. DARK J-V IDEALITY FIT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="dark-ideality">
-    <h2>27. Dark J-V Ideality Fit</h2>
+    <h2>28. Dark J-V Ideality Fit</h2>
 
     <h3>What it does</h3>
     <p>
@@ -2427,7 +3040,7 @@
     <div class="equation">
       n = 1 / (V<sub>T</sub>·ln 10·slope), &nbsp;&nbsp; J<sub>s</sub> = 10<sup>intercept</sup>
     </div>
-    <p>The same n-interpretation table as the light ideality factor applies (Section 12): n≈1
+    <p>The same n-interpretation table as the light ideality factor applies (Section 13): n≈1
        radiative/surface, n≈2 trap-assisted SRH, n&gt;2 interface/ionic.</p>
 
     <h3>Example fit</h3>
@@ -2452,17 +3065,17 @@
     <p>Open a dark J-V file in the Data Viewer and click <strong>Dark Ideality Fit</strong> (enabled only
        for dark files). Adjust the V<sub>min</sub>/V<sub>max</sub> window and temperature, re-fit, and read
        n, J<sub>s</sub>, and R². In ISOS-V-1 the dark ideality fit is run automatically on every dark scan
-       using the window set in the V-1 sub-frame (Section 21).</p>
+       using the window set in the V-1 sub-frame (Section 22).</p>
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       28. LIGHT IDEALITY FACTOR
+       29. LIGHT IDEALITY FACTOR
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="light-ideality">
-    <h2>28. Light Ideality Factor</h2>
+    <h2>29. Light Ideality Factor</h2>
     <p>
       The light ideality factor n<sub>idL</sub> is produced by the Light-Intensity J-V mode
-      (Section 12), where its full theory is given. It is the slope of V<sub>oc</sub> versus
+      (Section 13), where its full theory is given. It is the slope of V<sub>oc</sub> versus
       ln(L) in units of k<sub>B</sub>T/q, and like the dark ideality factor it diagnoses the
       dominant recombination mechanism — but it does so under <em>real operating illumination</em>,
       which is often more representative than the dark diode.
@@ -2471,7 +3084,7 @@
     <p>Open a Light-Intensity workbook in the Data Viewer. The metadata panel reports n<sub>idL</sub>
        for the forward and reverse scans with their standard errors and R², any fit warnings, and the
        plot shows the V<sub>oc</sub>-vs-ln(L) regression line over the data points (see the example in
-       Section 12).</p>
+       Section 13).</p>
     <div class="info-box">
       <div class="box-label">ℹ Dark vs light ideality</div>
       A dark ideality near 2 with a light ideality near 1 (or vice versa) is informative in itself: it
@@ -2481,10 +3094,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       29. EXCEL FILE FORMAT
+       30. EXCEL FILE FORMAT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="excel-format">
-    <h2>29. Excel File Format</h2>
+    <h2>30. Excel File Format</h2>
 
     <p>All files use a unified three-row layout for easy programmatic parsing:</p>
     <ul>
@@ -2551,10 +3164,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       19. UNDERSTANDING J-V RESULTS
+       20. UNDERSTANDING J-V RESULTS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="results">
-    <h2>30. Understanding J-V Results</h2>
+    <h2>31. Understanding J-V Results</h2>
 
     <h3>Indicators of a good cell</h3>
     <ul>
@@ -2601,10 +3214,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       20. PHOTOVOLTAIC PARAMETERS
+       21. PHOTOVOLTAIC PARAMETERS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="pv-parameters">
-    <h2>31. Photovoltaic Parameters</h2>
+    <h2>32. Photovoltaic Parameters</h2>
 
     <div class="param-block">
       <div class="param-name">Short-circuit Current Density — J<sub>sc</sub></div>
@@ -2668,10 +3281,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       21. EQUIVALENT CIRCUIT MODEL
+       22. EQUIVALENT CIRCUIT MODEL
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="circuit-model">
-    <h2>32. Equivalent Circuit Model</h2>
+    <h2>33. Equivalent Circuit Model</h2>
 
     <p>The single-diode model represents a solar cell as a photocurrent source in parallel with
        a diode, a shunt resistance, and a series resistance.</p>
@@ -2700,10 +3313,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       22. HYSTERESIS IN PEROVSKITES
+       23. HYSTERESIS IN PEROVSKITES
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="hysteresis">
-    <h2>33. Hysteresis in Perovskite Solar Cells</h2>
+    <h2>34. Hysteresis in Perovskite Solar Cells</h2>
 
     <h3>Physical origin</h3>
     <p>Perovskite absorbers are <strong>mixed ionic-electronic conductors</strong>. Mobile ionic
@@ -2746,10 +3359,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       23. TROUBLESHOOTING
+       24. TROUBLESHOOTING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="troubleshooting">
-    <h2>34. Troubleshooting</h2>
+    <h2>35. Troubleshooting</h2>
 
     <div class="trouble-block">
       <div class="trouble-problem">❌ "No instruments found" in the connection dialog</div>
@@ -2788,7 +3401,7 @@
         <div class="trouble-solution"><strong>Solutions:</strong>
           <ul>
             <li>Increase End Voltage to at least 0.1 V above the expected V<sub>oc</sub>.</li>
-            <li>Verify the solar simulator shutter is open and illumination is ≥100 mW/cm².</li>
+            <li>Verify the solar simulator shutter is open and illumination is ≥100 mW/cm². If the software controls your shutter, see <a href="#shutter">Section 10</a> — enabling <em>Confirm the light state with an SMU reading</em> catches this case before the data is saved.</li>
             <li>Check cell contact polarity (Force HI to counter-electrode).</li>
           </ul>
         </div>
@@ -2854,7 +3467,7 @@
             <li>Install mplcursors: <code>pip install mplcursors</code> in the correct Python
                 environment.</li>
             <li>Verify the file is a valid <code>.xlsx</code> file with one of the supported
-                sheet names (see Section 25).</li>
+                sheet names (see Section 26).</li>
           </ul>
         </div>
       </div>
@@ -2878,10 +3491,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       23. REFERENCES
+       24. REFERENCES
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="references">
-    <h2>35. References</h2>
+    <h2>36. References</h2>
 
     <ol class="ref-list">
       <li data-ref="[1]">

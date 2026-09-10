@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+- **Shutter control** — the software now opens and closes the solar simulator's shutter itself, in every measurement mode. Configure it in **Instrument → Shutter Control…** (menu bar, not a measurement panel: one configuration serves J-V, Light-Intensity, MPP, Pure MPP, Stabilized Current and every ISOS protocol)
+- Shutter backends are pluggable. Three ship with the software:
+  - **Manual** (the default) — prompts the operator, exactly as before
+  - **Keithley 2600 digital I/O** — drives one of the 14 lines on the SourceMeter's DB-25
+  - **Serial / Arduino** — configurable text commands, so an Arduino or most commercial controllers (Thorlabs SC10, Uniblitz, USB relay boards) work with no code change. Example sketch in `docs/arduino_shutter.ino`. Needs `pip install pyserial`
+- Adding a fourth backend is one module plus one registry entry and **no GUI code**: the settings form is generated from the backend's declared fields
+- Shutter state is asserted rather than assumed — closed on connect, after every measurement, on disconnect and on exit. Backends that need no SourceMeter are closed at application startup
+- Optional verification of the light state with an SMU current reading, which catches a "dark" scan that silently ran illuminated
+- `probe_shutter.py` — bench tool that finds which digital I/O line drives the shutter, with which polarity, and how long the blade takes to travel
+- `probe_smu.py` — bench tool that reports what the SourceMeter is actually measuring, for diagnosing a J-V curve with no zero-crossing
+- Keithley **2600-series (TSP)** support via a translating transport, so the existing SCPI measurement code drives a 2612 unchanged. A 2400 is never wrapped
+- **Connect to Simulator** — run every measurement mode end to end with no hardware
+- User preferences persist in `~/.jv-measurement/settings.json` (atomic write, corrupt file falls back to defaults)
+- Documentation: new **Section 10 — Shutter Control** in the user guide, covering wiring, both automatic backends, commercial controllers, and twelve troubleshooting entries
+
+### Fixed
+- J-V plot axis limits were hard-coded, clipping any sweep that ran past 1.2 V — a high-Voc cell lost its zero-crossing off the right edge. The upper edges now follow the data. The lower X edge stays pinned at 0 V on purpose, so sub-zero conditioning points are measured and saved but not drawn
+- On a 2600 the front panel kept displaying whatever it was last left on, so an operator could watch it read volts through an entire current sweep. `:SENS:FUNC` now points the display at the quantity being sensed
+
 ## [2.6.0] — 2026-04-23
 
 ### Added

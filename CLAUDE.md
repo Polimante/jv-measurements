@@ -31,16 +31,26 @@ app/
   gui/
     main_window.py             # JVMeasurementApp — entire GUI, measurement orchestration
     instrument_dialog.py       # Modal VISA scanner dialog (Toplevel)
+    shutter_dialog.py          # Shutter Control window (Instrument menu)
+    plot_limits.py             # jv_plot_limits() - Tk-free axis maths for the J-V plot
     data_viewer.py             # DataViewerWindow — read-only viewer for saved xlsx files
     tooltip.py                 # ToolTip hover widget
   instrument/
     keithley.py                # Stateless SCPI helpers (init, prebias, light_soaking, scan)
+  shutter/                     # Pluggable shutter backends (see "Shutter control")
+    base.py                    # Shutter ABC + ConfigField/BackendSpec metadata
+    __init__.py                # BACKENDS registry, create_shutter, default_config
+    manual.py                  # ManualShutter — prompts the operator (default)
+    keithley_digio.py          # KeithleyDigioShutter — digio.writebit on a 2600
+    serial_command.py          # SerialCommandShutter — text commands over serial
+    manager.py                 # ShutterManager — lock, retry, persistence, state
   measurement/
     analysis.py                # Pure math: calculate_jv_parameters, calculate_resistances, HI
     mpp_tracker.py             # MPPTracker — JV-SPO cycling protocol (Alt+F5)
     pure_mpp_tracker.py        # PureMPPTracker — Perturb-and-Observe continuous tracking (Alt+F6)
     isos_protocols.py          # ProtocolSpec registry (PROTOCOLS, get_protocol, list_protocol_*)
   io/
+    app_settings.py            # ~/.jv-measurement/settings.json (atomic, corruption-tolerant)
     exporter.py                # save_data() and save_dark_jv_data() → xlsxwriter
     isos_tracking.py           # Generic ISOS tracking workbook (create / append / read) + D-1 shims
     isos_autosave.py           # CSVStream durable autosave + consolidate_csv_into_xlsx()
@@ -50,6 +60,7 @@ app/
     updater.py                 # check_for_updates() — fetches version.json from GitHub
 docs/
   help.html                    # Standalone HTML help opened via webbrowser.open()
+  arduino_shutter.ino          # Example sketch for the serial shutter backend
 build_installer/
   setup.iss                    # Inno Setup 6 script → dist/JV-Measurements-Setup-vX.X.X.exe
 version.json                   # Machine-readable version + release notes (read by updater.py)
@@ -62,6 +73,8 @@ version.json                   # Machine-readable version + release notes (read 
 **Stop mechanism**: `stop_event` (module-level `threading.Event` in `constants.py`) is shared between the GUI thread and measurement thread. All loops in `keithley.py` check it. Call `stop_event.clear()` in the `finally` block after every measurement.
 
 **Session data**: `self.session_data` is a list of dicts accumulated during the application session. Each entry holds raw arrays (`v_fwd`, `j_fwd`, `v_rev`, `j_rev`, `power_fwd`, `power_rev`, optional dark arrays), all PV parameters, and a color from `PLOT_COLORS`. `update_plot()` redraws from this list on every call — it does not accept data arguments.
+
+**J-V plot axis limits** (`jv_plot_limits` in `app/gui/plot_limits.py`, kept out of `main_window` so the tests are not Windows-only — `main_window` imports `winsound`): the upper edges follow the data, with the historical 0-1.2 V / 0-30 mA/cm2 window kept as a floor so ordinary runs look unchanged. Two deliberate exclusions: the **lower X edge stays pinned at 0 V** (sweeps are often started below zero as a conditioning step, and those points carry a settling transient belonging to the treatment, not the device — they are measured and saved, just not drawn), and **dark current is excluded from the vertical fit** (it is exponential and reaches hundreds of mA/cm2, so fitting it would squeeze the photocurrent into a flat line on zero; one linear axis cannot show both, and the semi-log |J| view in the Data Viewer's "Dark Ideality Fit" is the tool for reading a dark diode).
 
 **Plot interactivity**: The Matplotlib canvas uses `button_press_event` (not `pick_event`) for legend toggling because `mplcursors` with `hover=True` interferes with `pick_event` in the Tkinter backend. The active connection id is stored in `self._pick_cid` and disconnected before re-registering on each redraw.
 
@@ -85,9 +98,160 @@ measurement code onto the ABC would mean rewriting the most safety-critical code
 it in CI. The payoff is only consistency, so we do not do it.
 
 Consequence for tests: SCPI-based components are tested with SCPI-shaped fakes
-(`MagicMock` with a `.query` side-effect, or `tests/_isos_runner_helpers.FakeKeithley`),
+(`MagicMock` with a `.query` side-effect, or `app.simulation.fake_keithley.FakeKeithley`),
 **not** with `DummySMU`. Revisit this split only if a concrete need arises to run a
 real measurement mode (e.g. ISOS-L-1/V-1) through `DummySMU` in the live GUI.
+
+**Keithley 2600-series (TSP) support — `tsp_transport.py`.** The raw-SCPI path is
+the native language of the Keithley **2400**. The Keithley **2600 series**
+(2601/2602/2611/2612/2634/2635/2636, 2650 family) speaks **TSP** instead and
+rejects colon-commands with error `-285 (TSP Syntax error … near ':')`. Rather
+than rewrite the ~50 SCPI call sites, `app/instrument/tsp_transport.py` inserts a
+translating transport *below* all of them: `TSPTransport` wraps the pyvisa
+resource and presents the same `.write(cmd)` / `.query(cmd)` interface, mapping
+the finite SCPI vocabulary the code emits into TSP (`smua`/`smub`) and reshaping
+`:READ?` replies back into the 2400 `"volt,curr,…"` comma format so
+`.split(",")[…]` parsing is unaffected. **A 2400 is never wrapped** — it stays a
+bare pyvisa resource, byte-for-byte identical to before, so the tested SCPI path
+is unchanged; the transport only ever sits in front of a 2600. `open_instrument_dialog`
+auto-selects via `is_tsp_instrument(idn)` (matches `MODEL 26xx`); the SMU channel
+(A/B) comes from the "SMU channel" dropdown in the Instrument Settings tab
+(`self.tsp_channel_var`, default A, read at connect). Unmapped commands raise
+`UnsupportedSCPICommand` (fail loud, not a silent `-285` mid-run). Fully covered by
+`tests/test_tsp_transport.py` (hardware-free). This does **not** touch the
+`SourceMeter` ABC — the two-instrument split above is preserved.
+
+### Shutter control — `app/shutter/`
+
+Pluggable shutter backends, so the software works with whatever hardware a lab
+has. **Adding a backend is one module plus one entry in `app/shutter/__init__.py`
+— no GUI code.** The **Instrument → Shutter Control…** window
+(`app/gui/shutter_dialog.py`) renders the selected backend's settings form
+from its `BackendSpec.fields` tuple (`ConfigField` declares
+name/kind/default/bounds/tooltip and does its own coercion), so no GUI file
+names a backend's options.
+
+The window hangs off the menu bar rather than a measurement panel on
+purpose: the shutter is a property of the rig, so one configuration serves
+J-V, Light Intensity, MPP, Stabilized Current, Pure MPP and every ISOS
+protocol. `JVMeasurementApp.open_shutter_dialog()` keeps it single-instance;
+the app owns `shutter_state_var` and pushes the badge colour into the window
+when one is open, so state changes from a measurement thread still show.
+
+| Piece | Role |
+|---|---|
+| `base.py` | `Shutter` ABC, `ConfigField`, `BackendSpec`, `ShutterError`, the `OPEN`/`CLOSED`/`UNKNOWN` states |
+| `__init__.py` | The `BACKENDS` registry + `create_shutter` / `default_config`. Factories import lazily so a backend's dependency stays optional |
+| `manual.py` | `ManualShutter` — prompts the operator. **The default**, and byte-identical to the pre-shutter behaviour |
+| `keithley_digio.py` | `KeithleyDigioShutter` — `digio.writebit` on a 2600 line |
+| `serial_command.py` | `SerialCommandShutter` — configurable text commands over a serial port. Covers an Arduino (see `docs/arduino_shutter.ino`), Thorlabs SC10, Uniblitz, USB relay boards: only the words change, never the code. `pyserial` is imported at connect time, never at construction, so a stored config naming it cannot stop the app from starting |
+| `manager.py` | `ShutterManager` — the only object the rest of the app touches |
+
+Contract: `open()`/`close()` **block until settled** (the settle delay is inside
+them) and are **idempotent**, so every call site is a one-liner. Nothing in the
+package imports tkinter — the manual backend's dialog is injected as a
+`prompt(action)` callable, the same pattern `ContinuousISOSRunner` already uses
+for `on_shutter`.
+
+`ShutterManager` owns the backend, serialises access behind an `RLock` (the
+Keithley backend shares the SourceMeter's VISA session, and the panel's Test
+buttons run on the Tk thread while measurements run on their own), retries a
+failed actuation once, persists config via `app/io/app_settings.py`
+(`~/.jv-measurement/settings.json`, atomic write, corrupt file → defaults), and
+reports state through `on_state_change` so the panel's badge can follow.
+
+**The `keithley_digio` backend and `TSPTransport`.** Digital I/O has no SCPI
+equivalent to translate *from*, so `TSPTransport.write_raw()` / `query_raw()`
+pass TSP straight through. They are separate methods on purpose: the guarantee
+that every `write()`/`query()` is a checked, enumerated translation is what
+keeps the SCPI path trustworthy. **Both** are needed — the backend's readback
+verification (`print(digio.readbit(N))`) is a query, and routing it through
+`query()` raises `UnsupportedSCPICommand`.
+
+**Startup state is asserted, not assumed.** A 2600's digital I/O lines idle HIGH
+(5.1 kΩ pull-up) and `reset()` does not touch them, so with a non-inverting
+interface box the shutter sits OPEN whenever nothing is driving it. The
+application therefore closes the shutter as soon as it can reach the hardware —
+in `open_instrument_dialog` via `_shutter_close_on_connect()` — and again in
+`_close_instrument()` *before* the VISA session goes away (which also covers
+application exit). It cannot close it any earlier than connect-time, and the
+badge reads "unknown (connect instrument)" until then. Both paths go through
+`_shutter_close_if_automatic()`, which skips non-automatic backends
+(`BackendSpec.is_automatic`): a manual backend closing there would pop a modal
+prompt on every connect, disconnect and quit.
+
+A backend that needs **no** SourceMeter (`requires_instrument=False` — the
+serial one) has nothing to wait for, so `_shutter_close_at_startup()` closes it
+200 ms after launch. That is the strongest form of the guarantee, and it is
+available to any rig whose shutter is not wired through the SMU.
+
+The lab's ABET Sun 2000 is wired to **digital I/O line 1, active HIGH, 68 ms of
+blade travel** (measured with `probe_shutter.py`; 300 ms is used as the settle
+delay). The simulator's SHUTTER CONTROL switch must be in EXTERNAL, where its
+SHUTTER INPUT BNC is level-sensitive.
+
+**`probe_shutter.py`** (project root) is the bench tool that finds the line,
+polarity and settling time of an unknown wiring, without touching the
+instrument's front panel. Manual mode watches the simulator's LED; `--auto` uses
+the SMU's own current reading and also times the blade.
+
+**How measurements drive it — `_shutter_set(open_, prompt_if_manual=...)`.**
+Every measurement mode goes through this one method on `JVMeasurementApp`, and
+the `prompt_if_manual` flag is what keeps the change safe for existing users:
+
+* `True` only at the boundaries that **already** showed a dialog before shutter
+  automation existed — the dark/illuminated handover in J-V and ISOS-D-1, and
+  the ISOS-V-1 scan boundaries.
+* `False` everywhere else (MPP, Pure MPP, Stabilized Current, Light Intensity,
+  the ISOS stress phases, and every `finally`).
+
+So a rig left on the **manual** backend sees exactly the dialogs it always saw —
+no more, no fewer — while an automatic backend drives the shutter everywhere.
+On the **simulator** the method toggles the fake cell's illumination and never
+shows a dialog at all, so an unattended dark-J-V run goes start to finish
+untouched (`tests/test_gui_smoke.py`).
+
+It returns False when the operator aborts, having set `stop_event` — so the
+callers' existing stop checks unwind the run exactly as the Stop button does.
+When an automatic backend fails twice (the manager already retried), the
+operator is offered a hand-move via `_shutter_manual_fallback`: OK continues,
+Cancel aborts. Continuing with an unknown illumination state is never an option.
+
+Closing is bracketed in the `finally` of all six measurement threads;
+MPP and Pure MPP hand their run loop straight to a daemon thread, so
+`_run_illuminated(work)` supplies the open/close bracket for those two.
+`ContinuousISOSRunner` is **untouched** — it has always emitted `on_shutter` and
+always blocked on it; only what happens inside `_isos_v1_shutter_prompt` changed.
+
+The pre-flight Safety Check dialogs are generated through
+`_shutter_safety_line()`, so they stop telling the operator to "confirm the
+shutter is open" once the software is the one opening it.
+
+**Verification by measurement (optional, off by default).** The shutter can only
+report what it *commanded*; the SMU can report what the cell actually sees. With
+"Confirm the light state with an SMU reading" ticked in the Shutter Control
+window, `_shutter_set` reads the cell current at 0 V after each move and checks
+it against the requested state (`verify_with_current` / `verify_threshold_a`, in
+the shutter settings section, not per backend). This is what catches the
+dangerous case on non-fail-safe wiring: a "dark" scan that silently ran
+illuminated looks perfectly plausible in the data. A mismatch asks whether to
+continue or abort; a failure of the *check itself* never fails a run. It reads
+through the plain SCPI vocabulary, so it works on a 2400 and, via
+`TSPTransport`, on a 2600 — and it leaves the instrument reset with the output
+off, which is why it only runs at phase boundaries where a re-initialisation
+follows.
+
+**Simulator mode (live GUI, no hardware).** `Instrument → Connect to Simulator…`
+(`open_simulator_dialog`) injects an `app.simulation.fake_keithley.FakeKeithley`
+(SCPI-shaped, backed by a `DummyCell` in one of `VALID_MODES`) directly into
+`self.instrument`. This drives the **raw-SCPI path unchanged** — it does *not*
+converge onto the `SourceMeter` ABC, so the split above is preserved. The fake is
+the same class the runner tests use (`FakeKeithley` is re-exported from
+`tests/_isos_runner_helpers.py`). `self._simulated` gates the simulator-only
+helpers; `_sim_set_light(on)` toggles the cell's illumination at dark/illuminated
+scan boundaries (and the V-1 shutter prompt) and is a no-op with real hardware.
+GUI smoke tests (`tests/test_gui_smoke.py`, `@pytest.mark.gui`) exercise full runs
+through this path.
 
 ### Sign convention
 
@@ -204,12 +368,12 @@ The canonical PCE column is `PCE_SPO` (stabilized power output) when available, 
 
 ### Future ISOS Protocols
 
-D-2/D-3 (high T, damp heat), L-2/L-3 (T-controlled light soaking), LC-* (light cycling), T-* (thermal cycling), V-2/V-3 (alternative bias loads), and O-* (outdoor) are all unimplemented — they require additional hardware (thermal chamber, motorized shutter, outdoor enclosure, etc.). Do not register them in `isos_protocols.py` without the corresponding runner support.
+D-2/D-3 (high T, damp heat), L-2/L-3 (T-controlled light soaking), LC-* (light cycling), T-* (thermal cycling), V-2/V-3 (alternative bias loads), and O-* (outdoor) are all unimplemented — they require additional hardware (thermal chamber, outdoor enclosure, etc.). The motorized shutter that LC-* needs now exists — see "Shutter control". Do not register them in `isos_protocols.py` without the corresponding runner support.
 
 ### Measurement sequence (J-V mode)
 
 ```
-[Dark J-V fwd + rev]  →  [prompt: open shutter]  →  [light soaking timer]
+[Dark J-V fwd + rev]  →  [shutter opens]  →  [light soaking timer]
 →  illuminated fwd scan  →  [pre-bias hold]  →  illuminated rev scan
 ```
 

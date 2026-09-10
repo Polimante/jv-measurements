@@ -17,25 +17,20 @@ from tkinter import (
 from datetime import datetime, timedelta
 import pyvisa
 
-PLOT_COLORS = [
-    "#1565C0",  # deep blue
-    "#B71C1C",  # deep red
-    "#1B5E20",  # deep green
-    "#E65100",  # deep orange
-    "#4A148C",  # deep purple
-    "#006064",  # deep cyan
-    "#3E2723",  # deep brown
-    "#37474F",  # blue-grey
-    "#880E4F",  # deep pink
-    "#004D40",  # deep teal
-]
-
+from app.gui.theme import PLOT_COLORS
 from app.utils.constants import APP_NAME, stop_event
 from app.utils.sound import play_completion_sound
 from app.utils.updater import check_for_updates, get_local_version
 from app.gui.tooltip import ToolTip
 from app.gui.mpp_settings_frame import build_mpp_settings_frame, build_param_grid
 from app.gui.instrument_dialog import InstrumentDialog
+from app.gui.plot_limits import jv_plot_limits
+from app.gui.shutter_dialog import ShutterDialog
+from app.instrument.tsp_transport import TSPTransport, is_tsp_instrument
+from app.shutter import CLOSED, OPEN, ShutterError
+from app.shutter.manager import ShutterManager
+from app.simulation.fake_keithley import FakeKeithley
+from app.simulation.dummy_cell import VALID_MODES
 from app.measurement.analysis import (
     calculate_jv_parameters,
     calculate_resistances,
@@ -85,9 +80,24 @@ class JVMeasurementApp:
         self.instrument      = None
         self.instrument_addr = None
         self.instrument_idn  = None
+        self._simulated      = False  # True when self.instrument is a FakeKeithley
         self.current_mode         = "jv"
         self._measurement_running = False
         self.isos_tracking_file   = None
+
+        # ── Shutter ───────────────────────────────────────────────────────
+        # Created before setup_gui() because the Instrument tab renders the
+        # backend's settings form from it. The state var is created first so
+        # the manager's construction-time notification has somewhere to land.
+        # Default backend is "manual", i.e. the prompt-the-operator behaviour
+        # the application has always had.
+        self.shutter_state_var = StringVar(value="Shutter: not configured")
+        self._shutter_badge_colour = "#757575"
+        self._shutter_dialog = None
+        self.shutter = ShutterManager(
+            prompt=self._shutter_operator_prompt,
+            on_state_change=self._on_shutter_state_change,
+        )
 
         self.setup_gui()
         # J-V traces
@@ -119,6 +129,13 @@ class JVMeasurementApp:
         # The recovery dialog itself lands in a later session; for now we only
         # surface the count in the status bar so unfinished runs are visible.
         self.root.after(1500, self._scan_for_inprogress_isos)
+
+        # Assert a closed shutter as early as the backend allows. A backend that
+        # needs no SourceMeter (serial, for one) can be closed right now, which
+        # is the strongest form of the "closed at startup" guarantee. The
+        # Keithley backend cannot — it borrows the instrument's session — so it
+        # is closed at connect time instead, in _shutter_close_on_connect().
+        self.root.after(200, self._shutter_close_at_startup)
 
     # ── GUI construction ──────────────────────────────────────────────────────
 
@@ -319,6 +336,20 @@ class JVMeasurementApp:
         ToolTip(cb4w,
                 "Enables :SYST:RSEN ON \u2014 eliminates cable resistance from the\n"
                 "measurement. Requires Force HI/LO + Sense HI/LO connections.")
+
+        Label(inf, text="SMU channel:").grid(
+            row=5, column=0, sticky=W, padx=4, pady=4)
+        self.tsp_channel_var = StringVar(value="A")
+        ch_combo = ttk.Combobox(inf, textvariable=self.tsp_channel_var,
+                                state="readonly", values=("A", "B"), width=7)
+        ch_combo.grid(row=5, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="(2600-series)", fg="#666666").grid(
+            row=5, column=2, sticky=W)
+        ToolTip(ch_combo,
+                "Which SMU channel the cell is wired to on a dual-channel\n"
+                "Keithley 2600-series (e.g. 2612): A = smua, B = smub.\n"
+                "Ignored for single-channel SCPI instruments (Keithley 2400).\n"
+                "Set this BEFORE connecting; reconnect to change it.")
 
         srf = LabelFrame(tab_inst, text="Calculated Scan Rate", padx=6, pady=4)
         srf.pack(fill=X, pady=(0, 4))
@@ -537,9 +568,18 @@ class JVMeasurementApp:
             label="Connect\u2026",
             command=self.open_instrument_dialog)
         self.instrument_menu.add_command(
+            label="Connect to Simulator\u2026",
+            command=self.open_simulator_dialog)
+        self.instrument_menu.add_command(
             label="Disconnect",
             command=self.disconnect_instrument,
             state=DISABLED)
+        self.instrument_menu.add_separator()
+        # On the menu bar, not inside a measurement panel: the shutter belongs
+        # to the rig, and once configured it serves every mode in Procedures.
+        self.instrument_menu.add_command(
+            label="Shutter Control…",
+            command=self.open_shutter_dialog)
         self.instrument_menu.add_separator()
         self.instrument_menu.add_command(
             label="Send *IDN? query",
@@ -685,23 +725,239 @@ class JVMeasurementApp:
                                  f"Could not open {addr}:\n{exc}")
             return
 
+        # Keithley 2600-series speaks TSP, not SCPI. Wrap it in a translating
+        # transport so the raw-SCPI measurement code drives it unchanged. A 2400
+        # is left as the bare pyvisa resource (identical to before). See
+        # app/instrument/tsp_transport.py.
+        tsp = is_tsp_instrument(idn)
+        if tsp:
+            ch = self.tsp_channel_var.get()
+            res = TSPTransport(res, channel=ch)
+
         self.instrument      = res
         self.instrument_addr = addr
         self.instrument_idn  = idn
 
         short_idn = idn[:60] + ("\u2026" if len(idn) > 60 else "")
-        self.instrument_label_var.set(f"\u2714  Connected: {short_idn}  [{addr}]")
-        self.status_var.set(f"Instrument connected: {addr}")
-        self.start_btn.config(state=NORMAL)
-        self.light_jv_start_btn.config(state=NORMAL)
-        self.mpp_start_btn.config(state=NORMAL)
-        self.stab_start_btn.config(state=NORMAL)
-        self.pmpp_start_btn.config(state=NORMAL)
-        self.isos_start_btn.config(state=NORMAL)
+        badge = f" \u2014 TSP/SMU {self.tsp_channel_var.get()}" if tsp else ""
+        self._apply_connected_state(
+            f"\u2714  Connected: {short_idn}{badge}  [{addr}]",
+            f"Instrument connected: {addr}{badge}")
 
-        self.instrument_menu.entryconfig("Connect\u2026",        state=NORMAL)
-        self.instrument_menu.entryconfig("Disconnect",            state=NORMAL)
-        self.instrument_menu.entryconfig("Send *IDN? query",      state=NORMAL)
+        # The shutter shares this session. Hand it over and assert a closed
+        # shutter straight away \u2014 see _shutter_close_on_connect().
+        self.shutter.attach_instrument(res)
+        self._shutter_close_on_connect()
+
+    def open_simulator_dialog(self):
+        """Connect to a simulated Keithley (FakeKeithley backed by a DummyCell).
+
+        Injects a SCPI-shaped fake into ``self.instrument`` so every measurement
+        mode runs end-to-end with no hardware. This is the same raw-SCPI path the
+        real instrument uses \u2014 it never touches the SourceMeter ABC (CLAUDE.md
+        two-instrument split).
+        """
+        mode = self._ask_simulator_mode()
+        if mode is None:
+            return
+
+        self._close_instrument()
+
+        self.instrument      = FakeKeithley.from_mode(mode)
+        self.instrument_addr = "SIMULATOR"
+        self.instrument_idn  = self.instrument.query("*IDN?").strip()
+        self._simulated = True
+
+        self._apply_connected_state(
+            f"\u2699  SIMULATION \u2014 {mode}  (no hardware)",
+            f"Simulator connected: cell mode '{mode}'")
+
+    def _ask_simulator_mode(self) -> str | None:
+        """Modal picker for the DummyCell behaviour. Returns the mode or None."""
+        dlg = Toplevel(self.root)
+        dlg.title("Connect to Simulator")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        Label(dlg, text="Simulated cell behaviour:",
+              font=("Arial", 10)).pack(padx=16, pady=(14, 6), anchor=W)
+
+        mode_var = StringVar(value="ideal_stable")
+        combo = ttk.Combobox(dlg, textvariable=mode_var, state="readonly",
+                             values=sorted(VALID_MODES), width=28)
+        combo.pack(padx=16, pady=(0, 10))
+
+        result = {"mode": None}
+
+        def _ok():
+            result["mode"] = mode_var.get()
+            dlg.destroy()
+
+        def _cancel():
+            dlg.destroy()
+
+        btns = Frame(dlg)
+        btns.pack(padx=16, pady=(0, 14), fill=X)
+        Button(btns, text="Connect", command=_ok, width=10).pack(side=RIGHT)
+        Button(btns, text="Cancel", command=_cancel, width=10).pack(
+            side=RIGHT, padx=(0, 6))
+
+        dlg.bind("<Return>", lambda _e: _ok())
+        dlg.bind("<Escape>", lambda _e: _cancel())
+        dlg.grab_set()
+        self.root.wait_window(dlg)
+        return result["mode"]
+
+    # ── Shutter control ──────────────────────────────────────────────────────
+    #
+    # The panel is generated from the selected backend's ``BackendSpec.fields``
+    # tuple, so adding support for new shutter hardware needs a backend module
+    # and a registry entry — no code in this file. See app/shutter/__init__.py.
+
+    def open_shutter_dialog(self):
+        """Open (or raise) the Shutter Control window."""
+        existing = getattr(self, "_shutter_dialog", None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_set()
+            return existing
+
+        dlg = ShutterDialog(self.root, self.shutter,
+                            self._shutter_busy, self.shutter_state_var)
+        self._shutter_dialog = dlg
+        dlg.set_badge_colour(self._shutter_badge_colour)
+        return dlg
+
+    def _shutter_busy(self) -> bool:
+        """True (with an explanation) when a measurement is using the hardware."""
+        if self._measurement_running:
+            messagebox.showinfo(
+                "Shutter",
+                "A measurement is running. Stop it before changing or testing "
+                "the shutter — it shares the instrument's connection.")
+            return True
+        return False
+
+    def _on_shutter_state_change(self, mgr) -> None:
+        """Manager callback — may arrive from the measurement thread.
+
+        On the Tk thread the badge is refreshed immediately: deferring it via
+        ``after`` would leave the indicator a step behind every button press,
+        since those callbacks only run when the event loop next spins.
+        """
+        state, ready, automatic = mgr.state, mgr.ready, mgr.is_automatic
+        if threading.current_thread() is threading.main_thread():
+            self._shutter_refresh_badge(state, ready, automatic)
+            return
+        self.root.after(
+            0, lambda: self._shutter_refresh_badge(state, ready, automatic))
+
+    def _shutter_refresh_badge(self, state, ready, automatic) -> None:
+        if not automatic:
+            text, colour = "Shutter: manual", "#757575"
+        elif not ready:
+            text, colour = "Shutter: unknown (connect instrument)", "#757575"
+        elif state == CLOSED:
+            text, colour = "Shutter: CLOSED", "#2E7D32"
+        elif state == OPEN:
+            text, colour = "Shutter: OPEN", "#E65100"
+        else:
+            text, colour = "Shutter: unknown", "#757575"
+        self.shutter_state_var.set(text)
+        # The colour is kept here as well as pushed to the window, so a dialog
+        # opened later starts with the right one instead of a stale grey.
+        self._shutter_badge_colour = colour
+        dlg = getattr(self, "_shutter_dialog", None)
+        if dlg is not None and dlg.winfo_exists():
+            dlg.set_badge_colour(colour)
+
+    def _shutter_operator_prompt(self, action: str) -> None:
+        """Modal prompt used by the manual backend; blocks until confirmed.
+
+        Safe from either thread: called from a measurement thread it posts to
+        the Tk thread and waits, and called from the Tk thread it shows the
+        dialog directly (posting and waiting there would deadlock).
+        """
+        if action == "open":
+            title = "Open Shutter"
+            body = ("Please open the solar simulator shutter, then click OK "
+                    "to continue.")
+        else:
+            title = "Close Shutter"
+            body = ("Please close the solar simulator shutter, then click OK "
+                    "to continue.")
+
+        if threading.current_thread() is threading.main_thread():
+            messagebox.showinfo(title, body)
+            return
+
+        done = threading.Event()
+        self.root.after(0, lambda: (messagebox.showinfo(title, body), done.set()))
+        done.wait()
+
+    def _shutter_close_if_automatic(self):
+        """Close the shutter when the backend can do it without a human.
+
+        Returns True/False for an attempt, or None when it was skipped.
+
+        Skipped for the manual backend on purpose. Connecting, disconnecting
+        and quitting all pass through here, and a modal "please close the
+        shutter" dialog on each of those would be intolerable — on a manual
+        setup the operator is the one in charge of the shutter anyway.
+        """
+        if not self.shutter.is_automatic or not self.shutter.ready:
+            return None
+        return self.shutter.close_quietly()
+
+    def _shutter_close_at_startup(self) -> None:
+        """Close the shutter at launch, for backends that need no instrument.
+
+        This is the one place the "shutter closed at startup" guarantee can be
+        met in full. Backends with ``requires_instrument`` (the Keithley digital
+        I/O one) have nothing to talk to yet and are skipped — the badge says
+        "unknown (connect instrument)" until the SourceMeter arrives.
+        """
+        if not self.shutter.is_automatic or self.shutter.requires_instrument:
+            return
+        if self.shutter.close_quietly():
+            self.status_var.set("Shutter closed.")
+        else:
+            self.status_var.set(
+                "Shutter could not be closed at startup — check "
+                "Instrument → Shutter Control…")
+
+    def _shutter_close_on_connect(self) -> None:
+        """Put the shutter in a known-closed state as soon as we can reach it.
+
+        The application cannot guarantee a closed shutter at startup: with the
+        2600's lines idling high through their pull-ups and a non-inverting
+        interface box, the shutter may already be open before any software is
+        listening. The first moment it *can* be commanded is when the
+        SourceMeter connects — so that is where the state is asserted.
+        """
+        closed = self._shutter_close_if_automatic()
+        if closed is None:
+            return
+        if closed:
+            # Append rather than replace: the connection message was just set.
+            self.status_var.set(f"{self.status_var.get()} — shutter closed.")
+        else:
+            messagebox.showwarning(
+                "Shutter",
+                "The instrument is connected, but the shutter could not be "
+                "closed.\n\nCheck the shutter settings in the Instrument tab "
+                "and use Test: Close.\n\nUntil then the illumination state is "
+                "unknown — do not trust a dark measurement.")
+
+    def _apply_connected_state(self, label_text, status_text):
+        """Flip the UI into the 'instrument connected' state (real or simulated)."""
+        self.instrument_label_var.set(label_text)
+        self.status_var.set(status_text)
+        for btn in (self.start_btn, self.light_jv_start_btn, self.mpp_start_btn,
+                    self.stab_start_btn, self.pmpp_start_btn, self.isos_start_btn):
+            btn.config(state=NORMAL)
+        self.instrument_menu.entryconfig("Disconnect",       state=NORMAL)
+        self.instrument_menu.entryconfig("Send *IDN? query", state=NORMAL)
 
     def disconnect_instrument(self):
         self._close_instrument()
@@ -718,6 +974,13 @@ class JVMeasurementApp:
 
     def _close_instrument(self):
         if self.instrument is not None:
+            # Close the shutter BEFORE the session goes away — afterwards there
+            # is no way to command it, and on non-fail-safe wiring an idle line
+            # leaves the shutter open. This also covers application exit, which
+            # routes through here via _on_exit(). Manual backends are skipped:
+            # see _shutter_close_if_automatic().
+            self._shutter_close_if_automatic()
+            self.shutter.detach_instrument()
             try:
                 self.instrument.write(":OUTP OFF")
                 self.instrument.close()
@@ -726,6 +989,7 @@ class JVMeasurementApp:
             self.instrument      = None
             self.instrument_addr = None
             self.instrument_idn  = None
+            self._simulated      = False
 
     def _query_idn_live(self):
         if self.instrument is None:
@@ -1018,16 +1282,16 @@ class JVMeasurementApp:
         if self.dark_jv_var.get():
             safety_msg = (
                 "1. Verify all connections to the SourceMeter\n"
-                "2. Confirm the solar simulator shutter is CLOSED\n\n"
+                f"{self._shutter_safety_line(want_open=False)}\n\n"
                 "The software will first measure J-V in the dark, save a\n"
-                "separate Excel file, then prompt you to open the shutter\n"
+                "separate Excel file, then handle the shutter\n"
                 "before the illuminated measurement.\n\n"
                 "Click OK to start."
             )
         else:
             safety_msg = (
                 "1. Verify all connections to the SourceMeter\n"
-                "2. Confirm solar simulator shutter is open\n\n"
+                f"{self._shutter_safety_line()}\n\n"
                 "Click OK to start measurement."
             )
 
@@ -1056,16 +1320,6 @@ class JVMeasurementApp:
         self.log_text.insert(END, results)
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
-
-    def _ask_open_shutter(self, event):
-        """Called on the main thread to show the open-shutter prompt."""
-        messagebox.showinfo(
-            "Dark J-V Complete \u2014 Open Shutter",
-            "Dark J-V measurement complete.\n\n"
-            "Please open the solar simulator shutter, then click OK\n"
-            "to begin the illuminated J-V measurement."
-        )
-        event.set()
 
     def _log_dark_jv(self, v_df, j_df, v_dr, j_dr, filepath):
         """Append a Dark J-V entry to the measurement log."""
@@ -1140,9 +1394,188 @@ class JVMeasurementApp:
 
     # ── Measurement thread ────────────────────────────────────────────────────
 
+    def _sim_set_light(self, on: bool) -> None:
+        """Toggle the simulated cell's illumination; no-op for real hardware.
+
+        Lets dark scans read a dark curve and illuminated scans read the lit
+        curve when a FakeKeithley is connected. With real hardware the shutter
+        backend does the work, so this does nothing.
+        """
+        if self._simulated and hasattr(self.instrument, "set_light"):
+            self.instrument.set_light(on)
+
+    # ── Shutter, from the measurement threads ────────────────────────────────
+
+    def _shutter_set(self, open_: bool, *, prompt_if_manual: bool) -> bool:
+        """Put the shutter in the requested state, blocking until it settles.
+
+        Returns True to carry on, False when the operator aborted — in which
+        case ``stop_event`` is set, so the caller's existing stop checks unwind
+        the measurement the way a Stop button would.
+
+        ``prompt_if_manual`` is True only at the boundaries that already showed
+        a dialog before shutter automation existed (the dark/illuminated
+        handover in J-V and ISOS-D-1, and the ISOS-V-1 scan boundaries). Every
+        other call site passes False, so a rig left on the manual backend sees
+        exactly the dialogs it always saw — no more, no fewer — while an
+        automatic backend drives the shutter everywhere.
+        """
+        action = "open" if open_ else "close"
+
+        if self._simulated:
+            # The fake cell follows the shutter; never ask anyone to move a
+            # physical blade during a hardware-free run.
+            self._sim_set_light(open_)
+            return True
+
+        if not self.shutter.is_automatic and not prompt_if_manual:
+            return True
+
+        try:
+            self.shutter.open() if open_ else self.shutter.close()
+        except ShutterError as exc:
+            if not self.shutter.is_automatic:
+                stop_event.set()          # the operator refused the prompt
+                return False
+            if not self._shutter_manual_fallback(action, exc):
+                stop_event.set()
+                return False
+            return True
+
+        return self._shutter_verify(open_)
+
+    def _shutter_manual_fallback(self, action: str, exc) -> bool:
+        """Automation failed — offer to carry on with a hand-moved shutter.
+
+        The manager has already retried once, so this is a second consecutive
+        failure. Returns True to continue, False to abort the measurement.
+        """
+        done = "opened" if action == "open" else "closed"
+        return bool(self._ask_main_thread(lambda: messagebox.askokcancel(
+            "Shutter failed",
+            f"The shutter could not be {done} automatically:\n\n{exc}\n\n"
+            f"{action.capitalize()} it by hand now and click OK to continue,\n"
+            "or click Cancel to abort the measurement.",
+            icon="warning")))
+
+    def _shutter_verify(self, expect_light: bool) -> bool:
+        """Optionally confirm the light state with an SMU reading.
+
+        The shutter can only report what it *commanded*. The SMU can report what
+        the cell actually sees, which is the only closed-loop check available —
+        and the one that catches the dangerous case on non-fail-safe wiring: a
+        "dark" scan that silently ran illuminated looks perfectly plausible.
+
+        Off by default (it needs a cell connected). Returns True to carry on.
+        """
+        if not self.shutter.verify_with_current or self.instrument is None:
+            return True
+        try:
+            current = self._read_cell_current_at_zero_v()
+        except Exception as exc:
+            self.status_var.set(f"Shutter verification skipped: {exc}")
+            return True                      # never fail a run on the check itself
+
+        lit = abs(current) > self.shutter.verify_threshold_a
+        if lit == expect_light:
+            return True
+
+        expected = "illuminated" if expect_light else "dark"
+        seen = "illuminated" if lit else "dark"
+        if self._ask_main_thread(lambda: messagebox.askokcancel(
+                "Shutter verification failed",
+                f"The shutter was commanded {expected.upper()}, but the cell "
+                f"reads {seen}.\n\n"
+                f"Current at 0 V: {abs(current) * 1e3:.4g} mA "
+                f"(threshold {self.shutter.verify_threshold_a * 1e3:.4g} mA)\n\n"
+                "Likely causes: the simulator's SHUTTER CONTROL switch is not "
+                "in EXTERNAL, the lamp is off, or no cell is connected.\n\n"
+                "Click OK to continue anyway, or Cancel to abort.",
+                icon="warning")):
+            return True
+        stop_event.set()
+        return False
+
+    def _read_cell_current_at_zero_v(self) -> float:
+        """Read the cell current at 0 V, in amps.
+
+        Uses the plain SCPI vocabulary so it works on a 2400 and, through
+        ``TSPTransport``, on a 2600. It leaves the instrument reset with the
+        output off — every call site re-initialises before measuring, which is
+        why verification only runs at phase boundaries.
+        """
+        inst = self.instrument
+        inst.write("*RST")
+        inst.write(":SOUR:FUNC VOLT")
+        inst.write(":SOUR:VOLT 0")
+        inst.write(":SENS:FUNC 'CURR:DC'")
+        inst.write(":SENS:CURR:PROT 0.1")
+        inst.write(":SENS:CURR:NPLC 1.000")
+        inst.write(":OUTP ON")
+        try:
+            return float(inst.query(":READ?").split(",")[1])
+        finally:
+            try:
+                inst.write(":OUTP OFF")
+            except Exception:
+                pass
+
+    def _shutter_safety_line(self, want_open: bool = True) -> str:
+        """The shutter line for a pre-flight Safety Check dialog.
+
+        Telling an operator to "confirm the shutter is open" while the software
+        is about to open it itself is worse than saying nothing, so the text
+        follows the configured backend.
+        """
+        if self._simulated:
+            return "2. Simulated run \u2014 no physical shutter involved"
+        if self.shutter.is_automatic:
+            state = "opened" if want_open else "closed"
+            return f"2. The shutter will be {state} automatically"
+        state = "open" if want_open else "CLOSED"
+        return f"2. Confirm the solar simulator shutter is {state}"
+
+    def _run_illuminated(self, work):
+        """Wrap a thread target so it runs with the shutter open, then closed.
+
+        MPP and Pure MPP hand their run loop straight to a daemon thread with no
+        wrapper of their own, so the open/close bracket lives here rather than
+        being duplicated inside each tracker.
+        """
+        def target():
+            try:
+                if not self._shutter_set(True, prompt_if_manual=False):
+                    return
+                work()
+            finally:
+                self._shutter_close_if_automatic()
+        return target
+
+    def _ask_main_thread(self, func):
+        """Run *func* on the Tk thread and return its result, from any thread."""
+        if threading.current_thread() is threading.main_thread():
+            return func()
+        result = {}
+        done = threading.Event()
+
+        def run():
+            try:
+                result["value"] = func()
+            finally:
+                done.set()
+
+        self.root.after(0, run)
+        done.wait()
+        return result.get("value")
+
     def run_measurement(self):
         v_df = j_df = v_dr = j_dr = None   # dark J-V data (None if not measured)
         try:
+            # Put the shutter where this run starts: a dark J-V begins closed,
+            # anything else begins open.
+            if not self._shutter_set(not self.dark_jv_var.get(),
+                                     prompt_if_manual=False):
+                return
             init_instrument(
                 self.instrument,
                 self.nplc_var.get(),
@@ -1194,13 +1627,13 @@ class JVMeasurementApp:
                     self.instrument_idn or "",
                 )
                 self._log_dark_jv(v_df, j_df, v_dr, j_dr, dark_fp)
-                self.status_var.set("Dark J-V complete \u2014 waiting for shutter\u2026")
+                self.status_var.set(
+                    "Dark J-V complete — opening shutter…")
 
-                # Show open-shutter dialog on the main thread; block here until OK
-                shutter_ready = threading.Event()
-                self.root.after(0, lambda ev=shutter_ready: self._ask_open_shutter(ev))
-                shutter_ready.wait()
-
+                # A boundary that always prompted on a manual rig, so it
+                # still does; an automatic backend just opens the shutter.
+                if not self._shutter_set(True, prompt_if_manual=True):
+                    return
                 if stop_event.is_set():
                     return
 
@@ -1311,6 +1744,9 @@ class JVMeasurementApp:
             self.status_var.set("Measurement failed.")
             winsound.Beep(500, 500)
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             try:
                 self.instrument.write(":OUTP OFF")
             except Exception:
@@ -1344,15 +1780,16 @@ class JVMeasurementApp:
         # Check whether any entry has dark data
         has_any_dark = any(e["v_dark_fwd"] is not None for e in self.session_data)
         if has_any_dark:
-            self.ax.set_ylim(-20, 30)
-            self.ax2.set_ylim(-20, 30)
             self.ax.axhline(0, color="#aaaaaa", linewidth=0.8,
                             linestyle="--", zorder=1)
-        else:
-            self.ax.set_ylim(0, 30)
-            self.ax2.set_ylim(0, 30)
 
-        self.ax.set_xlim(0, 1.2)   # 0–1.2 V — wide enough not to clip Voc
+        # The frame follows the data (see jv_plot_limits). ax2 is the power
+        # twinx and keeps sharing ax's scale, as it always has, so the power
+        # curve stays directly comparable to the current curve.
+        xlim, ylim = jv_plot_limits(self.session_data)
+        self.ax.set_xlim(*xlim)
+        self.ax.set_ylim(*ylim)
+        self.ax2.set_ylim(*ylim)
 
         all_lines   = []   # every line object (for mplcursors + legend map)
         jv_lines    = []   # J-V lines only (hover attached here)
@@ -2036,11 +2473,16 @@ class JVMeasurementApp:
             instrument_idn        = self.instrument_idn or "",
         )
         try:
+            if not self._shutter_set(True, prompt_if_manual=False):
+                return
             measurement.run()
         except Exception as exc:
             messagebox.showerror("Measurement Error", str(exc))
             self.lij_status_var.set("Sequence failed.")
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             self._measurement_running = False
             self._lij_running         = False
             self.root.after(0, self._lij_restore_controls)
@@ -2237,7 +2679,16 @@ class JVMeasurementApp:
 
         self.root.after(0, _show)
         ready.wait()
+        if result[0]:
+            # In simulation, "setting the lamp" scales the cell's photocurrent so
+            # the intensity series actually varies (1.0 sun → factor 1.0).
+            self._sim_set_intensity(intensity)
         return result[0]
+
+    def _sim_set_intensity(self, suns: float) -> None:
+        """Scale the simulated cell's photocurrent to *suns*; no-op for hardware."""
+        if self._simulated and hasattr(self.instrument, "cell"):
+            self.instrument.cell.set_illumination_factor(max(float(suns), 1e-6))
 
     # ══════════════════════════════════════════════════════════════════════════
     # MPP TRACKING — panel builder
@@ -3377,7 +3828,7 @@ class JVMeasurementApp:
         if not messagebox.askokcancel(
             "Safety Check",
             "1. Verify all connections to the Keithley SourceMeter\n"
-            "2. Confirm solar simulator shutter is open\n"
+            f"{self._shutter_safety_line()}\n"
             "3. Confirm only ONE cell is connected\n\n"
             "Click OK to start Pure MPP Tracking (P&O).",
             icon="warning"
@@ -3415,7 +3866,8 @@ class JVMeasurementApp:
 
         from app.measurement.pure_mpp_tracker import PureMPPTracker
         tracker = PureMPPTracker(self.instrument, params, callbacks, stop_event)
-        threading.Thread(target=tracker.run, daemon=True).start()
+        threading.Thread(target=self._run_illuminated(tracker.run),
+                         daemon=True).start()
 
     def stop_pure_mpp(self):
         stop_event.set()
@@ -3559,7 +4011,7 @@ class JVMeasurementApp:
         if not messagebox.askokcancel(
             "Safety Check",
             "1. Verify all connections to the Keithley SourceMeter\n"
-            "2. Confirm solar simulator shutter is open\n"
+            f"{self._shutter_safety_line()}\n"
             "3. Confirm only ONE cell is connected\n\n"
             "Click OK to start MPP Tracking.",
             icon="warning"
@@ -3600,7 +4052,8 @@ class JVMeasurementApp:
 
         from app.measurement.mpp_tracker import MPPTracker
         tracker = MPPTracker(self.instrument, params, callbacks, stop_event)
-        threading.Thread(target=tracker.run, daemon=True).start()
+        threading.Thread(target=self._run_illuminated(tracker.run),
+                         daemon=True).start()
 
     def stop_mpp_tracking(self):
         stop_event.set()
@@ -3790,7 +4243,7 @@ class JVMeasurementApp:
         if not messagebox.askokcancel(
             "Safety Check",
             "1. Verify all connections to the Keithley SourceMeter\n"
-            "2. Confirm solar simulator shutter is open\n\n"
+            f"{self._shutter_safety_line()}\n\n"
             "Click OK to start.",
             icon="warning"
         ):
@@ -3804,6 +4257,9 @@ class JVMeasurementApp:
         # Clear plot
         self.stab_ax_j.clear()
         self.stab_ax_pce.clear()
+        # clear() resets the twin axis ticks/label to the left \u2014 restore right.
+        self.stab_ax_pce.yaxis.set_label_position("right")
+        self.stab_ax_pce.yaxis.set_ticks_position("right")
         self.stab_ax_j.set_xlabel("Time (s)", fontsize=11)
         self.stab_ax_j.set_ylabel("Current Density (mA/cm\u00b2)",
                                    fontsize=11, color="#1565C0")
@@ -3823,6 +4279,8 @@ class JVMeasurementApp:
     def run_stabilized_current(self):
         import numpy as np, time as _time
         try:
+            if not self._shutter_set(True, prompt_if_manual=False):
+                return
             inst = self.instrument
             inst.write("*RST")
             _time.sleep(0.3)
@@ -3890,6 +4348,9 @@ class JVMeasurementApp:
         except Exception as exc:
             self.root.after(0, messagebox.showerror, "Error", str(exc))
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             try:
                 self.instrument.write(":OUTP OFF")
             except Exception:
@@ -3902,6 +4363,9 @@ class JVMeasurementApp:
     def _stab_update_plot(self, times, j_vals, pce_vals, stabilized_at):
         self.stab_ax_j.clear()
         self.stab_ax_pce.clear()
+        # clear() resets the twin axis ticks/label to the left — restore right.
+        self.stab_ax_pce.yaxis.set_label_position("right")
+        self.stab_ax_pce.yaxis.set_ticks_position("right")
 
         self.stab_ax_j.plot(times, j_vals, color="#1565C0", linewidth=1.4,
                              label="J (mA/cm\u00b2)")
@@ -5690,7 +6154,7 @@ class JVMeasurementApp:
         if self.isos_tracking_file is None:
             messagebox.showwarning(
                 "No Experiment",
-                "Please create or load an ISOS-D-1 tracking file first.\n"
+                "Please create or load an ISOS tracking file first.\n"
                 "Use 'New Experiment' or 'Load Experiment…' in the Experiment tab.")
             return
         if not os.path.isfile(self.isos_tracking_file):
@@ -5735,11 +6199,6 @@ class JVMeasurementApp:
         def log(msg):
             self.root.after(0, lambda m=msg: self.isos_status_var.set(m))
 
-        def _wait_shutter(title, body):
-            ev = threading.Event()
-            self.root.after(0, lambda: (messagebox.showinfo(title, body), ev.set()))
-            ev.wait()
-
         try:
             self._isos_last_metrics = None
             self.root.after(0, self._isos_reset_metrics_panel)
@@ -5766,6 +6225,8 @@ class JVMeasurementApp:
 
             # ── Optional dark J-V (instrument on during dark scans) ───────────
             if do_dark:
+                if not self._shutter_set(False, prompt_if_manual=False):
+                    return
                 init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
                 log("Dark J-V: forward scan…")
                 v_df, j_df = measure_scan(inst, start_v, end_v, step_v, cell_area, stop_event)
@@ -5786,23 +6247,16 @@ class JVMeasurementApp:
                     cell_area, delay_ms, nplc, four_wire,
                     self.instrument_idn or "",
                 )
-                log("Dark J-V complete — waiting for shutter…")
-                _wait_shutter(
-                    "Dark J-V Complete — Open Shutter",
-                    "Dark J-V measurement complete.\n\n"
-                    "Please open the solar simulator shutter, then click OK\n"
-                    "to begin the illuminated J-V measurement.",
-                )
+                log("Dark J-V complete — opening shutter…")
+                if not self._shutter_set(True, prompt_if_manual=True):
+                    return
                 if stop_event.is_set():
                     return
                 init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
             else:
-                # No dark J-V: confirm shutter BEFORE turning on the instrument
-                _wait_shutter(
-                    "Open Shutter",
-                    "Please open the solar simulator shutter, then click OK\n"
-                    "to begin the illuminated J-V measurement.",
-                )
+                # No dark J-V: open the shutter BEFORE turning the output on.
+                if not self._shutter_set(True, prompt_if_manual=True):
+                    return
                 if stop_event.is_set():
                     return
                 init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
@@ -5920,6 +6374,9 @@ class JVMeasurementApp:
                 "ISOS Measurement Error", str(e)))
             self.root.after(0, lambda: self.isos_status_var.set(f"Error: {exc}"))
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             self._measurement_running = False
             self._isos_active_runner = None
             stop_event.clear()
@@ -6107,6 +6564,11 @@ class JVMeasurementApp:
                 "on_complete":         lambda: _after(self.isos_status_var.set,
                                                       "ISOS-L-1 experiment complete."),
             }
+            # L-1 stresses under light, V-1 in the dark. The runner then
+            # drives the scan boundaries itself via the on_shutter callback.
+            if not self._shutter_set(bool(cfg.get("stress_with_light", True)),
+                                     prompt_if_manual=False):
+                return
             runner = ContinuousISOSRunner(self.instrument, cfg, callbacks, stop_event)
             self._isos_active_runner = runner
             runner.run()
@@ -6116,6 +6578,9 @@ class JVMeasurementApp:
                 "ISOS-L-1 Measurement Error", str(e)))
             self.root.after(0, lambda e=exc: self.isos_status_var.set(f"Error: {e}"))
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             self._measurement_running = False
             self._isos_active_runner = None
             stop_event.clear()
@@ -6290,6 +6755,11 @@ class JVMeasurementApp:
                 "on_complete":         lambda: _after(self.isos_status_var.set,
                                                       "ISOS-V-1 experiment complete."),
             }
+            # L-1 stresses under light, V-1 in the dark. The runner then
+            # drives the scan boundaries itself via the on_shutter callback.
+            if not self._shutter_set(bool(cfg.get("stress_with_light", True)),
+                                     prompt_if_manual=False):
+                return
             runner = ContinuousISOSRunner(self.instrument, cfg, callbacks, stop_event)
             self._isos_active_runner = runner
             runner.run()
@@ -6299,6 +6769,9 @@ class JVMeasurementApp:
                 "ISOS-V-1 Measurement Error", str(e)))
             self.root.after(0, lambda e=exc: self.isos_status_var.set(f"Error: {e}"))
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             self._measurement_running = False
             self._isos_active_runner = None
             stop_event.clear()
@@ -6306,16 +6779,13 @@ class JVMeasurementApp:
             self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
 
     def _isos_v1_shutter_prompt(self, action):
-        """Modal shutter prompt fired from the runner thread (blocks until OK)."""
-        ev = threading.Event()
-        if action == "open":
-            title, body = ("Open Shutter", "Open the solar-simulator shutter for "
-                           "the illuminated J-V scan, then click OK.")
-        else:
-            title, body = ("Close Shutter", "Close the shutter — dark stress will "
-                           "resume after you click OK.")
-        self.root.after(0, lambda: (messagebox.showinfo(title, body), ev.set()))
-        ev.wait()
+        """Runner callback, fired from the runner thread; blocks until done.
+
+        ``ContinuousISOSRunner`` is untouched by shutter automation: it has
+        always emitted ``on_shutter`` here and always blocked on it. Only
+        what happens inside changed.
+        """
+        self._shutter_set(action == "open", prompt_if_manual=True)
 
     def _isos_v1_stress_update(self, t_s, v, j, pce):
         """Refresh the live ETA during dark stress (throttled to ≤ 5 Hz)."""
