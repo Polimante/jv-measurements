@@ -28,6 +28,53 @@ _LOG_PARAMS: frozenset[str] = frozenset({"J0", "Rsh"})
 
 # ── Existing local-derivative methods ─────────────────────────────────────────
 
+# ── Open-circuit (lost contact) detection ─────────────────────────────────────
+
+# An illuminated cell always drives at least nanoamps through the SMU, except
+# for the single instant the sweep crosses Voc — and there the current changes
+# by tens of microamps per step, so it cannot sit below this for several points
+# in a row. A broken contact reads the SMU noise floor, ~1e-10 A.
+OPEN_CIRCUIT_CURRENT_A: float = 1e-9
+OPEN_CIRCUIT_MIN_POINTS: int = 3
+
+
+@dataclass
+class OpenCircuitEvent:
+    """Where an illuminated scan stopped seeing the cell."""
+    first_index: int     # index of the first point of the run
+    voltage: float       # programmed voltage at that point (V)
+    n_points: int        # points at or after first_index below the threshold
+
+
+def detect_open_circuit(voltages, currents, cell_area,
+                        threshold_a: float = OPEN_CIRCUIT_CURRENT_A,
+                        min_points: int = OPEN_CIRCUIT_MIN_POINTS):
+    """Find a lost contact in an **illuminated** J-V scan.
+
+    *currents* are current densities in mA/cm², converted back to amperes
+    with *cell_area*. Returns an :class:`OpenCircuitEvent` for the first run
+    of at least *min_points* consecutive points with |I| < *threshold_a*, or
+    ``None`` when the scan looks electrically sound.
+
+    Not meant for dark scans: a good diode legitimately passes sub-nA
+    currents near 0 V in the dark.
+    """
+    v = np.asarray(voltages, dtype=float)
+    i_a = np.abs(np.asarray(currents, dtype=float)) * float(cell_area) / 1000.0
+    low = i_a < threshold_a
+    run = 0
+    for k, is_low in enumerate(low):
+        run = run + 1 if is_low else 0
+        if run == min_points:
+            first = k - min_points + 1
+            return OpenCircuitEvent(
+                first_index=first,
+                voltage=float(v[first]),
+                n_points=int(np.count_nonzero(low[first:])),
+            )
+    return None
+
+
 def calculate_jv_parameters(voltages, currents, illumination):
     if illumination <= 0:
         raise ValueError(

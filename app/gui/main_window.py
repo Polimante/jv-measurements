@@ -35,6 +35,7 @@ from app.measurement.analysis import (
     calculate_jv_parameters,
     calculate_resistances,
     calculate_hysteresis_index,
+    detect_open_circuit,
     fit_single_diode,
 )
 from app.io.exporter import append_single_diode_fit_to_file
@@ -1568,6 +1569,34 @@ class JVMeasurementApp:
         done.wait()
         return result.get("value")
 
+    def _check_open_circuit(self, scans, cell_area):
+        """Warn when an illuminated scan lost the cell mid-sweep.
+
+        *scans* is an iterable of ``(label, voltages, j)``. Returns the
+        warning lines (empty when every scan is sound) so they can also be
+        written into the saved workbook. The dialog is posted to the Tk
+        thread and does not block the measurement thread.
+        """
+        notes = []
+        for label, v, j in scans:
+            ev = detect_open_circuit(v, j, cell_area)
+            if ev is not None:
+                notes.append(
+                    f"{label} scan: |I| < 1 nA from {ev.voltage:.3f} V on "
+                    f"({ev.n_points} points). The SMU stopped seeing the cell "
+                    f"- likely an open contact (probe, clip or cable).")
+        if notes:
+            msg = ("\n\n".join(notes)
+                   + "\n\nAn illuminated cell always drives far more than "
+                     "1 nA, so these points are not device physics. The data "
+                     "is saved, but the parameters of the affected scan are "
+                     "not meaningful. Check the contacts and measure again. "
+                     "The SMU_Readback sheet in the file holds the measured "
+                     "voltage and raw current of every point.")
+            self.root.after(0, lambda: messagebox.showwarning(
+                "Possible open contact", msg))
+        return notes
+
     def run_measurement(self):
         v_df = j_df = v_dr = j_dr = None   # dark J-V data (None if not measured)
         try:
@@ -1657,6 +1686,7 @@ class JVMeasurementApp:
                     return
 
             # ── Illuminated J-V ───────────────────────────────────────────
+            rb_f, rb_r = [], []    # (v_set, v_meas, i_raw) per point
             self.status_var.set("Measuring forward scan\u2026")
             v_f, j_f = measure_scan(
                 self.instrument,
@@ -1665,6 +1695,7 @@ class JVMeasurementApp:
                 self.step_voltage_var.get(),
                 self.cell_area_var.get(),
                 stop_event,
+                readback=rb_f,
             )
             if stop_event.is_set():
                 return
@@ -1688,9 +1719,17 @@ class JVMeasurementApp:
                 -self.step_voltage_var.get(),
                 self.cell_area_var.get(),
                 stop_event,
+                readback=rb_r,
             )
             if stop_event.is_set():
                 return
+
+            # Checked before the parameters: a lost contact usually also
+            # breaks the Voc search, and the operator must hear about the
+            # wiring rather than about a missing zero-crossing.
+            oc_notes = self._check_open_circuit(
+                (("Forward", v_f, j_f), ("Reverse", v_r, j_r)),
+                self.cell_area_var.get())
 
             illum = float(self.illumination_var.get())
 
@@ -1734,9 +1773,16 @@ class JVMeasurementApp:
                 self.instrument_idn or "",
                 scan_rate=float(self.scan_rate_var.get()) if self.scan_rate_var.get() != "\u2014" else None,
                 fit_result=fit_result,
+                readback_fwd=rb_f,
+                readback_rev=rb_r,
+                readback_notes=oc_notes,
             )
 
-            self.status_var.set("Measurement complete.")
+            if oc_notes:
+                self.status_var.set(
+                    "Measurement complete \u2014 WARNING: possible open contact.")
+            else:
+                self.status_var.set("Measurement complete.")
             play_completion_sound()
 
         except Exception as exc:

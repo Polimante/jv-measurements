@@ -110,13 +110,20 @@ def apply_light_soaking(inst, duration_s, stop_event, status_callback):
             pass
 
 
-def measure_scan(inst, start, end, step, cell_area, stop_event):
+def measure_scan(inst, start, end, step, cell_area, stop_event, readback=None):
     """
     Step the source voltage from *start* to *end* (inclusive) by *step*
     and read the current at each point.
 
     Returns ``(voltages, current_densities)`` as NumPy arrays, or
     ``(None, None)`` if the stop event fires mid-scan.
+
+    *readback*, when given a list, receives one ``(v_set, v_meas, i_raw)``
+    tuple per point: the programmed voltage, the voltage the instrument
+    reports (field 0 of ``:READ?``) and the raw current in amperes, before
+    the sign flip. The returned arrays are unchanged either way. This is
+    the evidence that tells a lost contact (V_meas follows V_set, I ~ 0)
+    from an output that dropped (V_meas ~ 0).
     """
     safety = 0.02
     voltages, currents = [], []
@@ -125,7 +132,15 @@ def measure_scan(inst, start, end, step, cell_area, stop_event):
             return None, None
         inst.write(f":SOUR:VOLT {v:.3f}")
         time.sleep(safety)
-        current = -float(inst.query(":READ?").split(",")[1])
+        fields = inst.query(":READ?").split(",")
+        i_raw = float(fields[1])
+        current = -i_raw
         currents.append((current * 1000) / cell_area)
         voltages.append(v)
+        if readback is not None:
+            try:
+                v_meas = float(fields[0])
+            except ValueError:
+                v_meas = float("nan")
+            readback.append((float(v), v_meas, i_raw))
     return np.array(voltages), np.array(currents)

@@ -9,6 +9,8 @@ from datetime import datetime
 FIT_SHEET = "SingleDiodeFit"
 # Sheet name used for the dark ideality factor fit results
 DARK_IDEALITY_SHEET = "DarkIdealityFit"
+# Sheet name for the raw SMU readback (programmed V, measured V, raw current)
+READBACK_SHEET = "SMU_Readback"
 
 _FIT_PARAM_NAMES = ("J_ph", "J0", "n", "Rs", "Rsh")
 _FIT_PARAM_UNITS = {
@@ -49,6 +51,35 @@ def _fmt(wb):
         "font_size":  10,
     })
     return hf, pf, nf
+
+
+# ── SMU_Readback sheet writer (xlsxwriter) ───────────────────────────────────
+
+def _write_readback_sheet(wb, hf, nf, readback_fwd, readback_rev, notes=()):
+    """Write the per-point SMU readback of the illuminated scans.
+
+    Each readback is a list of ``(v_set, v_meas, i_raw)`` tuples, as filled
+    by ``keithley.measure_scan(readback=...)``. Columns A-C are forward,
+    D-F reverse; *notes* (e.g. open-circuit warnings) go in column H.
+    """
+    ws = wb.add_worksheet(READBACK_SHEET)
+    ws.set_column("A:F", 18)
+    ws.set_column("H:H", 90)
+    sci = wb.add_format({"num_format": "0.000E+00", "align": "center",
+                         "font_name": "Calibri", "font_size": 10})
+    headers = ["Fwd V set (V)", "Fwd V measured (V)", "Fwd I raw (A)",
+               "Rev V set (V)", "Rev V measured (V)", "Rev I raw (A)",
+               None, "Notes"]
+    for c, h in enumerate(headers):
+        if h is not None:
+            ws.write(0, c, h, hf)
+    for col0, rb in ((0, readback_fwd or ()), (3, readback_rev or ())):
+        for i, (v_set, v_meas, i_raw) in enumerate(rb):
+            ws.write(i + 1, col0, v_set, nf)
+            ws.write(i + 1, col0 + 1, v_meas, nf)
+            ws.write(i + 1, col0 + 2, i_raw, sci)
+    for i, note in enumerate(notes):
+        ws.write(i + 1, 7, note)
 
 
 # ── SingleDiodeFit sheet writer (xlsxwriter) ─────────────────────────────────
@@ -239,12 +270,18 @@ def save_data(
     instrument_idn,
     scan_rate=None,
     fit_result=None,
+    readback_fwd=None,
+    readback_rev=None,
+    readback_notes=(),
 ):
     """Save an illuminated J-V measurement to xlsx.
 
     Args:
         fit_result: Optional SingleDiodeFit.  When provided a second sheet
             named ``SingleDiodeFit`` is appended to the workbook.
+        readback_fwd, readback_rev: Optional ``(v_set, v_meas, i_raw)``
+            lists from ``measure_scan(readback=...)``. When either is given
+            an ``SMU_Readback`` sheet is appended, with *readback_notes*.
     """
     p_f = v_f * j_f
     p_r = v_r * j_r
@@ -315,6 +352,9 @@ def save_data(
 
     if fit_result is not None:
         _write_fit_sheet(wb, hf, pf, nf, fit_result)
+    if readback_fwd is not None or readback_rev is not None:
+        _write_readback_sheet(wb, hf, nf, readback_fwd, readback_rev,
+                              readback_notes)
 
     wb.close()
     return fp
