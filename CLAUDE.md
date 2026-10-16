@@ -11,8 +11,18 @@ python main.py
 Tests live in `tests/` and run hardware-free. The application itself is Windows-only (`winsound`, VISA drivers).
 
 ```bash
-python -m pytest tests/          # run all tests
-python -m pytest tests/test_isos_tracking.py -v   # example: single file
+python -m pytest tests/                                   # everything the platform allows
+python -m pytest tests/ -m "not windows_only and not gui" # what Linux CI runs
+python -m pytest tests/ -m "gui"                          # GUI tests (Windows, real display)
+python -m pytest tests/test_isos_tracking.py -v           # one file
+python -m pytest tests/test_isos_tracking.py -k protocol_id -v      # one test (most are in classes)
+```
+
+The `validation/` suite is **separate from `tests/`** — deterministic, synthetic,
+and run deliberately rather than on every commit (see "Validation suite"):
+
+```bash
+python -m validation.run_suite --config validation/config.yaml
 ```
 
 ## Dependencies
@@ -29,14 +39,27 @@ pip install -r requirements.txt
 main.py                        # Entry point — creates Tk root, instantiates JVMeasurementApp
 app/
   gui/
-    main_window.py             # JVMeasurementApp — entire GUI, measurement orchestration
+    main_window.py             # JVMeasurementApp — entire GUI, measurement orchestration (~6.8k lines)
     instrument_dialog.py       # Modal VISA scanner dialog (Toplevel)
     shutter_dialog.py          # Shutter Control window (Instrument menu)
     plot_limits.py             # jv_plot_limits() - Tk-free axis maths for the J-V plot
     data_viewer.py             # DataViewerWindow — read-only viewer for saved xlsx files
+    mpp_plot_factory.py        # Tk-free figure/axes builders for the MPP + ISOS panels
+    mpp_settings_frame.py      # build_param_grid() — shared MPP / P&O parameter grid
+    input_validation.py        # Tk-free validators for the Entry widgets (stable codes)
+    theme.py                   # PLOT_COLORS + semantic colours — single source of truth
     tooltip.py                 # ToolTip hover widget
   instrument/
     keithley.py                # Stateless SCPI helpers (init, prebias, light_soaking, scan)
+    tsp_transport.py           # SCPI→TSP translating transport for the 2600 series
+    base.py                    # SourceMeter ABC
+    keithley_smu.py            # Keithley2400SourceMeter — ABC over a live pyvisa resource
+    keithley_adapter.py        # Keithley2400 — ABC adapter used by create_sourcemeter()
+    dummy_smu.py               # DummySMU — ABC over a synthetic DummyCell
+    __init__.py                # create_sourcemeter("keithley_2400" | "dummy")
+  simulation/
+    dummy_cell.py              # DummyCell — single-diode synthetic cell (the physics)
+    fake_keithley.py           # FakeKeithley — SCPI-shaped fake wrapping a DummyCell
   shutter/                     # Pluggable shutter backends (see "Shutter control")
     base.py                    # Shutter ABC + ConfigField/BackendSpec metadata
     __init__.py                # BACKENDS registry, create_shutter, default_config
@@ -47,13 +70,19 @@ app/
   measurement/
     analysis.py                # Pure math: calculate_jv_parameters, calculate_resistances, HI
     mpp_tracker.py             # MPPTracker — JV-SPO cycling protocol (Alt+F5)
-    pure_mpp_tracker.py        # PureMPPTracker — Perturb-and-Observe continuous tracking (Alt+F6)
+    pure_mpp_tracker.py        # PureMPPTracker — Perturb-and-Observe continuous tracking (Alt+F7)
+    light_intensity_jv.py      # LightIntensityJVMeasurement — J-V vs intensity + n_idL (Alt+F3)
+    isos_continuous_runner.py  # ContinuousISOSRunner — the L-1 / V-1 stress loop
     isos_protocols.py          # ProtocolSpec registry (PROTOCOLS, get_protocol, list_protocol_*)
+    stability_metrics.py       # Pure math: T80 / T95 / T_S / PCE_S / Ts80 / n_1000
   io/
     app_settings.py            # ~/.jv-measurement/settings.json (atomic, corruption-tolerant)
     exporter.py                # save_data() and save_dark_jv_data() → xlsxwriter
+    light_intensity_exporter.py# Consolidated Light-Intensity workbook (Config/Summary/fits)
+    data_curator.py            # Data Curation mode (Alt+F8) — thresholds, groups, statistics
     isos_tracking.py           # Generic ISOS tracking workbook (create / append / read) + D-1 shims
     isos_autosave.py           # CSVStream durable autosave + consolidate_csv_into_xlsx()
+    isos_recovery.py           # Tk-free orphan-CSV detection / consolidation for crash recovery
   utils/
     constants.py               # APP_NAME, APP_VERSION, global stop_event (threading.Event)
     sound.py                   # play_completion_sound() with playsound / winsound fallback
@@ -61,10 +90,24 @@ app/
 docs/
   help.html                    # Standalone HTML help opened via webbrowser.open()
   arduino_shutter.ino          # Example sketch for the serial shutter backend
+  git-workflow.md              # Branch / commit / push routine for this repo
+  release-vs-feature-branch.md # Branches, tags and releases — the rules
+  _gen_*.py                    # Build helpers: samples, figures, GIFs, GUI screenshots
+  sessions/                    # Per-session design notes (ISOS refactor history)
+validation/                    # Deterministic publication-grade validation suite (see below)
+Samples/                       # Bundled example workbooks, generated by docs/_gen_samples.py
+tests/                         # Hardware-free test suite (see "Continuous Integration")
+probe_shutter.py               # Bench tool: find the shutter's digio line, polarity, travel
+probe_smu.py                   # Bench tool: report what the SourceMeter is actually measuring
 build_installer/
   setup.iss                    # Inno Setup 6 script → dist/JV-Measurements-Setup-vX.X.X.exe
 version.json                   # Machine-readable version + release notes (read by updater.py)
 ```
+
+`jv_measurement_v2.3.py` in the project root is the pre-split monolith, kept for
+reference only — nothing imports it. `create_test_isos_file.py`,
+`diagnose_isos_file.py`, `simulate_isos_d1.py` and `take_screenshots.py` are
+one-off developer scripts, not part of the application.
 
 ### Key architectural patterns
 
@@ -83,19 +126,28 @@ version.json                   # Machine-readable version + release notes (read 
 The project intentionally keeps **two** ways of talking to the source-measure unit:
 
 1. **Raw SCPI** (`app/instrument/keithley.py` + `inst.write`/`inst.query`) — used by
-   **all real-measurement code**: `run_measurement`, `MPPTracker`, `PureMPPTracker`,
-   the ISOS-D-1 routine, and `ContinuousISOSRunner`. `self.instrument` is a live
-   pyvisa resource. This is the only path that ever drives physical hardware.
-2. **`SourceMeter` ABC** (`app/instrument/base.py`, implemented by
-   `app/instrument/dummy_smu.py`) — a higher-level interface (`set_voltage`,
-   `read_current_density`, `measure_scan`…). Used **only** by tests and the
-   synthetic-data / simulation workflows. There is no `SourceMeter`-based path to
-   real hardware.
+   the **older, safety-critical measurement code**: `run_measurement`, `MPPTracker`,
+   `PureMPPTracker`, the ISOS-D-1 routine, and `ContinuousISOSRunner`.
+   `self.instrument` is a live pyvisa resource.
+2. **`SourceMeter` ABC** (`app/instrument/base.py`) — a higher-level interface
+   (`set_voltage`, `read_current_density`, `measure_scan`…) with three
+   implementations: `DummySMU` (synthetic, used by tests, `validation/` and the
+   sample generator), `Keithley2400SourceMeter` (`keithley_smu.py`, wraps a live
+   pyvisa resource) and `Keithley2400` (`keithley_adapter.py`, returned by
+   `create_sourcemeter("keithley_2400")`).
 
-**These two never meet in production, and that is on purpose.** Converging the
-measurement code onto the ABC would mean rewriting the most safety-critical code
-(it controls a real instrument wired to real cells) with no way to regression-test
-it in CI. The payoff is only consistency, so we do not do it.
+**The ABC does reach real hardware, in exactly one mode.** Light-Intensity J-V
+(Alt+F3) is the one production path built on it: `main_window` wraps
+`self.instrument` in a `Keithley2400SourceMeter` and hands it to
+`LightIntensityJVMeasurement`. Everything older stays on raw SCPI. Converging the
+rest onto the ABC would mean rewriting the most safety-critical code (it controls
+a real instrument wired to real cells) with no way to regression-test it in CI.
+The payoff is only consistency, so we do not do it — **new** orchestrators,
+however, should be written against the ABC, as Light-Intensity J-V was.
+
+`keithley_smu.Keithley2400SourceMeter` and `keithley_adapter.Keithley2400` are two
+adapters over the same helpers; only the former is reachable from the GUI, the
+latter only via `create_sourcemeter()` (tests). Do not add a third — extend one.
 
 Consequence for tests: SCPI-based components are tested with SCPI-shaped fakes
 (`MagicMock` with a `.query` side-effect, or `app.simulation.fake_keithley.FakeKeithley`),
@@ -263,11 +315,33 @@ The negation makes photocurrent positive in the power-generating quadrant (stand
 
 ### Excel file layout
 
-Two file types, distinguished by sheet name:
+`data_viewer.load_jv_file()` dispatches on sheet name; the two single-measurement
+layouts are:
 - `MeasurementData` — illuminated J-V; row 1 = headers, row 2 = scalar params, row 3+ = V/J/P arrays
 - `Dark_JV_Data` — dark J-V; same layout but only V/J (no power, no PV params)
 
+Optional sidecar sheets on these files: `SingleDiodeFit`, `DarkIdealityFit`,
+`SMU_Readback` (J-V mode: per-point programmed V, measured V and raw current of
+both illuminated scans, plus any open-contact warning — readers ignore it). The
+other workbook families have their own writers and readers — Stabilized Current
+and MPP/Pure-MPP traces (`exporter.py`), the Light-Intensity consolidated
+workbook (`light_intensity_exporter.py`, detected by its `Config` + `Summary`
+sheets), the ISOS tracking workbook (`isos_tracking.py`) and the Data Curation
+output (`data_curator.py`).
+
 Column mapping is documented in `data_viewer.py::_read_illuminated()` and `_read_dark()`. When adding new scalar columns to `exporter.py`, update the column indices in both reader functions and in `data_viewer.py::_populate_metadata()`.
+
+### Open-contact detection (J-V mode)
+
+`detect_open_circuit(v, j, cell_area)` in `analysis.py` flags an illuminated
+scan with ≥ 3 consecutive points below 1 nA. An illuminated cell never sits
+there (even at Voc the current moves tens of µA per step); a lost probe or
+cable reads the SMU noise floor, ~1e-10 A. Seen on the bench on 2026-10-16:
+the current dropped to that floor ~10–17 s into each run and stayed there even
+at V < 0, so it is wiring, not device physics. `run_measurement` checks both
+illuminated scans before extracting parameters, shows a non-blocking warning,
+and writes the notes into `SMU_Readback`. Dark scans are deliberately not
+checked — a good diode passes sub-nA currents near 0 V in the dark.
 
 ### PV parameter definitions
 
@@ -316,7 +390,7 @@ When adding new code that uses J0 or n, update both the local-derivative methods
 | Data Curation | Alt+F8 | `switch_mode("curation")` in `main_window.py` |
 | ISOS Protocols (D-1 / L-1 / V-1) | Alt+F9 | `run_isos_d1_measurement()` (D-1) / `ContinuousISOSRunner` (L-1, V-1) in `main_window.py` |
 
-Mode panels are shown/hidden by `switch_mode()` using `pack()`/`pack_forget()`. The active panel name is stored in `self._current_mode` (`"jv"`, `"mpp"`, `"stab"`, `"pure_mpp"`).
+Mode panels are shown/hidden by `switch_mode()` using `pack()`/`pack_forget()`. The active panel name is stored in `self.current_mode` — one of `"jv"`, `"light_jv"`, `"mpp"`, `"stab"`, `"pure_mpp"`, `"curation"`, `"isos"`. `switch_mode()` refuses to switch while `self._measurement_running` is set.
 
 ### MPP Tracking (JV-SPO cycling) — `mpp_tracker.py`
 
@@ -387,6 +461,49 @@ The Instrument Settings tab has a toggle between two modes:
 
 Both modes use 50 ms as the GPIB overhead constant so they round-trip consistently.
 
+### Validation suite — `validation/`
+
+A **separate** deterministic suite from `tests/`: `tests/` guards against
+regressions on every commit; `validation/` generates publication-grade evidence
+(figures + tables for the manuscript) and runs weekly, on release tags, or on
+demand.
+
+```bash
+python -m validation.run_suite --config validation/config.yaml   # → validation/results/
+```
+
+Everything is synthetic — `DummyCell` physics through `DummySMU` with
+`sleep_scale=0`, all randomness seeded from `config.yaml` — so two runs produce
+byte-identical `results.json`. Five tests: J-V extraction (A), single-diode fit
+(B), MPP tracking (C), repeatability (D), ISOS-D-1 stability (E).
+`validation/README.md` holds the methodology and acceptance criteria.
+
+### Sample data and documentation assets
+
+`Samples/` ships example workbooks so the app can be explored with no hardware.
+They are **generated**, not hand-made:
+
+```bash
+python docs/_gen_samples.py        # regenerate Samples/ (deterministic)
+python docs/_gen_doc_figures.py    # figures for docs/help.html
+python docs/_gen_gui_shots.py      # real GUI screenshots, driven by FakeKeithley
+```
+
+The generator uses the production exporters and, for ISOS L-1/V-1, the real
+`ContinuousISOSRunner` against a `FakeKeithley` + virtual clock — so a sample is
+the same kind of workbook a real run writes. `tests/test_samples_generation.py`
+asserts every committed sample still opens through the app's own readers; it does
+**not** regenerate them. Regenerate and commit `Samples/` whenever a writer's
+layout changes.
+
+### Bench diagnostic scripts
+
+Both are standalone, run against real hardware, and are not imported by the app:
+`probe_shutter.py` (find the shutter's digital I/O line, polarity and blade
+travel) and `probe_smu.py` (report what the SourceMeter is actually measuring —
+for diagnosing a J-V curve with no zero-crossing). Their pure logic is unit
+tested in `tests/test_shutter_probe.py` / `tests/test_smu_probe.py`.
+
 ### Auto-update system
 
 `app/utils/updater.py` fetches `version.json` from the GitHub raw URL in a background daemon thread. Called silently 3 s after startup (`root.after(3000, ...)`), and explicitly via **Help → Check for Updates**. Network/import failures are silenced in the background check and reported in the explicit check.
@@ -403,8 +520,19 @@ Both modes use 50 ms as the GPIB overhead constant so they round-trip consistent
 1. Update `version.json` (version, release_date, release_notes)
 2. Update `CHANGELOG.md`
 3. Update `APP_VERSION` in `app/utils/constants.py`
-4. Commit, push, create a GitHub Release tagged `vX.Y.Z`
-5. Optionally attach the compiled installer `.exe` to the release
+4. Bump the version in `build_installer/setup.iss` as well
+5. Commit, push, create a GitHub Release tagged `vX.Y.Z`
+6. Optionally attach the compiled installer `.exe` to the release
+
+`version.json` and `APP_VERSION` must agree — the updater compares them.
+
+### Branch discipline
+
+Never commit directly to `main`: it is the stable branch users run, and it only
+advances by merge from a feature branch. Work happens on a feature branch and is
+tagged from `main` at known-good points. Commits use conventional prefixes
+(`feat:`, `fix:`, `docs:`, `test:`, `refactor:`). Full routine in
+`docs/git-workflow.md` and `docs/release-vs-feature-branch.md`.
 
 ### Continuous Integration
 
@@ -415,7 +543,9 @@ Two GitHub Actions workflows live in `.github/workflows/`:
 | `tests.yml` | `ubuntu-latest` | 3.10, 3.11, 3.12 (matrix) | `not windows_only and not gui` |
 | `tests-windows.yml` | `windows-latest` | 3.11 | `not gui` |
 
-Both workflows trigger on every `push` and `pull_request` to any branch.
+Both trigger on every `push` and `pull_request` to any branch. A third workflow,
+`validation.yml`, runs the `validation/` suite on a weekly cron, on `v*.*.*`
+tags, and on manual dispatch — never on an ordinary push.
 
 **Pytest markers** (defined in `tests/conftest.py` and registered in `pyproject.toml`):
 
