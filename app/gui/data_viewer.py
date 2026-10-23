@@ -76,6 +76,11 @@ def _read_illuminated(ws):
         "prebias_v":  p(24),  "prebias_t": p(25),
         "instrument": p(26),
         "scan_rate":  p(27),
+        # AB-AE: absent (None) in files written before 2026-10.
+        "scan_order":     p(28),
+        "illumination":   p(29),
+        "detector_power": p(30),
+        "detector_area":  p(31),
     }
 
     v_f, j_f, p_f = [], [], []
@@ -947,6 +952,21 @@ class DataViewerWindow:
             row(si, "Instrument:", (idn[:34] + "…") if len(idn) > 34 else idn)
 
             if dtype == "illuminated":
+                sl = section("Illumination")
+                pin = data.get("illumination")
+                if pin is None:
+                    row(sl, "Irradiance:", "not recorded (older file)", fg="#9e9e9e")
+                else:
+                    row(sl, "Irradiance:", _fmt(pin, "%.2f mW/cm²"))
+                    try:
+                        row(sl, "Equivalent:", f"{float(pin) / 100.0:.3f} sun")
+                    except (TypeError, ValueError):
+                        pass
+                    row(sl, "Detector power:", _fmt(data.get("detector_power"), "%.3f mW"))
+                    row(sl, "Detector area:", _fmt(data.get("detector_area"), "%.4f cm²"))
+                if data.get("scan_order"):
+                    row(si, "Scan order:", str(data["scan_order"]))
+
                 sp = section("Pre-bias Conditioning")
                 pb_v = data.get("prebias_v") or 0
                 pb_t = data.get("prebias_t") or 0

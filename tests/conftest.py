@@ -127,6 +127,7 @@ def jv_app(tk_root):
     application._pristine_defaults = {
         "isos_protocol": application.isos_protocol_var.get(),
         "current_mode": application.current_mode,
+        "rev_first": application.rev_first_var.get(),
     }
     tk_root.update_idletasks()
     return application

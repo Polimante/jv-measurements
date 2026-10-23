@@ -184,3 +184,88 @@ def test_dark_jv_run_on_the_simulator_needs_no_dialogs(app, monkeypatch, tmp_pat
         f"the 'dark' scan was not dark: {dark_jsc=} vs {lit_jsc=}")
 
     assert any("Dark_JV" in f.name for f in tmp_path.glob("*.xlsx"))
+
+
+# ── Scan order ("Measure from REV to FWD") ───────────────────────────────────
+
+def test_rev_first_box_is_off_by_default(jv_app_defaults):
+    assert jv_app_defaults["rev_first"] is False
+
+
+def _record_scans(monkeypatch):
+    """Wrap main_window's measure_scan / apply_prebias to log the sequence."""
+    import app.gui.main_window as mw
+
+    calls = []
+    real_scan = mw.measure_scan
+
+    def scan(inst, start, end, step, *a, **k):
+        calls.append(("fwd" if step > 0 else "rev", start, end))
+        return real_scan(inst, start, end, step, *a, **k)
+
+    monkeypatch.setattr(mw, "measure_scan", scan)
+    monkeypatch.setattr(mw, "apply_prebias",
+                        lambda *a, **k: calls.append(("prebias",)))
+    return calls
+
+
+def _configure_run(app, tmp_path, *, rev_first, dark=False, prebias=False):
+    app.sample_name_var.set("OrderCell")
+    app.export_folder_var.set(str(tmp_path))
+    app.dark_jv_var.set(dark)
+    app.light_soaking_var.set(False)
+    app.prebias_enabled_var.set(prebias)
+    app.auto_single_diode_fit_var.set(False)
+    app.start_voltage_var.set(0.0)
+    app.end_voltage_var.set(1.05)
+    app.step_voltage_var.set(0.05)
+    app.illumination_var.set("100.0")
+    app.rev_first_var.set(rev_first)
+
+
+@pytest.mark.parametrize("rev_first, expected", [
+    (False, ["fwd", "prebias", "rev"]),
+    (True,  ["prebias", "rev", "fwd"]),
+])
+def test_scan_order_follows_the_checkbox(app, monkeypatch, tmp_path,
+                                         rev_first, expected):
+    """REV->FWD runs End->Start first; pre-bias stays right before the reverse."""
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    calls = _record_scans(monkeypatch)
+    _configure_run(app, tmp_path, rev_first=rev_first, prebias=True)
+    try:
+        app.run_measurement()
+    finally:
+        app.rev_first_var.set(False)
+
+    assert [c[0] for c in calls] == expected
+    rev = next(c for c in calls if c[0] == "rev")
+    assert rev[1:] == (1.05, 0.0)               # End -> Start
+
+    # The fwd / rev arrays are still the right way round, whatever the order.
+    entry = app.session_data[-1]
+    assert entry["v_fwd"][0] < entry["v_fwd"][-1]
+    assert entry["v_rev"][0] > entry["v_rev"][-1]
+    assert entry["scan_order"] == ("REV->FWD" if rev_first else "FWD->REV")
+
+    wb = openpyxl.load_workbook(next(tmp_path.glob("OrderCell_2*.xlsx")))
+    ws = wb["MeasurementData"]
+    assert ws.cell(1, 28).value == "Scan Order"
+    assert ws.cell(2, 28).value == entry["scan_order"]
+
+
+def test_rev_first_also_orders_the_dark_scan(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    calls = _record_scans(monkeypatch)
+    _configure_run(app, tmp_path, rev_first=True, dark=True)
+    try:
+        app.run_measurement()
+    finally:
+        app.rev_first_var.set(False)
+
+    assert [c[0] for c in calls] == ["rev", "fwd", "rev", "fwd"]
+    ws = openpyxl.load_workbook(next(tmp_path.glob("*_Dark_JV_*.xlsx")))["Dark_JV_Data"]
+    assert ws.cell(1, 10).value == "Scan Order"
+    assert ws.cell(2, 10).value == "REV->FWD"

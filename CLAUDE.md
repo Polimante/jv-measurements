@@ -317,7 +317,12 @@ The negation makes photocurrent positive in the power-generating quadrant (stand
 
 `data_viewer.load_jv_file()` dispatches on sheet name; the two single-measurement
 layouts are:
-- `MeasurementData` — illuminated J-V; row 1 = headers, row 2 = scalar params, row 3+ = V/J/P arrays
+- `MeasurementData` — illuminated J-V; row 1 = headers, row 2 = scalar params, row 3+ = V/J/P arrays.
+  Scalars run G-AA as they always have; AB-AE were added in 2026-10 and always
+  carry their header: **AB** Scan Order, **AC** Illumination (mW/cm², the value
+  the PCE is divided by — always written), **AD** Detector Power (mW),
+  **AE** Detector Area (cm²). Older files simply lack them and read back as
+  `None`; the Data Viewer then shows "not recorded (older file)".
 - `Dark_JV_Data` — dark J-V; same layout but only V/J (no power, no PV params)
 
 Optional sidecar sheets on these files: `SingleDiodeFit`, `DarkIdealityFit`,
@@ -451,7 +456,21 @@ D-2/D-3 (high T, damp heat), L-2/L-3 (T-controlled light soaking), LC-* (light c
 →  illuminated fwd scan  →  [pre-bias hold]  →  illuminated rev scan
 ```
 
-Pre-bias is applied **between** the forward and reverse illuminated scans only.
+Pre-bias is applied **right before the reverse illuminated scan** only.
+
+With **"Measure from REV to FWD"** ticked (`self.rev_first_var`, Scan Parameters,
+default off) both pairs — dark and illuminated — run reverse first:
+
+```
+[Dark J-V rev + fwd]  →  [shutter opens]  →  [light soaking timer]
+→  [pre-bias hold]  →  illuminated rev scan  →  illuminated fwd scan
+```
+
+Both orders go through `_measure_jv_pair()`, which always returns
+`(v_f, j_f, v_r, j_r)` with fwd = Start→End and rev = End→Start, so nothing
+downstream knows the order. It is recorded as the optional trailing
+"Scan Order" column (`FWD->REV` / `REV->FWD`) — AB in `MeasurementData`, J in
+`Dark_JV_Data` — whose value only J-V mode fills in.
 
 ### Scan rate mode
 
@@ -555,7 +574,8 @@ tags, and on manual dispatch — never on an ordinary push.
 `windows_only` is carried only by the crash-recovery test that imports
 `main_window` (which imports `winsound`). `gui` is carried by seven modules:
 the two data-viewer button tests, `test_isos_l1_gui`, `test_v1_scan_rate_warning`,
-`test_gui_smoke`, `test_gui_shutter_dialog` and `test_gui_shutter_wiring`.
+`test_gui_smoke`, `test_gui_shutter_dialog` and `test_gui_shutter_wiring` — plus
+the two Data Viewer panel tests in `test_exporter_illumination`, marked per test.
 
 **All GUI tests share one Tk root and one `JVMeasurementApp`**, created by the
 session-scoped `tk_root` / `jv_app` fixtures in `tests/conftest.py` and destroyed

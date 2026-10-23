@@ -273,6 +273,9 @@ def save_data(
     readback_fwd=None,
     readback_rev=None,
     readback_notes=(),
+    scan_order=None,
+    detector_power=None,
+    detector_area=None,
 ):
     """Save an illuminated J-V measurement to xlsx.
 
@@ -282,6 +285,14 @@ def save_data(
         readback_fwd, readback_rev: Optional ``(v_set, v_meas, i_raw)``
             lists from ``measure_scan(readback=...)``. When either is given
             an ``SMU_Readback`` sheet is appended, with *readback_notes*.
+        scan_order: Optional ``"FWD->REV"`` / ``"REV->FWD"`` (column AB).
+        detector_power, detector_area: Optional reference-detector reading
+            (mW) and area (cm²) that *illum* was derived from (AD, AE).
+
+    *illum* — the irradiance (mW/cm²) the PCE was divided by — is always
+    written, in column AC, so the PCE can be recomputed from the file.
+    Columns AB-AE always carry their header; a value left as None leaves
+    its cell empty, which keeps the positions fixed for the readers.
     """
     p_f = v_f * j_f
     p_r = v_r * j_r
@@ -293,7 +304,7 @@ def save_data(
     hf, pf, nf = _fmt(wb)
 
     ws.set_column("A:F", 15)
-    ws.set_column("G:Z", 14)
+    ws.set_column("G:AE", 14)
 
     headers = [
         "Forward Voltage (V)", "Forward Current Density (mA.cm-²)",
@@ -310,6 +321,8 @@ def save_data(
         "Delay per point (ms)", "NPLC", "4-Wire Sensing",
         "Pre-bias Voltage (V)", "Pre-bias Duration (s)",
         "Instrument IDN", "Scan Rate (mV/s)",
+        "Scan Order", "Illumination (mW/cm²)",
+        "Detector Power (mW)", "Detector Area (cm²)",
     ]
     for c, h in enumerate(headers):
         ws.write(0, c, h, hf)
@@ -335,6 +348,10 @@ def save_data(
         pb_v, pb_t,                                  # X, Y
         instrument_idn,                              # Z
         scan_rate,                                   # AA
+        scan_order,                                  # AB (optional)
+        illum,                                       # AC
+        detector_power,                              # AD (optional)
+        detector_area,                               # AE (optional)
     ]):
         if val is not None:
             ws.write(1, col, val, pf)
@@ -365,12 +382,14 @@ def save_dark_jv_data(
     v_f, j_f, v_r, j_r,
     cell_area, delay_ms, nplc, four_wire,
     instrument_idn,
+    scan_order=None,
 ):
     """Save dark J-V raw data to a separate Excel file.
 
     No PCE/FF/Voc/Jsc are extracted — those parameters have no physical
     meaning without illumination.  The file contains raw V and J columns
     for forward and reverse scans plus measurement metadata.
+    *scan_order*, when given, is written as a trailing "Scan Order" column (J).
     """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fp = os.path.join(export_folder, f"{sample_name}_Dark_JV_{ts}.xlsx")
@@ -388,6 +407,8 @@ def save_dark_jv_data(
         "Solar Cell Area (cm²)", "Delay per point (ms)", "NPLC",
         "4-Wire Sensing", "Instrument IDN",
     ]
+    if scan_order is not None:
+        headers.append("Scan Order")  # J
     for c, h in enumerate(headers):
         ws.write(0, c, h, hf)
 
@@ -398,6 +419,7 @@ def save_dark_jv_data(
         nplc,                         # G
         1 if four_wire else 0,        # H
         instrument_idn,               # I
+        scan_order,                   # J (optional)
     ]):
         if val is not None:
             ws.write(1, col, val, pf)

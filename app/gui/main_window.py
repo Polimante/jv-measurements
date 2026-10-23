@@ -234,6 +234,20 @@ class JVMeasurementApp:
             self.input_widgets.append(entry)
             ToolTip(entry, self._tooltip(name))
 
+        self.rev_first_var = BooleanVar(value=False)
+        rev_first_cb = Checkbutton(pf, text="Measure from REV to FWD",
+                                   variable=self.rev_first_var)
+        rev_first_cb.grid(row=4, column=0, columnspan=3, sticky=W, padx=4, pady=2)
+        self.input_widgets.append(rev_first_cb)
+        ToolTip(rev_first_cb,
+                "Unchecked (default): forward scan (Start → End) first,\n"
+                "then reverse scan (End → Start).\n\n"
+                "Checked: reverse scan (End → Start) first, then forward.\n"
+                "Applies to the illuminated and the dark J-V.\n\n"
+                "Pre-bias, when enabled, is always applied right before the\n"
+                "reverse scan — so in this order it comes before the first scan.\n"
+                "The scan order is saved in the Excel file.")
+
         # Illumination Settings
         ilf = LabelFrame(tab_scan, text="Illumination", padx=6, pady=4)
         ilf.pack(fill=X, pady=(0, 4))
@@ -1366,6 +1380,7 @@ class JVMeasurementApp:
             "Voc_fwd": Voc_f, "Jsc_fwd": Jsc_f, "FF_fwd": FF_f, "PCE_fwd": PCE_f,
             "Voc_rev": Voc_r, "Jsc_rev": Jsc_r, "FF_rev": FF_r, "PCE_rev": PCE_r,
             "HI": HI,
+            "scan_order": self._scan_order_label(),
             "color": color,
             "single_diode_fit": None,   # populated later if auto-fit is enabled
         })
@@ -1381,6 +1396,7 @@ class JVMeasurementApp:
             f"Delay/pt: {self.delay_ms_var.get():.0f} ms  |  "
             f"NPLC: {self.nplc_var.get():.2f}  |  "
             f"4-Wire: {'ON' if self.four_wire_var.get() else 'OFF'}\n"
+            f"Scan order: {self._scan_order_label()}\n"
             f"{pb}{ls}\n"
             f"Forward Scan:\n"
             f"  Voc:  {Voc_f:.3f} V\n  Jsc:  {Jsc_f:.3f} mA/cm\u00b2\n"
@@ -1569,6 +1585,57 @@ class JVMeasurementApp:
         done.wait()
         return result.get("value")
 
+    @staticmethod
+    def _safe_float(var):
+        """A Tk variable's value as float, or None if it does not parse —
+        a metadata column must never be the reason a measurement fails."""
+        try:
+            return float(var.get())
+        except Exception:
+            return None
+
+    def _scan_order_label(self):
+        """The scan order as written to the Excel file and the log."""
+        return "REV->FWD" if self.rev_first_var.get() else "FWD->REV"
+
+    def _measure_jv_pair(self, status_prefix, readback_f=None, readback_r=None,
+                         before_rev=None):
+        """Measure one forward + one reverse scan, in the order the
+        "Measure from REV to FWD" box asks for.
+
+        Forward is always Start -> End and reverse End -> Start; only which
+        one runs first changes. *before_rev* (the pre-bias) runs right before
+        the reverse scan whichever order is chosen, because that is what it
+        conditions. Returns ``(v_f, j_f, v_r, j_r)``, or ``None`` when the
+        run was stopped.
+        """
+        start = self.start_voltage_var.get()
+        end   = self.end_voltage_var.get()
+        step  = self.step_voltage_var.get()
+        area  = self.cell_area_var.get()
+
+        def fwd():
+            self.status_var.set(f"{status_prefix}Measuring forward scan\u2026")
+            return measure_scan(self.instrument, start, end, step, area,
+                                stop_event, readback=readback_f)
+
+        def rev():
+            if before_rev is not None:
+                before_rev()
+                if stop_event.is_set():
+                    return None, None
+            self.status_var.set(f"{status_prefix}Measuring reverse scan\u2026")
+            return measure_scan(self.instrument, end, start, -step, area,
+                                stop_event, readback=readback_r)
+
+        result = {}
+        for name, scan in ((("rev", rev), ("fwd", fwd)) if self.rev_first_var.get()
+                           else (("fwd", fwd), ("rev", rev))):
+            result[name] = scan()
+            if stop_event.is_set():
+                return None
+        return (*result["fwd"], *result["rev"])
+
     def _check_open_circuit(self, scans, cell_area):
         """Warn when an illuminated scan lost the cell mid-sweep.
 
@@ -1614,29 +1681,10 @@ class JVMeasurementApp:
 
             # ── Dark J-V (optional) ───────────────────────────────────────
             if self.dark_jv_var.get():
-                self.status_var.set("Dark J-V: measuring forward scan\u2026")
-                v_df, j_df = measure_scan(
-                    self.instrument,
-                    self.start_voltage_var.get(),
-                    self.end_voltage_var.get(),
-                    self.step_voltage_var.get(),
-                    self.cell_area_var.get(),
-                    stop_event,
-                )
-                if stop_event.is_set():
+                dark = self._measure_jv_pair("Dark J-V: ")
+                if dark is None:
                     return
-
-                self.status_var.set("Dark J-V: measuring reverse scan\u2026")
-                v_dr, j_dr = measure_scan(
-                    self.instrument,
-                    self.end_voltage_var.get(),
-                    self.start_voltage_var.get(),
-                    -self.step_voltage_var.get(),
-                    self.cell_area_var.get(),
-                    stop_event,
-                )
-                if stop_event.is_set():
-                    return
+                v_df, j_df, v_dr, j_dr = dark
 
                 # Return to 0 V and turn output OFF before waiting for user
                 try:
@@ -1654,6 +1702,7 @@ class JVMeasurementApp:
                     self.nplc_var.get(),
                     self.four_wire_var.get(),
                     self.instrument_idn or "",
+                    scan_order=self._scan_order_label(),
                 )
                 self._log_dark_jv(v_df, j_df, v_dr, j_dr, dark_fp)
                 self.status_var.set(
@@ -1687,20 +1736,8 @@ class JVMeasurementApp:
 
             # ── Illuminated J-V ───────────────────────────────────────────
             rb_f, rb_r = [], []    # (v_set, v_meas, i_raw) per point
-            self.status_var.set("Measuring forward scan\u2026")
-            v_f, j_f = measure_scan(
-                self.instrument,
-                self.start_voltage_var.get(),
-                self.end_voltage_var.get(),
-                self.step_voltage_var.get(),
-                self.cell_area_var.get(),
-                stop_event,
-                readback=rb_f,
-            )
-            if stop_event.is_set():
-                return
 
-            if self.prebias_enabled_var.get():
+            def prebias():
                 apply_prebias(
                     self.instrument,
                     self.prebias_voltage_var.get(),
@@ -1708,21 +1745,13 @@ class JVMeasurementApp:
                     stop_event,
                     self.status_var.set,
                 )
-                if stop_event.is_set():
-                    return
 
-            self.status_var.set("Measuring reverse scan\u2026")
-            v_r, j_r = measure_scan(
-                self.instrument,
-                self.end_voltage_var.get(),
-                self.start_voltage_var.get(),
-                -self.step_voltage_var.get(),
-                self.cell_area_var.get(),
-                stop_event,
-                readback=rb_r,
-            )
-            if stop_event.is_set():
+            illum_pair = self._measure_jv_pair(
+                "", readback_f=rb_f, readback_r=rb_r,
+                before_rev=prebias if self.prebias_enabled_var.get() else None)
+            if illum_pair is None:
                 return
+            v_f, j_f, v_r, j_r = illum_pair
 
             # Checked before the parameters: a lost contact usually also
             # breaks the Voc search, and the operator must hear about the
@@ -1776,6 +1805,9 @@ class JVMeasurementApp:
                 readback_fwd=rb_f,
                 readback_rev=rb_r,
                 readback_notes=oc_notes,
+                scan_order=self._scan_order_label(),
+                detector_power=self._safe_float(self.detector_power_var),
+                detector_area=self._safe_float(self.detector_area_var),
             )
 
             if oc_notes:
@@ -6357,6 +6389,8 @@ class JVMeasurementApp:
                 pb_en, pb_v, pb_t,
                 self.instrument_idn or "",
                 scan_rate=scan_rate_val,
+                detector_power=self._safe_float(self.isos_detector_power_var),
+                detector_area=self._safe_float(self.isos_detector_area_var),
             )
 
             # ── Append to cumulative tracking file ────────────────────────────

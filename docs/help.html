@@ -817,6 +817,18 @@
          an aperture mask, enter the mask opening area, not the total cell area.</p>
     </div>
 
+    <div class="param-block">
+      <div class="param-name">Measure from REV to FWD</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">Off</span></div>
+      <p style="margin-top:8px;">Off: the forward scan (Start &rarr; End) runs first, then the reverse
+         scan (End &rarr; Start). On: the reverse scan runs first, then the forward scan, as
+         many recent perovskite papers do. It applies to the dark J-V as well. The forward and
+         reverse curves, parameters and HI are labelled the same either way; only the order
+         changes. Pre-bias, when enabled, stays right before the reverse scan, so with this box
+         ticked it comes before the first scan. The order is saved in the Excel file
+         (&ldquo;Scan Order&rdquo; column).</p>
+    </div>
+
     <h3>Scan rate reference table</h3>
     <p>Brazil grid 60 Hz; 1 NPLC ≈ 16.7 ms. The 20 ms software overhead is included.</p>
     <table>
@@ -1545,6 +1557,8 @@ python probe_shutter.py --lines 1-8  # restrict the range if other kit shares th
       <div class="box-label">ℹ Why this order?</div>
       Pre-bias is applied only before the reverse scan. Conditioning before the forward scan
       would distort FS results and make the HI calculation physically meaningless.
+      With <strong>Measure from REV to FWD</strong> ticked the sequence becomes
+      Pre-bias hold &rarr; Reverse scan &rarr; Forward scan.
     </div>
 
     <div class="param-block">
@@ -3157,6 +3171,9 @@ python probe_shutter.py --lines 1-8  # restrict the range if other kit shares th
         <tr><td>X–Y</td><td>Pre-bias V, Pre-bias t</td><td>✓</td><td>—</td></tr>
         <tr><td>Z</td><td>Instrument IDN</td><td>✓</td><td>—</td></tr>
         <tr><td>AA</td><td>Scan Rate (mV/s)</td><td>✓</td><td>—</td></tr>
+        <tr><td>AB</td><td>Scan Order (FWD-&gt;REV / REV-&gt;FWD)</td><td>✓</td><td>—</td></tr>
+        <tr><td>AC</td><td>Illumination (mW/cm²) — the P<sub>in</sub> the PCE is divided by</td><td>✓</td><td>—</td></tr>
+        <tr><td>AD–AE</td><td>Detector Power (mW), Detector Area (cm²)</td><td>✓</td><td>—</td></tr>
       </tbody>
     </table>
     <p>The <code>CLAUDE.md</code> file in the repository documents the column mappings for all
