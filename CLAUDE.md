@@ -525,7 +525,14 @@ tested in `tests/test_shutter_probe.py` / `tests/test_smu_probe.py`.
 
 ### Auto-update system
 
-`app/utils/updater.py` fetches `version.json` from the GitHub raw URL in a background daemon thread. Called silently 3 s after startup (`root.after(3000, ...)`), and explicitly via **Help → Check for Updates**. Network/import failures are silenced in the background check and reported in the explicit check.
+`app/utils/updater.py` fetches `version.json` from the GitHub raw URL in a background daemon thread. Called silently 3 s after startup (`root.after(3000, ...)`), and explicitly via **Help → Check for Updates**. Network/import failures are silenced in the background check and reported in the explicit check. The raw URL only answers for a **public** repository — while it is private, no installed copy ever sees an update.
+
+An update is offered (yes/no), never forced. On "yes" it downloads `zip_url`, and `apply_release()` refuses — before copying anything — when:
+
+* the release's `requirements.txt` has lines the installed one lacks (`NeedsInstaller`): an in-place update only copies files, so new code importing a library that is not installed would leave an app that does not start. The operator is sent to the installer instead, whose `install.bat` runs pip. The updater deliberately does **not** run pip itself on a downloaded requirements file;
+* the install folder is not writable (an "all users" install under Program Files).
+
+Only then are the files copied. Every dialog goes through `parent.after` — the network work runs on a daemon thread and Tk is not thread-safe. The Tk-free steps are tested in `tests/test_updater.py`.
 
 ### Distribution
 
@@ -536,14 +543,14 @@ tested in `tests/test_shutter_probe.py` / `tests/test_smu_probe.py`.
 
 ### Releasing a new version
 
-1. Update `version.json` (version, release_date, release_notes)
+1. On the feature branch, update `version.json` (version, release_date, release_notes, and `zip_url` / `download_url` pointing at the new tag)
 2. Update `CHANGELOG.md`
 3. Update `APP_VERSION` in `app/utils/constants.py`
 4. Bump the version in `build_installer/setup.iss` as well
-5. Commit, push, create a GitHub Release tagged `vX.Y.Z`
-6. Optionally attach the compiled installer `.exe` to the release
+5. Merge into `main`, tag that merge commit `vX.Y.Z` and push the tag **in the same sitting** — installed copies read `version.json` from `main` immediately, and its `zip_url` 404s until the tag exists
+6. Create the GitHub Release from the tag and attach the installer `.exe` compiled **from that tag** — the "Latest" release is what a new user downloads, so its installer must match its version
 
-`version.json` and `APP_VERSION` must agree — the updater compares them.
+`version.json` and `APP_VERSION` must agree — the updater compares them. A release that adds a line to `requirements.txt` cannot be applied in place (see "Auto-update system"); say so in its release notes, since existing users must run the new installer.
 
 ### Branch discipline
 
