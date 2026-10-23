@@ -2,9 +2,23 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [2.7.0] — 2026-10-23
+
+> **Upgrading from 2.6.x or earlier: run the new installer.** This version needs a
+> new Python library (scipy), which an in-place update cannot install. The update
+> prompt opens the release page for you.
 
 ### Added
+- **ISOS-L-1** (continuous light soaking, open-circuit or MPP load) and **ISOS-V-1** (dark electrical-bias stress) protocols, alongside ISOS-D-1
+- **Stability metrics** — T80, T95, burn-in end T_S, PCE_S, Ts80 and n_1000, with a live panel, plot overlay and a per-scan `ISOS_Metrics` sheet
+- **Crash recovery** for continuous ISOS runs — every stress sample is streamed to a durable CSV, and orphaned runs are offered for recovery at startup
+- **Light-Intensity J-V** mode (Alt+F3) with ideality-factor analysis
+- **Single-diode model fit** (automatic after each J-V, or interactive in the Data Viewer) and **dark ideality fit**
+- **Open-contact warning** in J-V mode — an illuminated scan whose current falls to the SMU noise floor (< 1 nA for 3+ points) now warns instead of reporting meaningless parameters. A new `SMU_Readback` sheet records the programmed voltage, the measured voltage and the raw current of every point
+- **"Measure from REV to FWD"** option (Scan Parameters, off by default) — runs the reverse scan first, for the dark and the illuminated J-V. Pre-bias stays right before the reverse scan
+- **Illumination is saved in every J-V file** — new columns AB Scan Order, AC Illumination (mW/cm²), AD Detector Power, AE Detector Area. The Data Viewer shows them in a new "Illumination" section. Columns A–AA are unchanged
+- Bundled `Samples/` — an example workbook for every measurement mode
+- Deterministic `validation/` suite with synthetic ground truth
 - **Shutter control** — the software now opens and closes the solar simulator's shutter itself, in every measurement mode. Configure it in **Instrument → Shutter Control…** (menu bar, not a measurement panel: one configuration serves J-V, Light-Intensity, MPP, Pure MPP, Stabilized Current and every ISOS protocol)
 - Shutter backends are pluggable. Three ship with the software:
   - **Manual** (the default) — prompts the operator, exactly as before
@@ -21,6 +35,8 @@ All notable changes to this project are documented here.
 - Documentation: new **Section 10 — Shutter Control** in the user guide, covering wiring, both automatic backends, commercial controllers, and twelve troubleshooting entries
 
 ### Fixed
+- The in-place updater could copy a version whose new libraries were not installed, leaving an application that did not start. It now checks first and sends you to the installer instead; it also checks that the installation folder is writable before copying anything, and shows its dialogs on the interface thread (they could freeze the application before)
+- The installer did not recognise Python 3.13 or 3.14 and would download Python 3.11 again
 - J-V plot axis limits were hard-coded, clipping any sweep that ran past 1.2 V — a high-Voc cell lost its zero-crossing off the right edge. The upper edges now follow the data. The lower X edge stays pinned at 0 V on purpose, so sub-zero conditioning points are measured and saved but not drawn
 - On a 2600 the front panel kept displaying whatever it was last left on, so an operator could watch it read volts through an entire current sweep. `:SENS:FUNC` now points the display at the quantity being sensed
 

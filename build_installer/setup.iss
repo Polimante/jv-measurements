@@ -3,20 +3,20 @@
 ; Build: Open this file in Inno Setup Compiler and click Build â†’ Compile
 
 #define AppName "JV Measurements"
-#define AppVersion "2.6.0"
+#define AppVersion "2.7.0"
 #define AppPublisher "UFABC â€” Lucas Polimante"
 #define AppURL "https://github.com/Polimante/jv-measurements"
 
 [Setup]
 AppId={{8F3A2B1C-4D5E-6F7A-8B9C-0D1E2F3A4B5C}
 AppName=JV Measurements
-AppVersion=2.6.0
+AppVersion=2.7.0
 AppPublisher=UFABC - Lucas Polimante
 AppPublisherURL=https://github.com/Polimante/jv-measurements
 DefaultDirName={autopf}\JV Measurements
 DefaultGroupName=JV Measurements
 OutputDir=..\dist
-OutputBaseFilename=JV-Measurements-Setup-v2.6.0
+OutputBaseFilename=JV-Measurements-Setup-v2.7.0
 SetupIconFile=..\assets\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -60,10 +60,14 @@ begin
     RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.10\InstallPath', '', Path) or
     RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.11\InstallPath', '', Path) or
     RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', Path) or
+    RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.13\InstallPath', '', Path) or
+    RegQueryStringValue(HKLM, 'SOFTWARE\Python\PythonCore\3.14\InstallPath', '', Path) or
     RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.9\InstallPath', '', Path) or
     RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.10\InstallPath', '', Path) or
     RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.11\InstallPath', '', Path) or
-    RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', Path);
+    RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.12\InstallPath', '', Path) or
+    RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.13\InstallPath', '', Path) or
+    RegQueryStringValue(HKCU, 'SOFTWARE\Python\PythonCore\3.14\InstallPath', '', Path);
 end;
 
 procedure InstallPython();
