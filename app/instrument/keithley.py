@@ -25,6 +25,38 @@ def init_instrument(inst, nplc, delay_s, four_wire):
     inst.write(":OUTP ON")
 
 
+def configure_oc_mode(inst, nplc: float = 1.0):
+    """
+    Configure the instrument to hold the cell at open circuit and read Voc.
+
+    Source = CURR with setpoint 0 A, sense = VOLT, so the measured voltage is
+    the cell's open-circuit voltage. No perturbation is applied. Used by the
+    ISOS-L-1 / V-1 OC stress phases (Khenkin et al. Nature Energy 2020).
+
+    Sequence:
+        *RST, :SOUR:FUNC CURR, :SOUR:CURR 0, :SENS:FUNC 'VOLT',
+        :SENS:VOLT:PROT 2, :SENS:VOLT:NPLC <nplc>, :SYST:RSEN OFF, :OUTP ON
+    """
+    inst.write("*RST")
+    inst.write(":SOUR:FUNC CURR")
+    inst.write(":SOUR:CURR 0")
+    inst.write(":SENS:FUNC 'VOLT'")
+    inst.write(":SENS:VOLT:PROT 2")
+    inst.write(f":SENS:VOLT:NPLC {nplc:.3f}")
+    inst.write(":SYST:RSEN OFF")
+    inst.write(":OUTP ON")
+
+
+def read_voc_now(inst) -> float:
+    """
+    Read the open-circuit voltage once and return it in volts.
+
+    Assumes the instrument is already in OC mode (see ``configure_oc_mode``);
+    the first field of the :READ? response is the measured voltage.
+    """
+    return float(inst.query(":READ?").split(",")[0])
+
+
 def apply_prebias(inst, v_pb, t_pb, stop_event, status_callback):
     """
     Hold the output at *v_pb* volts for *t_pb* seconds before the sweep.
@@ -78,13 +110,20 @@ def apply_light_soaking(inst, duration_s, stop_event, status_callback):
             pass
 
 
-def measure_scan(inst, start, end, step, cell_area, stop_event):
+def measure_scan(inst, start, end, step, cell_area, stop_event, readback=None):
     """
     Step the source voltage from *start* to *end* (inclusive) by *step*
     and read the current at each point.
 
     Returns ``(voltages, current_densities)`` as NumPy arrays, or
     ``(None, None)`` if the stop event fires mid-scan.
+
+    *readback*, when given a list, receives one ``(v_set, v_meas, i_raw)``
+    tuple per point: the programmed voltage, the voltage the instrument
+    reports (field 0 of ``:READ?``) and the raw current in amperes, before
+    the sign flip. The returned arrays are unchanged either way. This is
+    the evidence that tells a lost contact (V_meas follows V_set, I ~ 0)
+    from an output that dropped (V_meas ~ 0).
     """
     safety = 0.02
     voltages, currents = [], []
@@ -93,7 +132,15 @@ def measure_scan(inst, start, end, step, cell_area, stop_event):
             return None, None
         inst.write(f":SOUR:VOLT {v:.3f}")
         time.sleep(safety)
-        current = -float(inst.query(":READ?").split(",")[1])
+        fields = inst.query(":READ?").split(",")
+        i_raw = float(fields[1])
+        current = -i_raw
         currents.append((current * 1000) / cell_area)
         voltages.append(v)
+        if readback is not None:
+            try:
+                v_meas = float(fields[0])
+            except ValueError:
+                v_meas = float("nan")
+            readback.append((float(v), v_meas, i_raw))
     return np.array(voltages), np.array(currents)

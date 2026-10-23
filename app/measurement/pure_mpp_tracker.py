@@ -21,19 +21,26 @@ Algorithm (perturb-and-observe):
 import time
 import numpy as np
 
+from app.instrument.keithley import configure_oc_mode, read_voc_now
+
 
 class PureMPPTracker:
-    def __init__(self, instrument, params, callbacks, stop_event):
+    def __init__(self, instrument, params, callbacks, stop_event,
+                 load_mode="MPP"):
         """
         instrument : open pyvisa resource (Keithley 2400)
         params     : dict with all measurement parameters
         callbacks  : dict of callables for UI updates
         stop_event : threading.Event to abort measurement
+        load_mode  : "MPP" (perturb-and-observe tracking, default) or
+                     "OC" (hold at open circuit and record Voc). In OC mode
+                     j and pce are reported as 0 on every tick.
         """
         self.inst       = instrument
         self.params     = params
         self.callbacks  = callbacks
         self.stop_event = stop_event
+        self.load_mode  = load_mode
 
         self.time_s   = []   # elapsed seconds from t_start
         self.v_track  = []   # tracked Vmpp (V)
@@ -43,6 +50,9 @@ class PureMPPTracker:
 
     def run(self):
         """Main tracking loop — runs in a worker thread."""
+        if self.load_mode == "OC":
+            return self._run_oc()
+
         self._configure_instrument()
 
         # ── Initial J-V scan to find Vmpp ─────────────────────────────────────
@@ -123,6 +133,75 @@ class PureMPPTracker:
             except Exception:
                 pass
             self.callbacks["on_status"]("Pure MPP Tracking complete.")
+            self.callbacks["on_complete"](
+                self.time_s, self.v_track, self.j_track, self.pce_track)
+
+    # ── OC (open-circuit) tracking ────────────────────────────────────────────
+
+    def _run_oc(self):
+        """Hold the cell at open circuit and record Voc(t).
+
+        Mirrors :meth:`run` but with no perturbation: the instrument sources
+        0 A, senses voltage, and ``read_voc_now`` returns Voc on each tick.
+        ``j`` and ``pce`` are reported as 0.0 throughout. An optional baseline
+        J-V scan runs first unless ``params['oc_skip_initial_scan']`` is set.
+        """
+        # ── Optional baseline J-V scan ────────────────────────────────────────
+        if not self.params.get("oc_skip_initial_scan", False):
+            self._configure_instrument()
+            self.callbacks["on_status"]("Initial J-V scan — baseline…")
+            v_arr, j_arr = self._measure_scan(
+                self.params["scan_end_v"],
+                self.params["scan_start_v"],
+                -self.params["scan_step_v"],
+            )
+            vmpp = self._find_vmpp(v_arr, j_arr)
+            self.callbacks["on_jv_done"](v_arr, j_arr, vmpp)
+
+        # ── Switch to OC mode ─────────────────────────────────────────────────
+        configure_oc_mode(self.inst, self.params.get("nplc", 1.0))
+        self.callbacks["on_status"](
+            "Holding at open circuit — recording Voc…")
+
+        # t=0 begins when OC tracking starts (after any baseline scan)
+        self.t_start = time.time()
+
+        total_s    = self.params["total_duration_min"] * 60.0
+        interval_s = self.params["interval_ms"] / 1000.0
+
+        try:
+            while not self.stop_event.is_set():
+                if time.time() - self.t_start >= total_s:
+                    break
+
+                t_loop = time.time()
+
+                v   = read_voc_now(self.inst)
+                j   = 0.0
+                pce = 0.0
+
+                t_abs = time.time() - self.t_start
+                self.time_s.append(t_abs)
+                self.v_track.append(v)
+                self.j_track.append(j)
+                self.pce_track.append(pce)
+
+                self.callbacks["on_update"](t_abs, v, j, pce)
+
+                # ── Wait for remainder of interval ─────────────────────────
+                elapsed = time.time() - t_loop
+                remaining = interval_s - elapsed
+                if remaining > 0:
+                    deadline = time.time() + remaining
+                    while time.time() < deadline and not self.stop_event.is_set():
+                        time.sleep(min(0.05, deadline - time.time()))
+
+        finally:
+            try:
+                self.inst.write(":OUTP OFF")
+            except Exception:
+                pass
+            self.callbacks["on_status"]("Pure OC tracking complete.")
             self.callbacks["on_complete"](
                 self.time_s, self.v_track, self.j_track, self.pce_track)
 

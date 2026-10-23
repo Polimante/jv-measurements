@@ -78,13 +78,27 @@
 
     /* ── Page Header ───────────────────────────────────────────────────── */
     #page-header {
+      display: flex;
+      align-items: center;
+      gap: 22px;
       border-bottom: 3px solid #2c3e50;
       padding-bottom: 22px;
       margin-bottom: 45px;
     }
+    #page-header .logo {
+      width: 86px;
+      height: 86px;
+      flex-shrink: 0;
+      border-radius: 14px;
+    }
+    #page-header .header-text { flex: 1; }
     #page-header h1 { font-size: 26px; color: #2c3e50; margin-bottom: 6px; }
     .subtitle { font-size: 14.5px; color: #555; margin-bottom: 3px; }
     .author-line { font-size: 13px; color: #888; }
+
+    /* Sidebar mini-logo */
+    .sidebar-header .brand { display: flex; align-items: center; gap: 9px; }
+    .sidebar-header .brand img { width: 30px; height: 30px; border-radius: 6px; }
 
     /* ── Sections ──────────────────────────────────────────────────────── */
     .section { margin-bottom: 65px; scroll-margin-top: 25px; }
@@ -278,7 +292,10 @@
 ════════════════════════════════════════════════════════════════════════ -->
 <aside id="sidebar">
   <div class="sidebar-header">
-    <h3>User Documentation</h3>
+    <div class="brand">
+      <img src="figures/logo.png" alt="JV Measurement logo">
+      <h3>User Documentation</h3>
+    </div>
     <p>JV Measurement v2.6.0</p>
   </div>
   <nav>
@@ -295,25 +312,39 @@
       <li><a href="#modes">7. Measurement Modes Overview</a></li>
       <li><a href="#jv-params">8. J-V Measurement Parameters</a></li>
       <li><a href="#instrument-settings">9. Instrument Settings</a></li>
-      <li><a href="#prebias">10. Pre-bias Conditioning</a></li>
-      <li><a href="#running-jv">11. Running a J-V Measurement</a></li>
-      <li><a href="#stab">12. Stabilized Current</a></li>
-      <li><a href="#mpp">13. MPP Tracking (JV-SPO)</a></li>
-      <li><a href="#pure-mpp">14. Pure MPP Tracking (P&amp;O)</a></li>
-      <li><a href="#dark-jv">15. Dark J-V Measurement</a></li>
+      <li><a href="#shutter">10. Shutter Control</a></li>
+      <li><a href="#prebias">11. Pre-bias Conditioning</a></li>
+      <li><a href="#running-jv">12. Running a J-V Measurement</a></li>
+      <li><a href="#light-jv">13. Light-Intensity J-V</a></li>
+      <li><a href="#stab">14. Stabilized Current</a></li>
+      <li><a href="#mpp">15. MPP Tracking (JV-SPO)</a></li>
+      <li><a href="#pure-mpp">16. Pure MPP Tracking (P&amp;O)</a></li>
+      <li><a href="#dark-jv">17. Dark J-V Measurement</a></li>
+
+      <div class="sidebar-group">ISOS Stability Protocols</div>
+      <li><a href="#isos-overview">18. ISOS Protocols Overview</a></li>
+      <li><a href="#isos-common">19. Shared ISOS Parameters</a></li>
+      <li><a href="#isos-d1">20. ISOS-D-1 — Dark Storage</a></li>
+      <li><a href="#isos-l1">21. ISOS-L-1 — Light Soaking</a></li>
+      <li><a href="#isos-v1">22. ISOS-V-1 — Electrical Bias</a></li>
+      <li><a href="#isos-metrics">23. Stability Metrics</a></li>
+      <li><a href="#isos-autosave">24. Autosave &amp; Crash Recovery</a></li>
 
       <div class="sidebar-group">Data &amp; Analysis</div>
-      <li><a href="#data-curation">16. Data Curation</a></li>
-      <li><a href="#data-viewer">17. Data Viewer</a></li>
-      <li><a href="#excel-format">18. Excel File Format</a></li>
-      <li><a href="#results">19. Understanding J-V Results</a></li>
-      <li><a href="#pv-parameters">20. Photovoltaic Parameters</a></li>
-      <li><a href="#circuit-model">21. Equivalent Circuit Model</a></li>
-      <li><a href="#hysteresis">22. Hysteresis in Perovskites</a></li>
+      <li><a href="#data-curation">25. Data Curation</a></li>
+      <li><a href="#data-viewer">26. Data Viewer &amp; Visualization</a></li>
+      <li><a href="#diode-fit">27. Single-Diode Fit</a></li>
+      <li><a href="#dark-ideality">28. Dark J-V Ideality Fit</a></li>
+      <li><a href="#light-ideality">29. Light Ideality Factor</a></li>
+      <li><a href="#excel-format">30. Excel File Format</a></li>
+      <li><a href="#results">31. Understanding J-V Results</a></li>
+      <li><a href="#pv-parameters">32. Photovoltaic Parameters</a></li>
+      <li><a href="#circuit-model">33. Equivalent Circuit Model</a></li>
+      <li><a href="#hysteresis">34. Hysteresis in Perovskites</a></li>
 
       <div class="sidebar-group">Support</div>
-      <li><a href="#troubleshooting">23. Troubleshooting</a></li>
-      <li><a href="#references">24. References</a></li>
+      <li><a href="#troubleshooting">35. Troubleshooting</a></li>
+      <li><a href="#references">36. References</a></li>
     </ul>
   </nav>
 </aside>
@@ -324,9 +355,12 @@
 <main id="content">
 
   <div id="page-header">
-    <h1>JV Measurement Software — User Documentation</h1>
-    <p class="subtitle">Version 2.6.0 | Open-source characterization tool for perovskite solar cells</p>
-    <p class="author-line">Developed by Lucas Polimante — Universidade Federal do ABC (UFABC)</p>
+    <img class="logo" src="figures/logo.png" alt="JV Measurement Software logo">
+    <div class="header-text">
+      <h1>JV Measurement Software — User Documentation</h1>
+      <p class="subtitle">Version 2.6.0 | Open-source characterization tool for perovskite solar cells</p>
+      <p class="author-line">Developed by Lucas Polimante — Universidade Federal do ABC (UFABC)</p>
+    </div>
   </div>
 
   <!-- ════════════════════════════════════════════════════════════════════
@@ -338,8 +372,9 @@
       <strong>JV Measurement Software</strong> is an open-source Python application for automated
       characterisation of perovskite and other thin-film solar cells, built for use with a
       <strong>Keithley 2400 SourceMeter</strong> controlled via a GPIB-USB adapter.
-      It provides four complementary measurement modes that together cover the full characterisation
-      workflow recommended by international consensus protocols [Khenkin et al., 2020].
+      It provides a complete suite of complementary measurement and stability-testing modes that
+      together cover the full characterisation workflow recommended by international consensus
+      protocols [Khenkin et al., 2020].
     </p>
 
     <h3>Measurement modes</h3>
@@ -355,28 +390,41 @@
               FF, PCE, R<sub>s</sub>, R<sub>sh</sub>, and Hysteresis Index (HI)</td>
         </tr>
         <tr>
-          <td><strong>MPP Tracking (JV-SPO)</strong></td>
+          <td><strong>Light-Intensity J-V</strong></td>
           <td><code>Alt+F3</code></td>
+          <td>J-V sweeps at user-defined illumination intensities; extracts the light
+              ideality factor n<sub>idL</sub> from the slope of V<sub>oc</sub> vs ln(L)</td>
+        </tr>
+        <tr>
+          <td><strong>MPP Tracking (JV-SPO)</strong></td>
+          <td><code>Alt+F5</code></td>
           <td>Cyclic J-V scans followed by Stabilized Power Output (SPO) phases at V<sub>mpp</sub>;
               tracks efficiency evolution over time with periodic J-V diagnostics</td>
         </tr>
         <tr>
           <td><strong>Stabilized Current</strong></td>
-          <td><code>Alt+F5</code></td>
+          <td><code>Alt+F6</code></td>
           <td>Holds cell at a fixed voltage and records current density over time; reports
               quasi-steady-state PCE and detects the stabilization point</td>
         </tr>
         <tr>
           <td><strong>Pure MPP Tracking (P&amp;O)</strong></td>
-          <td><code>Alt+F6</code></td>
+          <td><code>Alt+F7</code></td>
           <td>Continuous Perturb-and-Observe maximum power point tracking; records V<sub>mpp</sub>,
               J, and PCE at every time step with no interruptions for J-V scans</td>
         </tr>
         <tr>
           <td><strong>Data Curation</strong></td>
-          <td><code>Alt+F7</code></td>
+          <td><code>Alt+F8</code></td>
           <td>Batch analysis of multiple saved J-V files; applies quality thresholds, groups
               devices by composition, and exports curated statistics ready for Origin box plots</td>
+        </tr>
+        <tr>
+          <td><strong>ISOS Protocols (D-1 / L-1 / V-1)</strong></td>
+          <td><code>Alt+F9</code></td>
+          <td>Consensus stability testing: dark storage, continuous light soaking, and dark
+              electrical-bias stress; tracks normalised PCE and stability metrics (T80, T95, …)
+              over days with durable autosave and crash recovery</td>
         </tr>
       </tbody>
     </table>
@@ -395,7 +443,7 @@
           diagnostics) and pure P&amp;O continuous tracking</li>
       <li><strong>Data Viewer</strong> window for opening and plotting any previously saved
           Excel file, with metadata panel and interactive legend</li>
-      <li><strong>Data Curation</strong> (Alt+F7) — batch analysis of multiple J-V files with
+      <li><strong>Data Curation</strong> (Alt+F8) — batch analysis of multiple J-V files with
           composition grouping, configurable pass/fail thresholds, per-group statistics, champion
           cell identification, and hysteresis summary; exports multi-sheet Excel ready for Origin</li>
       <li>All data exported to <strong>Excel (.xlsx)</strong> using a unified
@@ -606,33 +654,48 @@
        buttons are disabled. White text = instrument identified; measurement can proceed.</p>
 
     <h3>Mode switching</h3>
-    <p>Five modes are accessible from the <strong>Mode</strong> menu or via keyboard shortcuts
-       (Alt+F2, F3, F5, F6, F7). Each mode reveals its own panel of controls in the left pane.
-       Only one mode can be active at a time. Switching mode does not disconnect the instrument.</p>
+    <p>Eight modes are accessible from the <strong>Procedures</strong> menu or via keyboard
+       shortcuts (Alt+F2, F3, F5, F6, F7, F8, F9). Each mode reveals its own panel of controls
+       in the left pane. Only one mode can be active at a time. Switching mode does not
+       disconnect the instrument.</p>
 
     <h3>J-V mode panel (<code>Alt+F2</code>)</h3>
     <p>Sample name, export folder, voltage sweep parameters, cell area, instrument settings,
        illumination input, pre-bias conditioning, and dark J-V option. Contains the main
        J-V plot area and measurement log.</p>
 
-    <h3>MPP Tracking panel (<code>Alt+F3</code>)</h3>
+    <h3>Light-Intensity J-V panel (<code>Alt+F3</code>)</h3>
+    <p>Standard scan parameters (shared with J-V mode) plus an intensity sequence list.
+       The software prompts you to adjust the solar simulator at each intensity step, waits
+       a configurable stabilization time, then runs a forward + reverse J-V scan.
+       Outputs a consolidated workbook with all curves and the fitted light ideality factor
+       n<sub>idL</sub>.</p>
+
+    <h3>MPP Tracking panel (<code>Alt+F5</code>)</h3>
     <p>Sample name, export folder, cell area, scan parameters, pre-bias option, illumination,
        total duration, SPO duration per cycle. Contains SPO plot and J-V per cycle overlay.</p>
 
-    <h3>Stabilized Current panel (<code>Alt+F5</code>)</h3>
+    <h3>Stabilized Current panel (<code>Alt+F6</code>)</h3>
     <p>Sample name, export folder, cell area, applied voltage, illumination, duration, reading
        interval, and stabilization threshold. Contains a live dual-axis plot (J and PCE vs time).</p>
 
-    <h3>Pure MPP Tracking panel (<code>Alt+F6</code>)</h3>
+    <h3>Pure MPP Tracking panel (<code>Alt+F7</code>)</h3>
     <p>Sample name, export folder, cell area, perturbation step, interval, NPLC, delay,
        illumination, and initial scan parameters. Contains dual-axis plot (PCE and V<sub>mpp</sub>).</p>
 
-    <h3>Data Curation panel (<code>Alt+F7</code>)</h3>
+    <h3>Data Curation panel (<code>Alt+F8</code>)</h3>
     <p>Multi-file batch analysis tool. Four tabs: <strong>Files</strong> (load .xlsx files),
        <strong>Groups</strong> (define composition groups), <strong>Thresholds</strong> (set
        minimum quality thresholds), and <strong>Output</strong> (export filename and folder).
        The right panel shows a Raw Data Preview for the selected file and a summary table of all
        loaded cells with pass/fail coloring.</p>
+
+    <h3>ISOS Protocols panel (<code>Alt+F9</code>)</h3>
+    <p>Stability-testing workspace for the ISOS-D-1, L-1, and V-1 protocols. A tabbed control area
+       (Experiment / Scan / Instrument / Conditioning, plus L-1 and V-1 sub-frames) feeds a single
+       per-experiment tracking workbook. The right pane shows a live measurement-history table (D-1),
+       a Stability Metrics panel, an ETA + autosave-health status bar, and a protocol-specific plot.
+       Covered in detail in Sections 17–23.</p>
 
     <h3>File menu</h3>
     <ul>
@@ -647,8 +710,9 @@
   <section class="section" id="modes">
     <h2>7. Measurement Modes Overview</h2>
 
-    <p>The four modes complement each other within a complete efficiency characterisation workflow.
-       The order below reflects the recommended characterisation sequence for a new perovskite cell.</p>
+    <p>The modes complement each other within a complete efficiency-and-stability characterisation
+       workflow. The order below reflects the recommended characterisation sequence for a new
+       perovskite cell, ending with long-term ISOS stability testing.</p>
 
     <table>
       <thead>
@@ -691,6 +755,13 @@
           <td>Multi-sheet Excel with per-group statistics and composition comparisons</td>
           <td>After collecting data from multiple devices; batch parameter extraction and statistical
               comparison between compositions; preparation of Origin-ready data for publication</td>
+        </tr>
+        <tr>
+          <td><strong>ISOS Protocols</strong> (D-1 / L-1 / V-1)</td>
+          <td>hours – weeks</td>
+          <td>Normalised PCE vs time; T80 / T95 / T<sub>S</sub> / n<sub>1000</sub> stability metrics</td>
+          <td>Lifetime / stability testing under dark storage, light soaking, or electrical bias;
+              final qualification step after a cell's efficiency is established</td>
         </tr>
       </tbody>
     </table>
@@ -744,6 +815,18 @@
       <p style="margin-top:8px;">Used to convert measured current (A) to current density (mA/cm²).
          A 5% area error propagates directly to 5% error in J<sub>sc</sub> and PCE. When using
          an aperture mask, enter the mask opening area, not the total cell area.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Measure from REV to FWD</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">Off</span></div>
+      <p style="margin-top:8px;">Off: the forward scan (Start &rarr; End) runs first, then the reverse
+         scan (End &rarr; Start). On: the reverse scan runs first, then the forward scan, as
+         many recent perovskite papers do. It applies to the dark J-V as well. The forward and
+         reverse curves, parameters and HI are labelled the same either way; only the order
+         changes. Pre-bias, when enabled, stays right before the reverse scan, so with this box
+         ticked it comes before the first scan. The order is saved in the Excel file
+         (&ldquo;Scan Order&rdquo; column).</p>
     </div>
 
     <h3>Scan rate reference table</h3>
@@ -831,10 +914,622 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       10. PRE-BIAS CONDITIONING
+       10. SHUTTER CONTROL
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="shutter">
+    <h2>10. Shutter Control</h2>
+
+    <p>Almost every measurement in this software depends on knowing whether the cell is
+       illuminated. A dark J-V that silently ran under light looks perfectly plausible in the
+       data — nothing about the curve announces the mistake. The software therefore treats the
+       shutter as something to be <em>commanded and asserted</em>, not assumed.</p>
+
+    <p>Shutter support is <strong>pluggable</strong>. The software ships with three backends and
+       is designed so that a lab with different hardware can add its own, or in the common case
+       simply configure the generic serial backend and write no code at all.</p>
+
+    <div class="info-box">
+      <div class="box-label">Where to find it</div>
+      <strong>Instrument → Shutter Control…</strong> on the menu bar. It lives there rather than
+      inside one measurement panel because the shutter belongs to the rig: one configuration
+      serves J-V, Light-Intensity, MPP, Pure MPP, Stabilized Current and every ISOS protocol.
+      The setting is saved to <code>~/.jv-measurement/settings.json</code> and restored the next
+      time the software starts.
+    </div>
+
+    <h3>The Shutter Control window</h3>
+
+    <div class="param-block">
+      <div class="param-name">System</div>
+      <p style="margin-top:8px;">Chooses the backend. The settings shown underneath change to
+         match — each backend declares its own options, so the form is different for each one.</p>
+      <div class="param-row"><span class="param-key">Manual:</span><span class="param-val">the software prompts you; you move the shutter by hand</span></div>
+      <div class="param-row"><span class="param-key">Keithley 2600 digital I/O:</span><span class="param-val">a digital I/O line of the SourceMeter drives the shutter</span></div>
+      <div class="param-row"><span class="param-key">Serial / Arduino:</span><span class="param-val">text commands over a serial port</span></div>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Apply &amp; Save</div>
+      <p style="margin-top:8px;">Validates the form, activates the backend and writes the
+         configuration to disk. Out-of-range values are refused with an explanation rather than
+         silently clamped.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Test: Open / Test: Close / Self-test</div>
+      <p style="margin-top:8px;">Move the shutter right now, so you can confirm the wiring
+         without starting a measurement. <strong>Self-test</strong> performs close → open → close
+         and reports how long each step took. All three <em>apply the form first</em>, so there is
+         no "I forgot to click Apply" failure mode — what you see on screen is what gets tested.</p>
+      <p style="margin-top:8px;">The buttons are refused while a measurement is running: the
+         shutter shares the instrument's connection, and moving it mid-scan would corrupt the
+         data even if it were electrically safe.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Status badge</div>
+      <p style="margin-top:8px;">Top right of the window. Reads
+         <strong>CLOSED</strong> (green), <strong>OPEN</strong> (orange),
+         <strong>manual</strong>, or <strong>unknown (connect instrument)</strong> in grey.
+         "Unknown" is honest rather than defensive: before the SourceMeter is connected, a
+         backend that borrows its connection genuinely cannot know where the shutter is.</p>
+    </div>
+
+    <h3>When the shutter moves</h3>
+
+    <p>Once an automatic backend is configured, the software drives the shutter at every
+       boundary, in every mode:</p>
+
+    <table>
+      <thead>
+        <tr><th>Mode</th><th>Shutter behaviour</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>J-V (with Dark J-V)</td><td>Closed for the dark scans → opens → illuminated scans → closed</td></tr>
+        <tr><td>J-V (illuminated only)</td><td>Opens at the start → closed at the end</td></tr>
+        <tr><td>Light-Intensity J-V</td><td>Opens at the start → closed at the end</td></tr>
+        <tr><td>MPP / Pure MPP / Stabilized Current</td><td>Opens at the start → closed at the end</td></tr>
+        <tr><td>ISOS-D-1</td><td>Same as J-V: dark scans closed, illuminated scans open</td></tr>
+        <tr><td>ISOS-L-1</td><td>Open for the whole light-soaking run → closed at the end</td></tr>
+        <tr><td>ISOS-V-1</td><td>Closed during dark stress; opens for each periodic illuminated scan, closes again</td></tr>
+      </tbody>
+    </table>
+
+    <p>Every measurement ends with the shutter closed, and it stays closed until the next
+       measurement asks for light. Disconnecting the instrument and quitting the application
+       also close it.</p>
+
+    <div class="info-box">
+      <div class="box-label">Nothing changes if you do not configure a shutter</div>
+      With the default <strong>Manual</strong> backend the software behaves exactly as it always
+      has: it prompts you at the dark/illuminated handover in J-V and ISOS-D-1, and at the
+      ISOS-V-1 scan boundaries — no more dialogs than before, and no fewer. The extra boundaries
+      in the table above are driven only by backends that can actuate on their own.
+    </div>
+
+    <h3>10.1 Manual backend</h3>
+
+    <p>The default. At each dark/illuminated boundary the software pauses, shows a dialog asking
+       you to open or close the shutter, and waits for OK. Choose this if your simulator's
+       shutter has no remote input, or while you are still wiring up an automatic one.</p>
+
+    <h3>10.2 Keithley 2600 digital I/O backend</h3>
+
+    <p>The SourceMeter's own rear-panel <strong>DIGITAL I/O</strong> connector drives the
+       shutter. This needs no extra instrument and no extra software, which is why it is the
+       first automatic backend the software shipped with.</p>
+
+    <h4>The connector</h4>
+
+    <p>A 25-pin female D-sub on the rear panel of any Series 2600 instrument:</p>
+
+    <table>
+      <thead><tr><th>Pins</th><th>Function</th></tr></thead>
+      <tbody>
+        <tr><td>1 – 14</td><td>Digital I/O lines #1 – #14 (the line number equals the pin number)</td></tr>
+        <tr><td>15 – 21</td><td>Ground</td></tr>
+        <tr><td>22, 23, 25</td><td>+5 V output (600 mA total, self-resetting fuse)</td></tr>
+        <tr><td>24</td><td>Interlock (2611/2612/2635/2636) or Output Enable (2601/2602) — <strong>not</strong> a digital I/O line; the software never writes it</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Electrical behaviour — read this before wiring</h4>
+
+    <p>Each line is an <strong>open-drain output with a 5.1 kΩ pull-up to +5 V</strong>. Three
+       consequences follow, and every one of them matters:</p>
+
+    <ul>
+      <li><strong>A line idles HIGH.</strong> Nothing driving it means +5 V, not 0 V.</li>
+      <li><strong>It can barely source current.</strong> About 960 µA maximum flows <em>out</em>
+          of a line when high. That is enough for a high-impedance TTL input and nothing else.</li>
+      <li><strong>It sinks far more than it sources.</strong> Up to 5 mA at 0.7 V, 11 mA absolute
+          maximum, flowing <em>into</em> the line. This is why interface boxes are normally built
+          so that the Keithley pulls a line low to activate an opto-isolator or relay powered
+          from the port's own +5 V pin.</li>
+    </ul>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ The fail-safe question</div>
+      Because the lines idle high, a <strong>non-inverting</strong> interface leaves the shutter
+      <strong>OPEN</strong> whenever the SourceMeter is powered on and nothing is driving the
+      line. That is the opposite of fail-safe, and it is a property of the wiring, not of the
+      software. An <strong>inverting</strong> interface (Keithley pulls low to open) idles closed
+      and is the safer arrangement. Use <code>probe_shutter.py</code> (below) to find out which
+      one you have — the software reports it too, and says so explicitly in the result.
+    </div>
+
+    <p>A useful guarantee on the instrument side: the Series 2600 reference manual states that
+       <em>"the reset function does not affect the present state of the digital I/O lines"</em>.
+       The <code>*RST</code> the software sends before every scan therefore never disturbs the
+       shutter.</p>
+
+    <h4>ABET Sun 2000 / Sun 3000 wiring</h4>
+
+    <p>ABET simulators expose a <strong>SHUTTER INPUT</strong> BNC whose meaning depends on the
+       front-panel <strong>SHUTTER CONTROL</strong> switch:</p>
+
+    <table>
+      <thead><tr><th>Switch position</th><th>What the BNC does</th></tr></thead>
+      <tbody>
+        <tr><td><strong>EXTERNAL</strong></td><td><strong>Level</strong> sensitive: the shutter stays open as long as a TTL +5 V signal is present. <strong>This is the mode to use.</strong></td></tr>
+        <tr><td>INTERNAL / TIMED</td><td><strong>Edge</strong> trigger: a switch closure or a low TTL state fires one exposure of the built-in timer's duration, then the shutter closes by itself.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ Put the switch in EXTERNAL</div>
+      The software cannot see the position of that switch. Left in INTERNAL/TIMED, an "open"
+      command becomes a timed exposure that ends on its own part-way through your scan — with no
+      error, just wrong data. Check it before every session, or leave it taped in place.
+    </div>
+
+    <p>ABET also warns that running the shutter faster than <strong>3 Hz</strong> for extended
+       periods overheats the solenoid. Normal use here is far below that: at most one open and
+       one close per measurement.</p>
+
+    <h4>Finding your line and polarity — <code>probe_shutter.py</code></h4>
+
+    <p>You cannot guess which digital I/O line is wired, or which level opens the shutter. The
+       repository includes a bench tool that finds out without touching the instrument's front
+       panel. Run it from the project folder:</p>
+
+    <pre>python probe_shutter.py            # manual: watch the simulator's LED
+python probe_shutter.py --auto     # automatic: the SMU watches, via cell current
+python probe_shutter.py --read     # read the port state only, write nothing
+python probe_shutter.py --poke 3 0 # hold one line at one level until you press Enter
+python probe_shutter.py --lines 1-8  # restrict the range if other kit shares the port</pre>
+
+    <p>It perturbs one line at a time, restores each one immediately, and always restores the
+       whole port on exit — including on <kbd>Ctrl+C</kbd>. Start with <code>--read</code>, which
+       writes nothing at all.</p>
+
+    <p><strong>Manual mode</strong> asks you to watch the red SHUTTER LED on the simulator and
+       answer y/n per line; run it with the lamp <em>off</em> so nothing gets illuminated.
+       <strong><code>--auto</code></strong> is more reliable: with the lamp on and a cell
+       connected, the SourceMeter itself detects the change in photocurrent, needs no operator
+       input, and additionally times how long the blade takes to travel.</p>
+
+    <p>The result is printed in the form the Shutter Control window wants:</p>
+
+    <pre>  Digital I/O line ......... #1  (DB-25 pin 1)
+  Opens the shutter ........ digio.writebit(1, 1)
+  Closes the shutter ....... digio.writebit(1, 0)
+  Polarity ................. ACTIVE HIGH
+  Resting state ............ OPEN    -> NOT fail-safe
+  Mechanical settling ...... 68 ms
+
+      line       = 1
+      active_low = False
+      settle_ms  = 68</pre>
+
+    <h4>Settings</h4>
+
+    <div class="param-block">
+      <div class="param-name">Digital I/O line</div>
+      <div class="param-row"><span class="param-key">Range:</span><span class="param-val">1 – 14</span></div>
+      <p style="margin-top:8px;">Which line is wired to the shutter. Equals the DB-25 pin number.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">HIGH opens the shutter</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">checked</span></div>
+      <p style="margin-top:8px;">Checked for a non-inverting interface (write 1 to open);
+         unchecked for an inverting one (write 0 to open). See the fail-safe warning above.</p>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Settling time (ms)</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">300 ms</span></div>
+      <p style="margin-top:8px;">How long to wait after commanding, for the blade to finish
+         moving. Measure it with <code>probe_shutter.py --auto</code> and then use a comfortable
+         multiple: this happens once or twice per measurement, not once per point, so margin
+         costs nothing. A typical ABET Sun 2000 blade takes about 70 ms; 300 ms is the default.</p>
+      <div class="info-box">
+        <div class="box-label">This is the blade, not the cell</div>
+        Settling time covers the mechanical travel only. A perovskite's own response to light is
+        a separate, far slower effect measured in seconds to minutes — that is what the
+        <em>Light Soaking</em> setting is for. Do not use one in place of the other.
+      </div>
+    </div>
+
+    <div class="param-block">
+      <div class="param-name">Verify the line after writing</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">checked</span></div>
+      <p style="margin-top:8px;">Reads the line back with <code>digio.readbit</code> and fails if
+         it did not take the commanded level. Catches a write-protected line
+         (<code>digio.writeprotect</code>) or one being held by another device. Costs one extra
+         query per move.</p>
+    </div>
+
+    <h3>10.3 Serial / Arduino backend</h3>
+
+    <p>This is the generic backend, and the reason the abstraction exists. Rather than shipping
+       "an Arduino driver", the software ships a <strong>configurable text-command</strong>
+       backend: you type the words your controller expects into the settings form. The same code
+       therefore drives a home-made Arduino box and most commercial shutter controllers, which
+       are all ASCII over a serial port with different vocabulary.</p>
+
+    <div class="info-box">
+      <div class="box-label">Requires pyserial</div>
+      <pre>pip install pyserial</pre>
+      It is imported only when the backend is actually used, so a machine without it still runs
+      the software normally — including with this backend stored in the settings file.
+    </div>
+
+    <h4>Settings</h4>
+
+    <table>
+      <thead><tr><th>Field</th><th>Meaning</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td>Serial port</td><td>Port name. Device Manager shows which one an Arduino enumerated as.</td><td><code>COM3</code>, <code>/dev/ttyACM0</code></td></tr>
+        <tr><td>Baud rate</td><td>Must match the controller.</td><td><code>9600</code></td></tr>
+        <tr><td>Open command</td><td>Text sent to open, without the line ending.</td><td><code>OPEN</code></td></tr>
+        <tr><td>Close command</td><td>Text sent to close.</td><td><code>CLOSE</code></td></tr>
+        <tr><td>Line ending</td><td>Appended to every command.</td><td><code>LF</code>, <code>CRLF</code>, <code>CR</code>, <code>none</code></td></tr>
+        <tr><td>Settling time</td><td>Wait after commanding, in ms.</td><td><code>300</code></td></tr>
+        <tr><td>State query</td><td><em>Optional.</em> Text that asks the controller what it did.</td><td><code>STATE</code></td></tr>
+        <tr><td>Reply meaning 'open'</td><td>Substring of the reply that means open.</td><td><code>OPEN</code></td></tr>
+        <tr><td>Reply timeout</td><td>How long to wait for that answer, in seconds.</td><td><code>2.0</code></td></tr>
+        <tr><td>Delay after opening the port</td><td>Pause for boards that reset when the port opens.</td><td><code>2.0</code></td></tr>
+      </tbody>
+    </table>
+
+    <div class="tip-box">
+      <div class="box-label">Tip — set the State query if your controller can answer</div>
+      Without it, the software sends a command and trusts that it worked. With it, the controller
+      is asked to confirm, and a disagreement stops the measurement instead of quietly recording
+      a scan under the wrong illumination. It is the single most valuable field in this form.
+    </div>
+
+    <h4>Building an Arduino shutter controller</h4>
+
+    <p>An example sketch ships with the software at <code>docs/arduino_shutter.ino</code>. It
+       answers <code>OPEN</code>, <code>CLOSE</code> and <code>STATE</code> at 9600 baud, and
+       needs no modification for the default settings above.</p>
+
+    <p><strong>Wiring.</strong> The sketch drives pin 8. An Arduino pin sources about 20 mA at
+       5 V, which is enough for:</p>
+    <ul>
+      <li>a TTL input such as the ABET SHUTTER INPUT BNC (centre pin to the Arduino pin through a
+          series resistor, shield to Arduino GND — <strong>grounds must be common</strong>);</li>
+      <li>the input of an opto-isolator or a relay <em>module</em> (a board with its own driver
+          transistor).</li>
+    </ul>
+    <p>It is <strong>not</strong> enough to drive a solenoid or a bare relay coil directly. Those
+       need a driver board, and the solenoid needs its own supply.</p>
+
+    <p><strong>Polarity and fail-safe.</strong> The sketch closes the shutter in
+       <code>setup()</code> before doing anything else, so a power cycle or a reset leaves the
+       cell dark. If your interface inverts the signal, change <code>ACTIVE_HIGH</code> to
+       <code>false</code> in the sketch rather than swapping the OPEN and CLOSE commands in the
+       software — swapping the words would leave the sketch closing the shutter into the wrong
+       physical state at reset, defeating the fail-safe.</p>
+
+    <h4>Commercial controllers</h4>
+
+    <p>These are starting points, not guarantees — always confirm against your unit's manual,
+       then use <strong>Self-test</strong> to verify.</p>
+
+    <table>
+      <thead><tr><th>Controller</th><th>Typical settings</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Thorlabs SC10</strong></td>
+          <td>9600 baud, line ending <code>CR</code>. The unit <em>toggles</em> with
+              <code>ens</code>, so both Open and Close are <code>ens</code> and you should set a
+              State query (<code>ens?</code>) so the software can tell which state resulted.
+              Prefer the SC10's own "manual/auto" mode set to the one that holds the blade
+              open while asserted.</td>
+        </tr>
+        <tr>
+          <td><strong>Uniblitz VMM-D1 / VCM-D1</strong></td>
+          <td>Usually driven by a TTL level on a BNC rather than serial. Use the
+              <strong>Keithley digital I/O</strong> backend for these, or an Arduino as a level
+              translator.</td>
+        </tr>
+        <tr>
+          <td><strong>USB relay boards</strong></td>
+          <td>Highly vendor-specific; many accept short ASCII commands at 9600 baud. Set the
+              open/close strings to whatever the vendor documents, line ending usually
+              <code>CRLF</code>, and set <em>Delay after opening the port</em> to 0 if the board
+              does not reset on DTR.</td>
+        </tr>
+        <tr>
+          <td><strong>Anything else with an ASCII protocol</strong></td>
+          <td>If it opens and closes on two text commands over a serial port, this backend
+              already supports it. No code change is needed.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>10.4 Verification with an SMU reading</h3>
+
+    <p>A shutter can only report what it was <em>told</em> to do. The SourceMeter can report what
+       the cell actually sees, and that is the only closed-loop check available.</p>
+
+    <p>Tick <strong>"Confirm the light state with an SMU reading"</strong> in the Shutter Control
+       window and, after every move, the software reads the cell current at 0 V and checks it
+       against the state it asked for: bright when opened, dark when closed. A dark cell reads
+       nanoamps and a lit one milliamps, so the default threshold of 0.001 mA (1 µA) sits three
+       orders of magnitude from both.</p>
+
+    <p>This is the check that catches the dangerous case on non-fail-safe wiring: a
+       <em>dark</em> scan that silently ran illuminated. A mismatch asks whether to continue or
+       abort; a failure of the check itself never fails a run.</p>
+
+    <div class="info-box">
+      <div class="box-label">Off by default</div>
+      It needs a cell connected and the lamp on, which is not true of every session — a dark-only
+      characterisation, for instance. Turn it on for unattended or long-running work, where
+      nobody is watching the simulator.
+    </div>
+
+    <h3>10.5 Startup, connect and shutdown</h3>
+
+    <p>The software asserts a closed shutter as early as the hardware allows:</p>
+
+    <ul>
+      <li><strong>Backends that need no SourceMeter</strong> (the serial one) are closed about
+          200 ms after the application starts, before anything is connected. This is the full
+          form of the guarantee.</li>
+      <li><strong>Backends that borrow the SourceMeter's connection</strong> (the Keithley
+          digital I/O one) are closed the moment the instrument connects — the first point at
+          which they can be commanded at all.</li>
+      <li>On disconnect and on exit, the shutter is closed <em>before</em> the connection is
+          released. Afterwards there would be no way to command it.</li>
+    </ul>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ The gap the software cannot close</div>
+      With a non-fail-safe Keithley wiring, the shutter may already be open between switching the
+      SourceMeter on and connecting to it in the software. No program can prevent that — nothing
+      is listening yet. The status badge reads "unknown (connect instrument)" for exactly this
+      period rather than pretending otherwise. If it matters for your samples, either connect
+      before switching the lamp on, or have the interface box inverted so the resting state is
+      closed.
+    </div>
+
+    <h3>10.6 Adding support for other hardware</h3>
+
+    <p>For developers: a backend is <strong>one module plus one entry</strong> in
+       <code>app/shutter/__init__.py</code>, and <strong>no GUI code at all</strong>. The
+       Shutter Control window builds its settings form from the backend's declared
+       <code>fields</code> tuple, so a contributor who can write sixty lines of Python can add
+       their own hardware without touching tkinter.</p>
+
+    <pre>app/shutter/
+  base.py             Shutter ABC + ConfigField / BackendSpec metadata
+  __init__.py         the BACKENDS registry
+  manual.py           prompts the operator (the default)
+  keithley_digio.py   digio.writebit on a 2600
+  serial_command.py   configurable text commands over serial
+  manager.py          locking, retries, persistence, state reporting</pre>
+
+    <p>A backend implements <code>open()</code>, <code>close()</code> and <code>describe()</code>.
+       Both actuation methods must <strong>block until the shutter has settled</strong> and must
+       be <strong>idempotent</strong>. Declare <code>requires_instrument</code> if the backend
+       borrows the SourceMeter session, and <code>is_automatic=False</code> only for backends
+       that need a human.</p>
+
+    <h3>10.7 Shutter troubleshooting</h3>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter does not move at all</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> SHUTTER CONTROL switch not in
+          EXTERNAL; wrong digital I/O line; the interface box has no power; the cable does not
+          carry the ground or +5 V pin the box needs.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ol>
+            <li>Put the simulator's SHUTTER CONTROL switch in <strong>EXTERNAL</strong>.</li>
+            <li>Run <code>python probe_shutter.py --read</code> to confirm the software can talk
+                to the port at all (it writes nothing).</li>
+            <li>Run <code>python probe_shutter.py</code> and let it scan all 14 lines. If no line
+                responds, the problem is on the wiring side, not in the software.</li>
+            <li>Try <code>--auto</code> with the lamp on: a cell current reading is a far more
+                reliable witness than an LED at the edge of your vision.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter opens when it should close, and vice versa</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> The polarity setting does not match
+          your interface box.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Toggle
+          <strong>"HIGH opens the shutter"</strong> in the Shutter Control window and click
+          <strong>Apply &amp; Save</strong>, then <strong>Self-test</strong>. If in doubt, let
+          <code>probe_shutter.py</code> determine it — it reports the polarity explicitly.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "Digital I/O line N was set to X but reads back as Y"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> the line is write-protected
+          (<code>digio.writeprotect</code> is non-zero), or another device on the port is holding
+          it.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Run <code>python probe_shutter.py --read</code>; it prints the write-protect mask.</li>
+            <li>Check whether another instrument shares the DB-25. If so, use
+                <code>--lines</code> to keep the probe away from its line, and make sure the
+                shutter is configured for a line nothing else drives.</li>
+            <li>As a last resort the check can be switched off with <strong>"Verify the line
+                after writing"</strong> — but you then lose the only warning you would get about
+                a stuck line.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter is open whenever the Keithley is switched on</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Not a fault. The 2600's digital I/O
+          lines idle HIGH through a 5.1 kΩ pull-up, so a non-inverting interface holds the
+          shutter open whenever nothing is driving the line.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Connect the instrument in the software — it closes the shutter immediately on
+                connect.</li>
+            <li>For a permanent fix, have the interface box inverted so that the Keithley pulls
+                the line <em>low</em> to open. The resting state then becomes closed, and the
+                software configuration is simply "HIGH opens" unchecked.</li>
+            <li>Switch the SourceMeter off when leaving the bench: with no power there is no
+                pull-up, and the line falls.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ A dark measurement looks illuminated (or the reverse)</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> SHUTTER CONTROL left in
+          INTERNAL/TIMED, so the "open" became a timed exposure that ended mid-scan; the beam is
+          blocked by something other than the shutter; the lamp is off.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ol>
+            <li>Enable <strong>"Confirm the light state with an SMU reading"</strong>. This is
+                exactly the failure it exists to catch, and it will stop the run instead of
+                saving a plausible-looking wrong curve.</li>
+            <li>Check the SHUTTER CONTROL switch is in EXTERNAL.</li>
+            <li>Run <code>python probe_smu.py</code> with the lamp on and the shutter open. It
+                steps through voltages on both SMU channels and says whether it is seeing a lit
+                cell, a dark cell, or nothing connected.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Serial backend: "Could not open serial port"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> wrong port name; the Arduino IDE's
+          Serial Monitor (or another program) already has the port open; missing driver.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Close the Arduino Serial Monitor. Windows gives a serial port to one program at a time.</li>
+            <li>Confirm the port name in Device Manager under <em>Ports (COM &amp; LPT)</em>.</li>
+            <li>Install the board's USB-serial driver (CH340 clones in particular need one).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Serial backend: "did not answer within N s"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Causes:</strong> wrong baud rate; wrong line ending;
+          the controller has no state query; the reply arrives after the timeout.</div>
+        <div class="trouble-solution"><strong>Solutions:</strong>
+          <ul>
+            <li>Check baud rate and line ending against the controller's manual. An Arduino using
+                <code>readStringUntil('\n')</code> needs <strong>LF</strong>.</li>
+            <li>Raise <em>Reply timeout</em>.</li>
+            <li>If the controller genuinely cannot report its state, clear the <em>State query</em>
+                field. The software will then trust the command instead of verifying it.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ Arduino: the first command after connecting is lost</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Most Arduino boards <strong>reset</strong>
+          when the serial port is opened (the DTR line is wired to reset), and then spend a second
+          or two in the bootloader, discarding anything sent meanwhile.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Raise <em>Delay after opening the
+          port</em> to 2 s or more. The software opens the port once and keeps it open, so this
+          cost is paid a single time per session, not per shutter movement. Boards that do not
+          reset on DTR can use 0.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "This shutter backend needs pyserial"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> pyserial is not installed in the
+          Python environment running the software.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> <code>pip install pyserial</code>,
+          then restart the software. It is deliberately an optional dependency: the import happens
+          only when the backend is actually used, so its absence never prevents the application
+          from starting.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The Test buttons do nothing and say a measurement is running</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Not a fault. The shutter shares the
+          instrument's connection, and moving it mid-scan would invalidate the data.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Stop the measurement first. If no
+          measurement is actually running, the software may have been left in that state by an
+          error — Instrument → Disconnect and reconnect clears it.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ "The shutter could not be opened automatically"</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Two consecutive failures — the software
+          already retried once before asking.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> The dialog offers to continue with
+          a hand-moved shutter (OK) or abort the measurement (Cancel). Both are safe choices;
+          what the software will never do is carry on silently with an unknown illumination
+          state. Afterwards, use <strong>Self-test</strong> to reproduce the failure with its full
+          error message.
+        </div>
+      </div>
+    </div>
+
+    <div class="trouble-block">
+      <div class="trouble-problem">❌ The shutter chatters, or the solenoid gets hot</div>
+      <div class="trouble-inner">
+        <div class="trouble-cause"><strong>Cause:</strong> Too many open/close cycles. ABET warns
+          against sustained operation above 3 Hz.</div>
+        <div class="trouble-solution"><strong>Solution:</strong> Normal use is far below that
+          limit — one open and one close per measurement. If you see rapid cycling, something is
+          calling the shutter in a loop: check that an ISOS protocol is not configured with a
+          scan interval of seconds, and report it as a bug if not.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       11. PRE-BIAS CONDITIONING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="prebias">
-    <h2>10. Pre-bias Conditioning</h2>
+    <h2>11. Pre-bias Conditioning</h2>
 
     <h3>Physical motivation</h3>
     <p>
@@ -862,6 +1557,8 @@
       <div class="box-label">ℹ Why this order?</div>
       Pre-bias is applied only before the reverse scan. Conditioning before the forward scan
       would distort FS results and make the HI calculation physically meaningless.
+      With <strong>Measure from REV to FWD</strong> ticked the sequence becomes
+      Pre-bias hold &rarr; Reverse scan &rarr; Forward scan.
     </div>
 
     <div class="param-block">
@@ -880,10 +1577,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       11. RUNNING A J-V MEASUREMENT
+       12. RUNNING A J-V MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="running-jv">
-    <h2>11. Running a J-V Measurement <span class="mode-badge jv">Alt+F2</span></h2>
+    <h2>12. Running a J-V Measurement <span class="mode-badge jv">Alt+F2</span></h2>
 
     <h3>Measurement sequence (automated)</h3>
     <div class="seq-flow">
@@ -973,13 +1670,108 @@
     </ol>
 
     <img src="screenshots/01_jv_mode.png" alt="J-V Measurement panel" style="width:100%;border-radius:6px;border:1px solid #dde1e7;margin:16px 0;">
+
+    <h3>Example output</h3>
+    <p>The animation below shows a J-V scan being acquired <strong>point by point</strong> exactly as
+       it appears on the live plot: the forward branch (filled circles, solid line) is swept first,
+       then the reverse branch (hollow circles, dashed line), with the power-density curves growing on
+       the right axis. The gap between the two branches is the hysteresis used to compute the
+       Hysteresis Index (HI).</p>
+    <img src="figures/anim_jv.gif" alt="Animated J-V scan building point by point"
+         style="max-width:620px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
+    <p>The static figure below is the same illuminated J-V scan with the maximum-power-point rectangle
+       and the extracted parameters marked.</p>
+    <img src="figures/sim_jv_curve.png" alt="Simulated illuminated J-V curve with hysteresis"
+         style="max-width:560px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       12. STABILIZED CURRENT MEASUREMENT
+       13. LIGHT-INTENSITY J-V
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="light-jv">
+    <h2>13. Light-Intensity J-V <span class="mode-badge jv">Alt+F3</span></h2>
+
+    <h3>What it measures</h3>
+    <p>
+      This mode runs a sequence of J-V scans at several illumination intensities and
+      extracts the <strong>light ideality factor</strong> n<sub>idL</sub> from the
+      dependence of the open-circuit voltage on light intensity. It is the standard
+      technique for distinguishing the dominant recombination mechanism in a solar cell
+      without requiring dark measurements [Tress et al., 2018; Caprioglio et al., 2020].
+    </p>
+
+    <h3>Theory — why V<sub>oc</sub> vs ln(L) reveals recombination</h3>
+    <p>
+      In the ideal-diode picture the open-circuit voltage depends logarithmically on the
+      photogenerated current, and therefore on illumination intensity <em>L</em>:
+    </p>
+    <div class="equation">
+      V<sub>oc</sub> = (n<sub>idL</sub> k<sub>B</sub>T / q) · ln(L / L<sub>0</sub>) + const
+    </div>
+    <p>
+      Plotting V<sub>oc</sub> against ln(L) yields a straight line whose slope is
+      n<sub>idL</sub>·k<sub>B</sub>T/q. The software normalises intensity to its maximum
+      (L<sub>norm</sub> = L / L<sub>max</sub>) so only intensity <em>ratios</em> matter —
+      the absolute unit (suns, %, mW/cm²) is irrelevant. The slope is converted to the
+      ideality factor through n<sub>idL</sub> = q·slope / (k<sub>B</sub>T).
+    </p>
+    <table>
+      <thead>
+        <tr><th>n<sub>idL</sub></th><th>Dominant recombination</th><th>Interpretation</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>≈ 1</td><td>Band-to-band / radiative or surface (majority-carrier)</td><td>High-quality absorber, well-passivated interfaces</td></tr>
+        <tr><td>≈ 1.3–1.6</td><td>Mixed bulk + interface</td><td>Typical for good perovskite devices</td></tr>
+        <tr><td>≈ 2</td><td>Shockley–Read–Hall (trap-assisted, bulk depletion region)</td><td>Defect-limited; deep traps in the bulk</td></tr>
+        <tr><td>&gt; 2</td><td>Interface / ionic / multi-trap</td><td>Strong interfacial or ion-mediated recombination</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Parameters</h3>
+    <div class="param-block">
+      <div class="param-name">Intensity sequence</div>
+      <p style="margin-top:8px;">An ordered list of illumination intensities (in suns or any
+         consistent proportional unit). At each step the software prompts you to set the solar
+         simulator to that intensity and confirm before continuing. Use at least
+         <strong>4–5 well-spaced intensities</strong> spanning roughly 0.1–1 sun for a reliable
+         slope; the fit requires a minimum of 3 points.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Stabilization time (s)</div>
+      <p style="margin-top:8px;">Wait time after you confirm a new intensity, before the J-V scan
+         starts. Allows the lamp and cell to settle. A live countdown is shown. 10–30 s is typical.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Reference illumination (per sun)</div>
+      <p style="margin-top:8px;">The mW/cm² value corresponding to 1 sun for your reference detector,
+         used to convert each intensity step into an absolute P<sub>in</sub> for the PCE of that step.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Scan parameters</div>
+      <p style="margin-top:8px;">Start / end / step voltage, delay, and NPLC are shared with the J-V
+         mode (Sections 8–9). A forward and reverse scan are taken at every intensity.</p>
+    </div>
+
+    <h3>Example output — the light ideality fit</h3>
+    <img src="figures/sim_light_intensity.png" alt="Simulated Voc vs ln(L) light ideality fit"
+         style="max-width:560px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
+    <p>
+      Output is a consolidated workbook containing all J-V curves, the per-intensity PV parameters,
+      and the fitted n<sub>idL</sub> with its standard error and R². The fit is also viewable later in
+      the Data Viewer (Section 26).
+    </p>
+    <div class="tip-box">
+      <div class="box-label">Tip — clean fits</div>
+      Always include a 1-sun point and at least one point below 0.3 sun. A poor R² (&lt;0.99) usually
+      means the simulator intensity drifted between steps or the stabilization time was too short.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       14. STABILIZED CURRENT MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="stab">
-    <h2>12. Stabilized Current Measurement <span class="mode-badge stab">Alt+F5</span></h2>
+    <h2>14. Stabilized Current Measurement <span class="mode-badge stab">Alt+F6</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -1029,6 +1821,12 @@
        The plot updates in real time during the measurement.</p>
 
     <img src="screenshots/03_stab_mode.png" alt="Stabilized Current panel" style="width:100%;border-radius:6px;border:1px solid #dde1e7;margin:16px 0;">
+
+    <p>The animation below is a simulated stabilized-current measurement acquired point by point:
+       the current density and PCE both relax toward a steady value, and the dashed line marks the
+       detected stabilization point after the initial transient decays.</p>
+    <img src="figures/anim_stab.gif" alt="Animated stabilized current and PCE vs time"
+         style="max-width:560px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
 
     <h3>Measurement flowchart</h3>
     <svg class="flow-svg" width="680" height="360" viewBox="0 0 680 360" xmlns="http://www.w3.org/2000/svg">
@@ -1089,10 +1887,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       13. MPP TRACKING — JV-SPO CYCLING
+       14. MPP TRACKING — JV-SPO CYCLING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="mpp">
-    <h2>13. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F3</span></h2>
+    <h2>15. MPP Tracking — JV-SPO Cycling <span class="mode-badge mpp">Alt+F5</span></h2>
 
     <h3>Protocol overview</h3>
     <p>
@@ -1165,6 +1963,12 @@
 
     <img src="screenshots/02_mpp_mode.png" alt="MPP Tracking (JV-SPO) panel" style="width:100%;border-radius:6px;border:1px solid #dde1e7;margin:16px 0;">
 
+    <p>A simulated stabilized-power-output (SPO) trace at V<sub>mpp</sub>, drawn point by point:
+       efficiency rises through an initial burn-in and settles to a plateau. The plateau value — not
+       the dynamic J-V scan value — is the efficiency that should be reported.</p>
+    <img src="figures/anim_mpp.gif" alt="Animated MPP / SPO efficiency vs time"
+         style="max-width:560px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
+
     <h3>Cycling flowchart</h3>
     <svg class="flow-svg" width="680" height="380" viewBox="0 0 680 380" xmlns="http://www.w3.org/2000/svg">
       <defs>
@@ -1218,10 +2022,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       14. PURE MPP TRACKING — P&O
+       15. PURE MPP TRACKING — P&O
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="pure-mpp">
-    <h2>14. Pure MPP Tracking — Perturb &amp; Observe <span class="mode-badge pmpp">Alt+F6</span></h2>
+    <h2>16. Pure MPP Tracking — Perturb &amp; Observe <span class="mode-badge pmpp">Alt+F7</span></h2>
 
     <h3>Algorithm description</h3>
     <p>
@@ -1365,10 +2169,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       15. DARK J-V MEASUREMENT
+       16. DARK J-V MEASUREMENT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="dark-jv">
-    <h2>15. Dark J-V Measurement <span class="mode-badge jv">Alt+F2 (within J-V mode)</span></h2>
+    <h2>17. Dark J-V Measurement <span class="mode-badge jv">Alt+F2 (within J-V mode)</span></h2>
 
     <h3>What it measures</h3>
     <p>
@@ -1411,10 +2215,490 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       16. DATA CURATION
+       18. ISOS PROTOCOLS OVERVIEW
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="isos-overview">
+    <h2>18. ISOS Protocols Overview <span class="mode-badge" style="background:#00695C;">Alt+F9</span></h2>
+
+    <h3>What ISOS is</h3>
+    <p>
+      <strong>ISOS</strong> (International Summit on Organic and Hybrid Photovoltaic Stability)
+      is a set of consensus stability-testing protocols agreed by the perovskite and organic
+      PV community and published in <em>Nature Energy</em> [Khenkin et al., 2020]. They define
+      <em>how</em> a cell should be stressed (dark, light, electrical bias, thermal, outdoor),
+      under which load (open circuit, maximum power point, or short circuit), and how the
+      resulting degradation should be reported, so that lifetimes measured in different
+      laboratories are comparable.
+    </p>
+    <p>
+      A protocol name encodes the stress family and a level: <strong>D</strong> = dark storage,
+      <strong>L</strong> = light soaking, <strong>V</strong> = electrical bias (voltage),
+      <strong>T</strong> = thermal cycling, <strong>LC</strong> = light cycling,
+      <strong>O</strong> = outdoor. The level (1, 2, 3) sets the environmental control: level 1
+      is ambient / minimal control, levels 2–3 add controlled temperature, humidity, or
+      atmosphere. This software implements the <strong>level-1</strong> protocols that need no
+      additional environmental hardware.
+    </p>
+
+    <h3>Implemented protocols</h3>
+    <table>
+      <thead>
+        <tr><th>Protocol</th><th>Stress</th><th>Load</th><th>Continuous?</th><th>Trigger</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>ISOS-D-1</strong></td>
+          <td>Dark storage / shelf life (cell rests in the dark)</td>
+          <td>Open circuit</td>
+          <td>No — manual</td>
+          <td>You press "Run ISOS" for each characterisation point</td>
+        </tr>
+        <tr>
+          <td><strong>ISOS-L-1</strong></td>
+          <td>Continuous light soaking at ambient T</td>
+          <td>OC or MPP</td>
+          <td>Yes — unattended</td>
+          <td>Automatic loop on a scan interval</td>
+        </tr>
+        <tr>
+          <td><strong>ISOS-V-1</strong></td>
+          <td>Dark electrical-bias stress (constant voltage/MPP in the dark)</td>
+          <td>OC, MPP, or fixed V</td>
+          <td>Yes — unattended</td>
+          <td>Automatic loop on a fixed or tiered schedule</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="info-box">
+      <div class="box-label">ℹ Higher levels need hardware</div>
+      D-2/D-3 (elevated T, damp heat), L-2/L-3 (temperature-controlled soaking), T-* (thermal
+      cycling), and O-* (outdoor) are deliberately <em>not</em> available because they require a
+      climate chamber, a motorised shutter, or an outdoor enclosure. They are not selectable in
+      the dropdown.
+    </div>
+
+    <h3>Experiment lifecycle</h3>
+    <p>
+      Every ISOS run is organised around a single <strong>tracking workbook</strong> (one
+      <code>.xlsx</code> per experiment) that accumulates every characterisation point over the
+      whole campaign — which may span days or weeks.
+    </p>
+    <div class="seq-flow">
+      <div class="seq-step">New / Load Experiment</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Set parameters</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Run ISOS</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Per-scan rows appended</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Stability metrics updated</div>
+    </div>
+    <ul>
+      <li><strong>New Experiment</strong> creates the tracking workbook and records t₀ (the zero
+          of elapsed time). All later points are timestamped relative to this t₀.</li>
+      <li><strong>Load Experiment…</strong> reopens an existing workbook to continue a campaign
+          (e.g. the next day) — elapsed time keeps counting from the original t₀, and the
+          measurement history and stability metrics are reconstructed from the file.</li>
+      <li>The folder of each experiment is remembered so the software can offer
+          <strong>crash recovery</strong> (Section 24) the next time it starts.</li>
+    </ul>
+
+    <h3>The ISOS panel</h3>
+    <p>The left pane organises controls into four tabs plus protocol-specific sub-frames:</p>
+    <ul>
+      <li><strong>Experiment</strong> — protocol dropdown, sample name, export folder, electrical
+          load (OC / MPP), and the New / Load Experiment buttons.</li>
+      <li><strong>Scan</strong> — voltage sweep range, cell area, and illumination input.</li>
+      <li><strong>Instrument</strong> — delay / NPLC / scan-rate mode / 4-wire (identical to the
+          J-V mode settings).</li>
+      <li><strong>Conditioning</strong> — optional dark J-V, pre-bias, light soaking, and the
+          continuous-protocol sub-frames (L-1 / V-1).</li>
+    </ul>
+    <p>The right pane shows a live measurement-history table (D-1), a Stability Metrics panel,
+       an ETA + autosave-health status bar, and a protocol-specific plot.</p>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       19. SHARED ISOS PARAMETERS
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="isos-common">
+    <h2>19. Shared ISOS Parameters</h2>
+    <p>These controls apply to all three protocols. Protocol-specific parameters are documented
+       in Sections 19–21.</p>
+
+    <h3>Experiment tab</h3>
+    <div class="param-block">
+      <div class="param-name">Protocol</div>
+      <p style="margin-top:8px;">Selects ISOS-D-1, ISOS-L-1, or ISOS-V-1. Changing the protocol
+         reveals the matching sub-frame and swaps the live plot layout. The measurement-history
+         table is shown only for D-1.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Sample Name &amp; Export Folder</div>
+      <p style="margin-top:8px;">Identify the device and choose where the tracking workbook and
+         per-scan backup files are written. Set these <em>before</em> clicking New Experiment.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Electrical Load — OC / MPP</div>
+      <p style="margin-top:8px;">The load held <em>between</em> characterisations.
+         <strong>OC</strong> (open circuit) leaves the cell at V<sub>oc</sub>;
+         <strong>MPP</strong> holds it near its maximum power point. ISOS-D-1 is OC only.
+         L-1 and V-1 support both — MPP load is the more demanding and realistic stress, because
+         the cell carries current and self-heats the way it would in operation.</p>
+    </div>
+
+    <h3>Scan tab</h3>
+    <div class="param-block">
+      <div class="param-name">Start / End / Step Voltage, Cell Area</div>
+      <p style="margin-top:8px;">The voltage sweep used for every periodic illuminated J-V
+         characterisation. Same meaning as in J-V mode (Section 8). Defaults −0.1 V → 1.05 V,
+         25 mV step, 0.07 cm².</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Illumination (Detector Power / Area)</div>
+      <p style="margin-top:8px;">Enter the reference-detector reading and area; the software
+         computes the illumination in mW/cm² used for every PCE in the campaign. Keep this fixed
+         across the whole experiment so normalised PCE values are meaningful.</p>
+    </div>
+
+    <h3>Instrument tab</h3>
+    <p>Delay per point, NPLC, scan-rate input mode, and 4-wire sensing behave exactly as in the
+       main J-V mode (Section 9). Because an ISOS campaign produces many J-V scans, keep these
+       fixed for the entire run so the scan rate — and therefore the apparent hysteresis — is
+       constant point-to-point.</p>
+
+    <h3>Conditioning tab</h3>
+    <div class="param-block">
+      <div class="param-name">Dark J-V before illuminated scan</div>
+      <p style="margin-top:8px;">When enabled, a dark sweep is taken before each illuminated
+         characterisation. Mandatory in spirit for V-1 (the dark diode is the primary diagnostic
+         of bias-induced degradation); optional for D-1 / L-1.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Pre-bias</div>
+      <p style="margin-top:8px;">Optional conditioning hold before the reverse scan, identical to
+         Section 11. Use the same setting on every point for reproducible HI.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Light Soaking</div>
+      <p style="margin-top:8px;">Optional fixed soak (default 300 s) before a characterisation,
+         to bring the cell to a repeatable photo-stationary state before measuring.</p>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       20. ISOS-D-1
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="isos-d1">
+    <h2>20. ISOS-D-1 — Dark Storage / Shelf Life</h2>
+
+    <h3>Protocol</h3>
+    <p>
+      The cell is stored in the dark at open circuit and periodically taken out for an illuminated
+      J-V characterisation. This is the gentlest ISOS test and measures intrinsic shelf life —
+      how the device ages with no light or applied bias. There is no automated stress loop:
+      <strong>you trigger each characterisation manually</strong> by pressing "Run ISOS", typically
+      once per day.
+    </p>
+
+    <h3>How to run a D-1 campaign</h3>
+    <ol>
+      <li>Select <strong>ISOS-D-1</strong>, set sample name and export folder, then click
+          <strong>New Experiment</strong>. This stamps t₀.</li>
+      <li>Set the scan, illumination, instrument, and conditioning parameters (Section 19).</li>
+      <li>Press <strong>Run ISOS</strong>. The software runs the same sequence as a normal J-V
+          measurement (optional dark J-V → optional light soak → forward → optional pre-bias →
+          reverse) and appends one row to the tracking workbook with the elapsed time and all PV
+          parameters.</li>
+      <li>Return the cell to dark storage. The next day, <strong>Load Experiment…</strong> (or keep
+          the app open) and press Run ISOS again. Elapsed time continues from the original t₀.</li>
+    </ol>
+
+    <h3>Measurement History table</h3>
+    <p>
+      For D-1 the panel shows a live table of every point: index, date, elapsed hours, reverse-scan
+      PCE, and PCE normalised to the first measurement (PCE/PCE₀). A normalised value of 0.80 marks
+      T80 — the canonical lifetime endpoint (Section 23).
+    </p>
+    <div class="tip-box">
+      <div class="box-label">Tip — keep the cadence regular</div>
+      Even sampling (e.g. every 24 h) gives the cleanest degradation curve and the most reliable
+      T80 / T95 extrapolation. Record at least one point before any meaningful aging so PCE₀ is
+      a true fresh-cell baseline.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       21. ISOS-L-1
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="isos-l1">
+    <h2>21. ISOS-L-1 — Continuous Light Soaking</h2>
+
+    <h3>Protocol</h3>
+    <p>
+      The cell is continuously illuminated at ambient temperature while held at OC or MPP, and is
+      characterised automatically at a fixed interval. Between characterisations the runner stays
+      in a <em>stress phase</em> (holding the load and streaming data); at each interval it briefly
+      pauses to take an illuminated J-V scan (and optional SPO), appends the result, recomputes the
+      stability metrics, and resumes. The run is unattended for hours to days.
+    </p>
+
+    <h3>Run structure</h3>
+    <div class="seq-flow">
+      <div class="seq-step optional">Equilibration</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Baseline conditioning (N scans)</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Stress</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step optional">Relaxation</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">J-V + SPO</div>
+      <div class="seq-arrow">→</div>
+      <div class="seq-step">Append + failure check</div>
+    </div>
+    <p style="margin-top:6px;">The last four steps repeat every scan interval until the total
+       duration elapses, Stop is pressed, or a failure condition trips.</p>
+
+    <h3>Core parameters</h3>
+    <div class="param-block">
+      <div class="param-name">Total duration (h)</div>
+      <p style="margin-top:8px;">How long the whole stress run lasts (default 24 h). Drives the ETA.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Scan interval (min)</div>
+      <p style="margin-top:8px;">Time between illuminated characterisations (default 15 min). Shorter
+         intervals give finer degradation curves but interrupt the stress more often.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Pre-scan relaxation (s)</div>
+      <p style="margin-top:8px;">A short settle at OC (default 60 s) just before each J-V scan, so the
+         scan starts from a repeatable state rather than straight out of the MPP-loaded stress phase.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">SPO after scan (s)</div>
+      <p style="margin-top:8px;">Duration of a stabilized-power-output measurement taken right after
+         each J-V scan (default 20 s; 0 disables it). The SPO PCE is the preferred canonical efficiency
+         for the stability metrics because it is scan-rate independent.</p>
+    </div>
+
+    <h3>Baseline conditioning</h3>
+    <div class="param-block">
+      <div class="param-name">Baseline scans (N) &amp; Baseline rest (s)</div>
+      <p style="margin-top:8px;">Before stress begins, the runner takes N J-V scans (default 4) spaced
+         by the rest time (default 60 s). The <strong>first scan is discarded</strong> (it is the least
+         settled) and the <strong>median PCE of the rest defines PCE₀</strong> — the denominator for all
+         normalised values and the metrics. A robust PCE₀ is what makes T80 trustworthy.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Equilibration before start (h)</div>
+      <p style="margin-top:8px;">Optional dark hold before baseline (default off, 0 h). Used to bring a
+         freshly fabricated cell to a stable starting point.</p>
+    </div>
+
+    <h3>Load-specific settings</h3>
+    <div class="param-block">
+      <div class="param-name">MPP load — Engine, Perturb step, V min/max, MPP log interval</div>
+      <p style="margin-top:8px;">When load = MPP, the cell is held near maximum power during stress.
+         The <strong>Engine</strong> is either <strong>P&amp;O</strong> (continuous perturb-and-observe,
+         Section 16) or <strong>JV-SPO</strong> (periodic mini J-V then hold V<sub>mpp</sub>).
+         <strong>Perturb step</strong> (default 10 mV) is the P&amp;O voltage increment;
+         <strong>V min/max</strong> (0–1.2 V) clamp the tracked voltage to a safe window; and the
+         <strong>MPP log interval</strong> (default 2 s) sets how often a stress sample is streamed
+         to the autosave CSV.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">OC load — V<sub>oc</sub> read interval (ms)</div>
+      <p style="margin-top:8px;">When load = OC, the cell sits at open circuit and its V<sub>oc</sub> is
+         logged every <em>read interval</em> (default 1000 ms).</p>
+    </div>
+
+    <h3>Failure detection</h3>
+    <div class="param-block">
+      <div class="param-name">PCE threshold (% of PCE₀) &amp; Auto-stop</div>
+      <p style="margin-top:8px;">If the measured PCE falls below this fraction of PCE₀ (default 20 %),
+         the cell is flagged as failed. With <strong>Auto-stop on failure</strong> enabled (default),
+         the run ends cleanly and the data is consolidated; otherwise the run continues and the failure
+         is only logged.</p>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       22. ISOS-V-1
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="isos-v1">
+    <h2>22. ISOS-V-1 — Dark Electrical-Bias Stress</h2>
+
+    <h3>Protocol</h3>
+    <p>
+      The cell is stressed <strong>in the dark</strong> under a constant applied bias (or held at the
+      last measured V<sub>mpp</sub>) and is characterised periodically with <em>both</em> a dark and
+      an illuminated J-V scan. The shutter is opened only briefly for the illuminated scan — the
+      software prompts you (or your shutter hardware) to open and close it around each one. V-1
+      isolates the effect of electrical bias and field-driven ion migration from photodegradation,
+      and the <strong>dark diode</strong> is the most sensitive probe of bias-induced shunting and
+      contact damage.
+    </p>
+
+    <h3>Measurement schedule</h3>
+    <p>Because bias degradation is fast early and slow later, V-1 supports three scheduling modes:</p>
+    <table>
+      <thead><tr><th>Mode</th><th>Behaviour</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Fixed interval</strong></td><td>One characterisation every N minutes (default 60).</td></tr>
+        <tr><td><strong>Tiered (recommended)</strong></td><td>An editable table of [start h, end h, interval min] phases — e.g. every 60 min for the first 5 h, every 4 h up to 24 h, then daily. Captures the fast early changes without flooding the late run.</td></tr>
+        <tr><td><strong>Custom (CSV)</strong></td><td>Import an arbitrary list of measurement times from a CSV file.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Dark J-V scan &amp; ideality window</h3>
+    <div class="param-block">
+      <div class="param-name">Start / End / Step (V) and Fit V_min / V_max</div>
+      <p style="margin-top:8px;">The dark sweep range (default −0.2 V → 1.1 V, 25 mV) and the voltage
+         window used to fit the dark ideality factor (default 0.5–0.8 V). The window should sit in the
+         exponential injection region — see Section 28 for how to choose it.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">Log I_dark during stress</div>
+      <p style="margin-top:8px;">When enabled (default), the dark current under bias is streamed during
+         the stress phase, giving a continuous shunt/leakage trace between characterisations.</p>
+    </div>
+
+    <h3>Timing, baseline &amp; load</h3>
+    <p>Total duration, pre-scan relaxation, SPO after scan, equilibration (default <em>on</em>, 12 h —
+       bias cells benefit from a long dark settle), and baseline scans / rest behave as in L-1
+       (Section 21). When load = MPP, V-1 simply <em>holds the last V<sub>mpp</sub></em> from the most
+       recent scan as a constant dark bias (with the same V min/max clamp and I_dark log interval).</p>
+
+    <h3>Failure detection (three independent triggers)</h3>
+    <div class="param-block">
+      <div class="param-name">PCE threshold (% of PCE₀)</div>
+      <p style="margin-top:8px;">Illuminated PCE below this fraction of PCE₀ (default 20 %).</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">I_dark × baseline</div>
+      <p style="margin-top:8px;">Dark current grown beyond this multiple of its baseline value
+         (default 5×) — a direct shunt-formation alarm.</p>
+    </div>
+    <div class="param-block">
+      <div class="param-name">R_sh_dark min (Ω·cm²)</div>
+      <p style="margin-top:8px;">Dark shunt resistance falling below this floor (default 0 = disabled).</p>
+    </div>
+    <p>Any tripped trigger flags failure; <strong>Auto-stop on failure</strong> (default on) ends the
+       run cleanly.</p>
+
+    <div class="warning-box">
+      <div class="box-label">⚠ Scan-rate warning</div>
+      The V-1 sub-frame shows a live warning if the chosen step / delay / NPLC would make the
+      illuminated scan unusually slow or fast relative to the stress, since an inconsistent scan rate
+      corrupts the degradation curve. Adjust the Instrument-tab settings until the warning clears.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       23. STABILITY METRICS
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="isos-metrics">
+    <h2>23. Stability Metrics</h2>
+
+    <p>
+      After every characterisation the software recomputes a set of stability metrics from the
+      accumulated normalised-PCE curve and shows them live in the Stability Metrics panel. The
+      canonical efficiency column is the <strong>SPO PCE</strong> when available, otherwise the
+      reverse-scan PCE. These metrics follow the ISOS reporting conventions [Khenkin et al., 2020].
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Metric</th><th>Definition</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>T80</strong></td><td>Time for PCE to fall to 80 % of PCE₀ — the standard lifetime endpoint. Sub-sample interpolated.</td></tr>
+        <tr><td><strong>T95</strong></td><td>Time to reach 95 % of PCE₀ — an early-degradation marker.</td></tr>
+        <tr><td><strong>T<sub>S</sub></strong></td><td>End of the burn-in phase — the point where the smoothed normalised PCE stops curving sharply (most-positive second derivative of a Savitzky–Golay-smoothed curve).</td></tr>
+        <tr><td><strong>PCE<sub>S</sub></strong></td><td>Mean PCE in a window around T<sub>S</sub> — the post-burn-in "stabilized" efficiency.</td></tr>
+        <tr><td><strong>Ts80</strong></td><td>Time measured <em>from</em> T<sub>S</sub> for PCE to reach 80 % of PCE<sub>S</sub> — the lifetime of the stabilized regime, excluding burn-in.</td></tr>
+        <tr><td><strong>n<sub>1000</sub></strong></td><td>PCE(1000 h)/PCE(0), linearly extrapolated from the stable region; reported with a standard-error band when the run is shorter than 1000 h.</td></tr>
+      </tbody>
+    </table>
+    <p>Metrics that the run has not yet reached are shown as not-yet-reached rather than guessed.</p>
+
+    <h3>Burn-in mode (Auto / Manual / Fallback)</h3>
+    <p>
+      Perovskites often show an initial burn-in (a fast early change) before settling into a slow
+      decay. How T<sub>S</sub> is located strongly affects Ts80 and n<sub>1000</sub>, so the panel
+      lets you choose:
+    </p>
+    <ul>
+      <li><strong>Auto</strong> — T<sub>S</sub> is detected from the curvature of the smoothed curve.</li>
+      <li><strong>Manual</strong> — you enter the burn-in end time directly (use when you know the
+          physical burn-in duration).</li>
+      <li><strong>Fallback</strong> — a fixed default is used when the data is too short or noisy for
+          reliable auto-detection.</li>
+    </ul>
+    <p>Switching mode triggers an instant recompute and redraw. The metrics are written to an
+       <code>ISOS_Metrics</code> sheet (one row per scan) and can be exported with
+       <strong>Copy metrics to clipboard</strong>.</p>
+
+    <h3>Overlay on the plot</h3>
+    <p>The <strong>Show overlay on plot</strong> toggle draws the threshold lines (80 %, 95 %) and the
+       T80 / T95 / T<sub>S</sub> markers on a normalised-PCE axis. Turn it off for clean screenshots.</p>
+    <img src="figures/anim_isos.gif" alt="Animated ISOS degradation curve with T80 and T95"
+         style="max-width:600px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
+    <p style="text-align:center;font-size:12.5px;color:#777;">
+      Simulated degradation curve built point by point: normalised PCE crossing 95 % (T95) and
+      80 % (T80), with the markers appearing as each threshold is reached.
+    </p>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       24. AUTOSAVE & CRASH RECOVERY
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="isos-autosave">
+    <h2>24. Autosave &amp; Crash Recovery</h2>
+
+    <p>
+      Continuous ISOS runs can last days, so the software is built to survive a crash or power loss
+      without losing data.
+    </p>
+
+    <h3>Durable autosave</h3>
+    <p>
+      During the stress phase every streamed sample is written to a durable
+      <code>*_stress_inprogress_*.csv</code> file and flushed to disk per row. The status bar shows
+      an autosave <strong>health dot</strong>: gray = idle, green = a flush just succeeded, red = a
+      write error (e.g. disk full or folder removed). On a clean finish the whole CSV is folded into
+      the tracking workbook as a single <code>Stress_&lt;HHMMSS&gt;</code> sheet and the CSV is renamed
+      <code>.consumed</code>.
+    </p>
+
+    <h3>Crash recovery on startup</h3>
+    <p>
+      When the application starts it scans every folder it has seen an ISOS experiment in and looks for
+      orphaned in-progress CSV files whose tracking workbook still exists. If it finds any, it offers a
+      recovery dialog:
+    </p>
+    <table>
+      <thead><tr><th>Choice</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Consolidate all</strong></td><td>Fold every orphan CSV into its workbook as a Stress sheet.</td></tr>
+        <tr><td><strong>Discard all</strong></td><td>Rename each orphan CSV <code>.discarded</code> — it is never deleted, so you can recover it manually.</td></tr>
+        <tr><td><strong>Decide individually</strong></td><td>Review each orphan and choose per file.</td></tr>
+      </tbody>
+    </table>
+    <div class="info-box">
+      <div class="box-label">ℹ Nothing is ever deleted</div>
+      Recovery only renames files (<code>.consumed</code> / <code>.discarded</code>). The raw
+      streamed data always remains on disk until you remove it yourself.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       25. DATA CURATION
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="data-curation">
-    <h2>16. Data Curation <span class="mode-badge curation">Alt+F7</span></h2>
+    <h2>25. Data Curation <span class="mode-badge curation">Alt+F8</span></h2>
 
     <p>
       Data Curation is a post-processing tool for batch analysis of multiple J-V measurement files.
@@ -1423,6 +2707,16 @@
       for comparative statistics, and exports a curated multi-sheet Excel workbook ready for
       analysis in Origin or Excel.
     </p>
+
+    <div class="info-box">
+      <div class="box-label">ℹ Why curate a batch?</div>
+      A single champion cell proves a result is <em>possible</em>; a <em>distribution</em> of cells
+      proves it is <em>reproducible</em>. Best-practice reporting requires presenting the statistics of
+      a batch (mean, spread, yield), not just the best device [Christians et al., 2015; Saliba &amp;
+      Etgar, 2020]. Data Curation automates this: it pools many devices, applies objective pass/fail
+      thresholds, separates groups for fair comparison, and emits both the champion and the full
+      distribution so reviewers can judge reproducibility.
+    </div>
 
     <img src="screenshots/05_curation_mode.png" alt="Data Curation panel" style="width:100%;border-radius:6px;border:1px solid #dde1e7;margin:16px 0;">
 
@@ -1555,10 +2849,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       17. DATA VIEWER
+       18. DATA VIEWER
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="data-viewer">
-    <h2>17. Data Viewer</h2>
+    <h2>26. Data Viewer &amp; Visualization</h2>
 
     <h3>Opening the Data Viewer</h3>
     <p>Go to <strong>File → Open Data File…</strong>. A file dialog opens; select any
@@ -1629,6 +2923,22 @@
           exact coordinates. Tooltips show line label, x-coordinate, and y-coordinate.</li>
     </ul>
 
+    <h3>Analysis &amp; fitting buttons</h3>
+    <p>The top-right toolbar offers interactive analyses whose buttons enable themselves only for the
+       appropriate file type:</p>
+    <ul>
+      <li><strong>Single-Diode Fit</strong> (illuminated J-V files) — opens the interactive
+          five-parameter fit window with overlay, residuals, editable temperature and bounds, re-fit,
+          CSV export, and save-to-file (Section 27).</li>
+      <li><strong>Dark Ideality Fit</strong> (dark J-V files) — opens the log<sub>10</sub>|J|-vs-V
+          ideality fit with an adjustable voltage window (Section 28).</li>
+      <li><strong>Light-intensity workbooks</strong> additionally display the fitted light ideality
+          factor n<sub>idL</sub> and its V<sub>oc</sub>-vs-ln(L) regression directly in the metadata
+          panel and plot (Section 29).</li>
+    </ul>
+    <p>Any saved fit (auto-fit or interactive) is re-read and shown automatically when the file is
+       reopened, so an analysis only needs to be done once.</p>
+
     <div class="info-box">
       <div class="box-label">ℹ Axis locks (J-V files)</div>
       For illuminated and dark J-V files, the axes are locked to the standard display range
@@ -1639,10 +2949,169 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       18. EXCEL FILE FORMAT
+       27. SINGLE-DIODE FIT
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="diode-fit">
+    <h2>27. Single-Diode Fit</h2>
+
+    <h3>What it does</h3>
+    <p>
+      The single-diode fit extracts the five physical device parameters
+      (J<sub>ph</sub>, J<sub>0</sub>, n, R<sub>s</sub>, R<sub>sh</sub>) by fitting the full
+      implicit diode equation to a measured illuminated J-V curve. Unlike the local-slope
+      estimates of R<sub>s</sub> and R<sub>sh</sub> (Section 32), the fit uses the
+      <em>entire</em> curve at once, so the parameters are mutually consistent and come with
+      statistical uncertainties.
+    </p>
+
+    <h3>Theory — the implicit equation</h3>
+    <p>The cell is modelled as a photocurrent source in parallel with a diode and a shunt
+       resistance, in series with R<sub>s</sub> (Section 33). In the software's unit convention
+       (J in mA/cm², R in Ω·cm²):</p>
+    <div class="equation">
+      J = J<sub>ph</sub> − J<sub>0</sub>·[exp((V + J·R<sub>s</sub>·10<sup>−3</sup>)/(n·V<sub>T</sub>)) − 1]
+      − (V + J·R<sub>s</sub>·10<sup>−3</sup>)·10<sup>3</sup>/R<sub>sh</sub>
+    </div>
+    <p>
+      Because J appears on both sides, the equation is solved <strong>pointwise</strong> for J at
+      each voltage with a bracketed root-finder (Brent's method), and these solved values are fed
+      into a non-linear least-squares optimiser (<code>scipy.optimize.curve_fit</code>) that adjusts
+      the five parameters. V<sub>T</sub> = k<sub>B</sub>T/q is the thermal voltage (≈ 25.7 mV at
+      298 K); the fit temperature is editable.
+    </p>
+
+    <h3>The five parameters</h3>
+    <table>
+      <thead><tr><th>Parameter</th><th>Meaning</th><th>Effect on the curve</th></tr></thead>
+      <tbody>
+        <tr><td>J<sub>ph</sub></td><td>Photogenerated current density (≈ J<sub>sc</sub>)</td><td>Sets the J<sub>sc</sub> plateau height</td></tr>
+        <tr><td>J<sub>0</sub></td><td>Dark saturation current density</td><td>Lower J<sub>0</sub> → higher V<sub>oc</sub> (recombination)</td></tr>
+        <tr><td>n</td><td>Ideality factor</td><td>Shapes the knee; recombination signature</td></tr>
+        <tr><td>R<sub>s</sub></td><td>Series resistance</td><td>Tilts the curve near V<sub>oc</sub> (reduces FF)</td></tr>
+        <tr><td>R<sub>sh</sub></td><td>Shunt resistance</td><td>Tilts the curve near J<sub>sc</sub> (leakage)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Example fit</h3>
+    <img src="figures/sim_diode_fit.png" alt="Single-diode fit overlay with residuals"
+         style="max-width:560px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
+    <p style="text-align:center;font-size:12.5px;color:#777;">
+      Fit overlay (top) and residuals (bottom). A good fit shows residuals scattered randomly about
+      zero with no structure.
+    </p>
+
+    <h3>Goodness-of-fit metrics</h3>
+    <ul>
+      <li><strong>R²</strong> — coefficient of determination; &gt;0.999 is typical for a clean curve.</li>
+      <li><strong>RMSE</strong> — root-mean-square error in mA/cm².</li>
+      <li><strong>RMSE (log)</strong> — RMSE in log<sub>10</sub>|J| space, which weights the low-current
+          region fairly and is the more honest metric across the curve's huge dynamic range.</li>
+      <li><strong>Bounded parameters</strong> — any parameter that hit its allowed bound is flagged;
+          a bounded result is a warning that the model could not find an interior optimum (often a sign
+          the curve is distorted, e.g. S-shaped).</li>
+    </ul>
+
+    <h3>How to run it</h3>
+    <ul>
+      <li><strong>Auto-fit (post-measurement):</strong> enable "Auto single-diode fit" on the Instrument
+          tab (default off). The reverse scan is fitted automatically in the measurement thread and the
+          result is written as a <code>SingleDiodeFit</code> sheet in the J-V file.</li>
+      <li><strong>Interactive fit (Data Viewer):</strong> open an illuminated J-V file and click
+          <strong>Single-Diode Fit</strong>. The window shows the overlay and residuals and lets you edit
+          the temperature and parameter bounds, re-fit, export the result to CSV, and save it back into
+          the file.</li>
+    </ul>
+    <div class="warning-box">
+      <div class="box-label">⚠ When the fit struggles</div>
+      Strongly S-shaped curves, heavy noise, or a missing J<sub>sc</sub>/V<sub>oc</sub> region can push
+      parameters to their bounds or inflate uncertainties. Widen the bounds, supply a better temperature,
+      or measure a cleaner curve before trusting the extracted J<sub>0</sub> and n.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       28. DARK J-V IDEALITY FIT
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="dark-ideality">
+    <h2>28. Dark J-V Ideality Fit</h2>
+
+    <h3>What it does</h3>
+    <p>
+      A dark J-V curve plotted as log<sub>10</sub>|J| versus V has a straight exponential region
+      between the shunt-dominated low-voltage part and the series-resistance-limited high-voltage
+      part. The slope of that line gives the diode <strong>ideality factor n</strong> and its
+      intercept gives the dark saturation current density J<sub>s</sub>. This is the classic,
+      illumination-independent way to diagnose the dominant recombination mechanism.
+    </p>
+
+    <h3>Theory</h3>
+    <p>In the exponential injection region the shunt and series terms are negligible, so the diode
+       equation reduces to J ≈ J<sub>s</sub>·exp(V/(n·V<sub>T</sub>)). Taking log<sub>10</sub>:</p>
+    <div class="equation">
+      log<sub>10</sub>|J| = log<sub>10</sub>J<sub>s</sub> + V / (n·V<sub>T</sub>·ln 10)
+    </div>
+    <p>so a linear regression of log<sub>10</sub>|J| on V over the chosen window gives</p>
+    <div class="equation">
+      n = 1 / (V<sub>T</sub>·ln 10·slope), &nbsp;&nbsp; J<sub>s</sub> = 10<sup>intercept</sup>
+    </div>
+    <p>The same n-interpretation table as the light ideality factor applies (Section 13): n≈1
+       radiative/surface, n≈2 trap-assisted SRH, n&gt;2 interface/ionic.</p>
+
+    <h3>Example fit</h3>
+    <img src="figures/sim_dark_jv.png" alt="Dark J-V semilog plot with ideality fit window"
+         style="max-width:560px;width:100%;display:block;margin:14px auto;border:1px solid #dde1e7;border-radius:6px;">
+    <p style="text-align:center;font-size:12.5px;color:#777;">
+      Dark |J| on a log axis: shunt plateau at low V, clean exponential region (shaded = fit window),
+      and R<sub>s</sub> roll-off at high V.
+    </p>
+
+    <h3>Choosing the fit window</h3>
+    <div class="warning-box">
+      <div class="box-label">⚠ The window is everything</div>
+      The window (default 0.5–0.8 V) must lie inside the straight exponential region. If it dips into
+      the shunt-dominated plateau (too low) the slope flattens and n is over-estimated; if it reaches
+      into the R<sub>s</sub>-limited region (too high) the slope also flattens. Always inspect the
+      semilog plot and pick the window over the visibly straight section. At least 5 points must fall
+      inside the window.
+    </div>
+
+    <h3>How to run it</h3>
+    <p>Open a dark J-V file in the Data Viewer and click <strong>Dark Ideality Fit</strong> (enabled only
+       for dark files). Adjust the V<sub>min</sub>/V<sub>max</sub> window and temperature, re-fit, and read
+       n, J<sub>s</sub>, and R². In ISOS-V-1 the dark ideality fit is run automatically on every dark scan
+       using the window set in the V-1 sub-frame (Section 22).</p>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       29. LIGHT IDEALITY FACTOR
+  ═════════════════════════════════════════════════════════════════════ -->
+  <section class="section" id="light-ideality">
+    <h2>29. Light Ideality Factor</h2>
+    <p>
+      The light ideality factor n<sub>idL</sub> is produced by the Light-Intensity J-V mode
+      (Section 13), where its full theory is given. It is the slope of V<sub>oc</sub> versus
+      ln(L) in units of k<sub>B</sub>T/q, and like the dark ideality factor it diagnoses the
+      dominant recombination mechanism — but it does so under <em>real operating illumination</em>,
+      which is often more representative than the dark diode.
+    </p>
+    <h3>Viewing the result</h3>
+    <p>Open a Light-Intensity workbook in the Data Viewer. The metadata panel reports n<sub>idL</sub>
+       for the forward and reverse scans with their standard errors and R², any fit warnings, and the
+       plot shows the V<sub>oc</sub>-vs-ln(L) regression line over the data points (see the example in
+       Section 13).</p>
+    <div class="info-box">
+      <div class="box-label">ℹ Dark vs light ideality</div>
+      A dark ideality near 2 with a light ideality near 1 (or vice versa) is informative in itself: it
+      means the recombination that limits V<sub>oc</sub> under illumination differs from the dark
+      injection mechanism — frequently a sign that interfaces, not the bulk, dominate under operation.
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       30. EXCEL FILE FORMAT
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="excel-format">
-    <h2>18. Excel File Format</h2>
+    <h2>30. Excel File Format</h2>
 
     <p>All files use a unified three-row layout for easy programmatic parsing:</p>
     <ul>
@@ -1702,6 +3171,9 @@
         <tr><td>X–Y</td><td>Pre-bias V, Pre-bias t</td><td>✓</td><td>—</td></tr>
         <tr><td>Z</td><td>Instrument IDN</td><td>✓</td><td>—</td></tr>
         <tr><td>AA</td><td>Scan Rate (mV/s)</td><td>✓</td><td>—</td></tr>
+        <tr><td>AB</td><td>Scan Order (FWD-&gt;REV / REV-&gt;FWD)</td><td>✓</td><td>—</td></tr>
+        <tr><td>AC</td><td>Illumination (mW/cm²) — the P<sub>in</sub> the PCE is divided by</td><td>✓</td><td>—</td></tr>
+        <tr><td>AD–AE</td><td>Detector Power (mW), Detector Area (cm²)</td><td>✓</td><td>—</td></tr>
       </tbody>
     </table>
     <p>The <code>CLAUDE.md</code> file in the repository documents the column mappings for all
@@ -1709,10 +3181,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       19. UNDERSTANDING J-V RESULTS
+       20. UNDERSTANDING J-V RESULTS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="results">
-    <h2>19. Understanding J-V Results</h2>
+    <h2>31. Understanding J-V Results</h2>
 
     <h3>Indicators of a good cell</h3>
     <ul>
@@ -1759,10 +3231,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       20. PHOTOVOLTAIC PARAMETERS
+       21. PHOTOVOLTAIC PARAMETERS
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="pv-parameters">
-    <h2>20. Photovoltaic Parameters</h2>
+    <h2>32. Photovoltaic Parameters</h2>
 
     <div class="param-block">
       <div class="param-name">Short-circuit Current Density — J<sub>sc</sub></div>
@@ -1826,10 +3298,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       21. EQUIVALENT CIRCUIT MODEL
+       22. EQUIVALENT CIRCUIT MODEL
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="circuit-model">
-    <h2>21. Equivalent Circuit Model</h2>
+    <h2>33. Equivalent Circuit Model</h2>
 
     <p>The single-diode model represents a solar cell as a photocurrent source in parallel with
        a diode, a shunt resistance, and a series resistance.</p>
@@ -1858,10 +3330,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       22. HYSTERESIS IN PEROVSKITES
+       23. HYSTERESIS IN PEROVSKITES
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="hysteresis">
-    <h2>22. Hysteresis in Perovskite Solar Cells</h2>
+    <h2>34. Hysteresis in Perovskite Solar Cells</h2>
 
     <h3>Physical origin</h3>
     <p>Perovskite absorbers are <strong>mixed ionic-electronic conductors</strong>. Mobile ionic
@@ -1904,10 +3376,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       23. TROUBLESHOOTING
+       24. TROUBLESHOOTING
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="troubleshooting">
-    <h2>23. Troubleshooting</h2>
+    <h2>35. Troubleshooting</h2>
 
     <div class="trouble-block">
       <div class="trouble-problem">❌ "No instruments found" in the connection dialog</div>
@@ -1946,7 +3418,7 @@
         <div class="trouble-solution"><strong>Solutions:</strong>
           <ul>
             <li>Increase End Voltage to at least 0.1 V above the expected V<sub>oc</sub>.</li>
-            <li>Verify the solar simulator shutter is open and illumination is ≥100 mW/cm².</li>
+            <li>Verify the solar simulator shutter is open and illumination is ≥100 mW/cm². If the software controls your shutter, see <a href="#shutter">Section 10</a> — enabling <em>Confirm the light state with an SMU reading</em> catches this case before the data is saved.</li>
             <li>Check cell contact polarity (Force HI to counter-electrode).</li>
           </ul>
         </div>
@@ -2012,7 +3484,7 @@
             <li>Install mplcursors: <code>pip install mplcursors</code> in the correct Python
                 environment.</li>
             <li>Verify the file is a valid <code>.xlsx</code> file with one of the supported
-                sheet names (see Section 16).</li>
+                sheet names (see Section 26).</li>
           </ul>
         </div>
       </div>
@@ -2036,10 +3508,10 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       23. REFERENCES
+       24. REFERENCES
   ═════════════════════════════════════════════════════════════════════ -->
   <section class="section" id="references">
-    <h2>24. References</h2>
+    <h2>36. References</h2>
 
     <ol class="ref-list">
       <li data-ref="[1]">
@@ -2107,6 +3579,43 @@
         PVEducation.org, Shunt Resistance and Series Resistance.
         <a href="https://www.pveducation.org/pvcdrom/solar-cell-operation/shunt-resistance">https://www.pveducation.org</a>
         <br><em>— Online reference for parameter extraction methods and device physics.</em>
+      </li>
+      <li data-ref="[10]">
+        M.O. Reese, S.A. Gevorgyan, M. Jørgensen, et al., Consensus stability testing protocols for
+        organic photovoltaic materials and devices,
+        <em>Sol. Energy Mater. Sol. Cells</em> 95 (2011) 1253–1267.
+        <a href="https://doi.org/10.1016/j.solmat.2011.01.036">https://doi.org/10.1016/j.solmat.2011.01.036</a>
+        <br><em>— The original ISOS protocol definitions (D/L/V/T/O families and levels) that the
+        ISOS Protocols mode implements.</em>
+      </li>
+      <li data-ref="[11]">
+        W. Tress, M. Yavari, K. Domanski, et al., Interpretation and evolution of open-circuit voltage,
+        recombination, ideality factor and subgap defect states during reversible light-soaking and
+        irreversible degradation of perovskite solar cells,
+        <em>Energy Environ. Sci.</em> 11 (2018) 151–165.
+        <a href="https://doi.org/10.1039/C7EE02415K">https://doi.org/10.1039/C7EE02415K</a>
+        <br><em>— Basis for interpreting the light ideality factor n<sub>idL</sub> and its evolution
+        during light soaking and degradation.</em>
+      </li>
+      <li data-ref="[12]">
+        P. Caprioglio, C.M. Wolff, O.J. Sandberg, et al., On the Origin of the Ideality Factor in
+        Perovskite Solar Cells,
+        <em>Adv. Energy Mater.</em> 10 (2020) 2000502.
+        <a href="https://doi.org/10.1002/aenm.202000502">https://doi.org/10.1002/aenm.202000502</a>
+        <br><em>— Physical interpretation of the ideality factor and its link to dominant recombination
+        channels in perovskite devices.</em>
+      </li>
+      <li data-ref="[13]">
+        M. Saliba, L. Etgar, Current Density Mismatch in Perovskite Solar Cells,
+        <em>ACS Energy Lett.</em> 5 (2020) 2886–2888.
+        <a href="https://doi.org/10.1021/acsenergylett.0c01642">https://doi.org/10.1021/acsenergylett.0c01642</a>
+        <br><em>— Best practice for reporting J-V data and reproducible device statistics; motivation
+        for the Data Curation workflow.</em>
+      </li>
+      <li data-ref="[14]">
+        S.M. Sze, K.K. Ng, <em>Physics of Semiconductor Devices</em>, 3rd ed., Wiley, Hoboken, 2007.
+        <br><em>— Foundational treatment of the diode equation, dark saturation current J<sub>0</sub>,
+        and the ideality factor used in the single-diode and dark-ideality fits.</em>
       </li>
     </ol>
   </section>

@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+markers = [
+    "windows_only: skip on non-Windows platforms",
+    "gui: requires a live Tk display; skipped in headless environments and CI",
+]

@@ -1,4 +1,6 @@
 import os
+import json
+import time
 import threading
 import winsound
 import tempfile
@@ -9,35 +11,34 @@ from tkinter import (
     ttk, Menu, filedialog, Label, Entry, Button,
     StringVar, DoubleVar, IntVar, Text, messagebox,
     Frame, LabelFrame, Checkbutton, BooleanVar, Radiobutton,
-    Listbox, Scrollbar,
+    Listbox, Scrollbar, Toplevel,
     LEFT, RIGHT, BOTH, X, Y, W, E, END, DISABLED, NORMAL, BOTTOM,
 )
-from datetime import datetime
+from datetime import datetime, timedelta
 import pyvisa
 
-PLOT_COLORS = [
-    "#1565C0",  # deep blue
-    "#B71C1C",  # deep red
-    "#1B5E20",  # deep green
-    "#E65100",  # deep orange
-    "#4A148C",  # deep purple
-    "#006064",  # deep cyan
-    "#3E2723",  # deep brown
-    "#37474F",  # blue-grey
-    "#880E4F",  # deep pink
-    "#004D40",  # deep teal
-]
-
+from app.gui.theme import PLOT_COLORS
 from app.utils.constants import APP_NAME, stop_event
 from app.utils.sound import play_completion_sound
 from app.utils.updater import check_for_updates, get_local_version
 from app.gui.tooltip import ToolTip
+from app.gui.mpp_settings_frame import build_mpp_settings_frame, build_param_grid
 from app.gui.instrument_dialog import InstrumentDialog
+from app.gui.plot_limits import jv_plot_limits
+from app.gui.shutter_dialog import ShutterDialog
+from app.instrument.tsp_transport import TSPTransport, is_tsp_instrument
+from app.shutter import CLOSED, OPEN, ShutterError
+from app.shutter.manager import ShutterManager
+from app.simulation.fake_keithley import FakeKeithley
+from app.simulation.dummy_cell import VALID_MODES
 from app.measurement.analysis import (
     calculate_jv_parameters,
     calculate_resistances,
     calculate_hysteresis_index,
+    detect_open_circuit,
+    fit_single_diode,
 )
+from app.io.exporter import append_single_diode_fit_to_file
 from app.instrument.keithley import (
     init_instrument, apply_prebias, apply_light_soaking, measure_scan,
 )
@@ -45,14 +46,26 @@ from app.io.exporter import (
     save_data, save_dark_jv_data,
     save_stab_current_data, save_pure_mpp_data, save_mpp_data,
 )
-from app.io.isos_exporter import (
+from app.io.isos_tracking import (
     create_isos_d1_tracking_file,
+    create_isos_tracking_file,
     append_isos_d1_measurement,
     read_isos_d1_config,
     read_isos_d1_log,
     read_isos_d1_jv_curves,
+    read_isos_config,
+    read_isos_log,
+    read_isos_jv_curves,
+    append_metrics_row,
+)
+from app.measurement.isos_protocols import list_protocol_labels, get_protocol
+from app.io.isos_recovery import (
+    add_recent_folder, load_recent_folders, find_orphan_stress_csvs,
+    consolidate_orphan, discard_orphan,
 )
 from app.gui.data_viewer import DataViewerWindow
+from app.measurement.light_intensity_jv import LightIntensityJVMeasurement
+from app.instrument.keithley_smu import Keithley2400SourceMeter
 
 
 class JVMeasurementApp:
@@ -68,9 +81,24 @@ class JVMeasurementApp:
         self.instrument      = None
         self.instrument_addr = None
         self.instrument_idn  = None
+        self._simulated      = False  # True when self.instrument is a FakeKeithley
         self.current_mode         = "jv"
         self._measurement_running = False
         self.isos_tracking_file   = None
+
+        # ── Shutter ───────────────────────────────────────────────────────
+        # Created before setup_gui() because the Instrument tab renders the
+        # backend's settings form from it. The state var is created first so
+        # the manager's construction-time notification has somewhere to land.
+        # Default backend is "manual", i.e. the prompt-the-operator behaviour
+        # the application has always had.
+        self.shutter_state_var = StringVar(value="Shutter: not configured")
+        self._shutter_badge_colour = "#757575"
+        self._shutter_dialog = None
+        self.shutter = ShutterManager(
+            prompt=self._shutter_operator_prompt,
+            on_state_change=self._on_shutter_state_change,
+        )
 
         self.setup_gui()
         # J-V traces
@@ -97,6 +125,18 @@ class JVMeasurementApp:
 
         # Silent update check — runs 3 s after startup to avoid delaying launch
         self.root.after(3000, lambda: check_for_updates(self.root, silent=True))
+
+        # Crash-recovery scaffolding — look for interrupted ISOS stress runs.
+        # The recovery dialog itself lands in a later session; for now we only
+        # surface the count in the status bar so unfinished runs are visible.
+        self.root.after(1500, self._scan_for_inprogress_isos)
+
+        # Assert a closed shutter as early as the backend allows. A backend that
+        # needs no SourceMeter (serial, for one) can be closed right now, which
+        # is the strongest form of the "closed at startup" guarantee. The
+        # Keithley backend cannot — it borrows the instrument's session — so it
+        # is closed at connect time instead, in _shutter_close_on_connect().
+        self.root.after(200, self._shutter_close_at_startup)
 
     # ── GUI construction ──────────────────────────────────────────────────────
 
@@ -193,6 +233,20 @@ class JVMeasurementApp:
             setattr(self, f"{name}_var", var)
             self.input_widgets.append(entry)
             ToolTip(entry, self._tooltip(name))
+
+        self.rev_first_var = BooleanVar(value=False)
+        rev_first_cb = Checkbutton(pf, text="Measure from REV to FWD",
+                                   variable=self.rev_first_var)
+        rev_first_cb.grid(row=4, column=0, columnspan=3, sticky=W, padx=4, pady=2)
+        self.input_widgets.append(rev_first_cb)
+        ToolTip(rev_first_cb,
+                "Unchecked (default): forward scan (Start → End) first,\n"
+                "then reverse scan (End → Start).\n\n"
+                "Checked: reverse scan (End → Start) first, then forward.\n"
+                "Applies to the illuminated and the dark J-V.\n\n"
+                "Pre-bias, when enabled, is always applied right before the\n"
+                "reverse scan — so in this order it comes before the first scan.\n"
+                "The scan order is saved in the Excel file.")
 
         # Illumination Settings
         ilf = LabelFrame(tab_scan, text="Illumination", padx=6, pady=4)
@@ -298,6 +352,20 @@ class JVMeasurementApp:
                 "Enables :SYST:RSEN ON \u2014 eliminates cable resistance from the\n"
                 "measurement. Requires Force HI/LO + Sense HI/LO connections.")
 
+        Label(inf, text="SMU channel:").grid(
+            row=5, column=0, sticky=W, padx=4, pady=4)
+        self.tsp_channel_var = StringVar(value="A")
+        ch_combo = ttk.Combobox(inf, textvariable=self.tsp_channel_var,
+                                state="readonly", values=("A", "B"), width=7)
+        ch_combo.grid(row=5, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="(2600-series)", fg="#666666").grid(
+            row=5, column=2, sticky=W)
+        ToolTip(ch_combo,
+                "Which SMU channel the cell is wired to on a dual-channel\n"
+                "Keithley 2600-series (e.g. 2612): A = smua, B = smub.\n"
+                "Ignored for single-channel SCPI instruments (Keithley 2400).\n"
+                "Set this BEFORE connecting; reconnect to change it.")
+
         srf = LabelFrame(tab_inst, text="Calculated Scan Rate", padx=6, pady=4)
         srf.pack(fill=X, pady=(0, 4))
 
@@ -315,6 +383,26 @@ class JVMeasurementApp:
                 "  Standard:    10\u2013100 mV/s  (good balance of speed and accuracy)\n"
                 "  Slow scan:   1\u201310 mV/s    (approaches quasi-steady-state)\n\n"
                 "Always report this value alongside Step Voltage and Delay when publishing.")
+
+        # ── Auto single-diode fit ─────────────────────────────────────────────
+        fitf = LabelFrame(tab_inst, text="Analysis", padx=6, pady=4)
+        fitf.pack(fill=X, pady=(0, 4))
+
+        self.auto_single_diode_fit_var = BooleanVar(value=False)
+        auto_fit_cb = Checkbutton(
+            fitf,
+            text="Auto single-diode fit",
+            variable=self.auto_single_diode_fit_var,
+        )
+        auto_fit_cb.grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+        ToolTip(
+            auto_fit_cb,
+            "After each J-V measurement, automatically fit the 5-parameter\n"
+            "single-diode model to the reverse scan.\n\n"
+            "Results are saved in the Excel file (SingleDiodeFit sheet) and\n"
+            "stored with the session data for the current session.\n\n"
+            "Adds approximately 1–3 seconds per measurement.",
+        )
 
         # ─── Tab 3: Conditioning ──────────────────────────────────────────────
         tab_cond = Frame(nb, padx=6, pady=4, bg="#ececec")
@@ -454,6 +542,7 @@ class JVMeasurementApp:
         self.draw_placeholder_plot()
 
         # ── Build additional mode panels (hidden until mode is switched) ──────
+        self._build_light_intensity_jv_panel(left, plot_frame)
         self._build_mpp_panel(left, plot_frame)
         self._build_stab_panel(left, plot_frame)
         self._build_pure_mpp_panel(left, plot_frame)
@@ -462,11 +551,12 @@ class JVMeasurementApp:
 
         # ── Keyboard shortcuts for mode switching ─────────────────────────────
         self.root.bind("<Alt-F2>", lambda e: self.switch_mode("jv"))
-        self.root.bind("<Alt-F3>", lambda e: self.switch_mode("mpp"))
-        self.root.bind("<Alt-F5>", lambda e: self.switch_mode("stab"))
-        self.root.bind("<Alt-F6>", lambda e: self.switch_mode("pure_mpp"))
-        self.root.bind("<Alt-F7>", lambda e: self.switch_mode("curation"))
-        self.root.bind("<Alt-F8>", lambda e: self.switch_mode("isos"))
+        self.root.bind("<Alt-F3>", lambda e: self.switch_mode("light_jv"))
+        self.root.bind("<Alt-F5>", lambda e: self.switch_mode("mpp"))
+        self.root.bind("<Alt-F6>", lambda e: self.switch_mode("stab"))
+        self.root.bind("<Alt-F7>", lambda e: self.switch_mode("pure_mpp"))
+        self.root.bind("<Alt-F8>", lambda e: self.switch_mode("curation"))
+        self.root.bind("<Alt-F9>", lambda e: self.switch_mode("isos"))
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -493,9 +583,18 @@ class JVMeasurementApp:
             label="Connect\u2026",
             command=self.open_instrument_dialog)
         self.instrument_menu.add_command(
+            label="Connect to Simulator\u2026",
+            command=self.open_simulator_dialog)
+        self.instrument_menu.add_command(
             label="Disconnect",
             command=self.disconnect_instrument,
             state=DISABLED)
+        self.instrument_menu.add_separator()
+        # On the menu bar, not inside a measurement panel: the shutter belongs
+        # to the rig, and once configured it serves every mode in Procedures.
+        self.instrument_menu.add_command(
+            label="Shutter Control…",
+            command=self.open_shutter_dialog)
         self.instrument_menu.add_separator()
         self.instrument_menu.add_command(
             label="Send *IDN? query",
@@ -509,31 +608,37 @@ class JVMeasurementApp:
             accelerator="Alt+F2",
             command=lambda: self.switch_mode("jv"))
         self.procedures_menu.add_command(
-            label="  MPP Tracking",
+            label="  Light-Intensity J-V",
             accelerator="Alt+F3",
+            command=lambda: self.switch_mode("light_jv"))
+        self.procedures_menu.add_command(
+            label="  MPP Tracking",
+            accelerator="Alt+F5",
             command=lambda: self.switch_mode("mpp"))
         self.procedures_menu.add_command(
             label="  Stabilized Current",
-            accelerator="Alt+F5",
+            accelerator="Alt+F6",
             command=lambda: self.switch_mode("stab"))
         self.procedures_menu.add_command(
             label="  Pure MPP Tracking",
-            accelerator="Alt+F6",
+            accelerator="Alt+F7",
             command=lambda: self.switch_mode("pure_mpp"))
         self.procedures_menu.add_separator()
         self.procedures_menu.add_command(
             label="  Data Curation",
-            accelerator="Alt+F7",
+            accelerator="Alt+F8",
             command=lambda: self.switch_mode("curation"))
         self.procedures_menu.add_separator()
         self.procedures_menu.add_command(
             label="  ISOS Protocols",
-            accelerator="Alt+F8",
+            accelerator="Alt+F9",
             command=lambda: self.switch_mode("isos"))
         menubar.add_cascade(label="Procedures", menu=self.procedures_menu)
 
         help_menu = Menu(menubar, tearoff=0)
         help_menu.add_command(label="Documentation", command=self._show_help)
+        help_menu.add_command(label="Open Samples Folder",
+                              command=self._open_samples_folder)
         help_menu.add_separator()
         help_menu.add_command(
             label="Check for Updates",
@@ -558,12 +663,14 @@ class JVMeasurementApp:
             return
 
         self.jv_panel.pack_forget()
+        self.light_jv_panel.pack_forget()
         self.mpp_panel.pack_forget()
         self.stab_panel.pack_forget()
         self.pmpp_panel.pack_forget()
         self.curation_panel.pack_forget()
         self.isos_panel.pack_forget()
         self.jv_plot_frame.pack_forget()
+        self.light_jv_plot_frame.pack_forget()
         self.mpp_plot_frame.pack_forget()
         self.stab_plot_frame.pack_forget()
         self.pmpp_plot_frame.pack_forget()
@@ -573,6 +680,9 @@ class JVMeasurementApp:
         if mode == "jv":
             self.jv_panel.pack(fill=BOTH, expand=True)
             self.jv_plot_frame.pack(fill=BOTH, expand=True)
+        elif mode == "light_jv":
+            self.light_jv_panel.pack(fill=BOTH, expand=True)
+            self.light_jv_plot_frame.pack(fill=BOTH, expand=True)
         elif mode == "mpp":
             self.mpp_panel.pack(fill=BOTH, expand=True)
             self.mpp_plot_frame.pack(fill=BOTH, expand=True)
@@ -593,14 +703,15 @@ class JVMeasurementApp:
         self._update_window_menu_checkmark(mode)
 
     def _update_window_menu_checkmark(self, active_mode):
-        # Entry indices: 0=J-V, 1=MPP, 2=Stab, 3=PureMPP, 4=sep, 5=Curation, 6=sep, 7=ISOS
+        # Entry indices: 0=J-V, 1=LightJV, 2=MPP, 3=Stab, 4=PureMPP, 5=sep, 6=Curation, 7=sep, 8=ISOS
         all_entries = [
-            (0, "  J-V Measurement",    "jv"),
-            (1, "  MPP Tracking",       "mpp"),
-            (2, "  Stabilized Current", "stab"),
-            (3, "  Pure MPP Tracking",  "pure_mpp"),
-            (5, "  Data Curation",      "curation"),
-            (7, "  ISOS Protocols",     "isos"),
+            (0, "  J-V Measurement",     "jv"),
+            (1, "  Light-Intensity J-V", "light_jv"),
+            (2, "  MPP Tracking",        "mpp"),
+            (3, "  Stabilized Current",  "stab"),
+            (4, "  Pure MPP Tracking",   "pure_mpp"),
+            (6, "  Data Curation",       "curation"),
+            (8, "  ISOS Protocols",      "isos"),
         ]
         for menu_i, label, mode_key in all_entries:
             display = ("✓" + label[1:]) if mode_key == active_mode else label
@@ -629,22 +740,239 @@ class JVMeasurementApp:
                                  f"Could not open {addr}:\n{exc}")
             return
 
+        # Keithley 2600-series speaks TSP, not SCPI. Wrap it in a translating
+        # transport so the raw-SCPI measurement code drives it unchanged. A 2400
+        # is left as the bare pyvisa resource (identical to before). See
+        # app/instrument/tsp_transport.py.
+        tsp = is_tsp_instrument(idn)
+        if tsp:
+            ch = self.tsp_channel_var.get()
+            res = TSPTransport(res, channel=ch)
+
         self.instrument      = res
         self.instrument_addr = addr
         self.instrument_idn  = idn
 
         short_idn = idn[:60] + ("\u2026" if len(idn) > 60 else "")
-        self.instrument_label_var.set(f"\u2714  Connected: {short_idn}  [{addr}]")
-        self.status_var.set(f"Instrument connected: {addr}")
-        self.start_btn.config(state=NORMAL)
-        self.mpp_start_btn.config(state=NORMAL)
-        self.stab_start_btn.config(state=NORMAL)
-        self.pmpp_start_btn.config(state=NORMAL)
-        self.isos_start_btn.config(state=NORMAL)
+        badge = f" \u2014 TSP/SMU {self.tsp_channel_var.get()}" if tsp else ""
+        self._apply_connected_state(
+            f"\u2714  Connected: {short_idn}{badge}  [{addr}]",
+            f"Instrument connected: {addr}{badge}")
 
-        self.instrument_menu.entryconfig("Connect\u2026",        state=NORMAL)
-        self.instrument_menu.entryconfig("Disconnect",            state=NORMAL)
-        self.instrument_menu.entryconfig("Send *IDN? query",      state=NORMAL)
+        # The shutter shares this session. Hand it over and assert a closed
+        # shutter straight away \u2014 see _shutter_close_on_connect().
+        self.shutter.attach_instrument(res)
+        self._shutter_close_on_connect()
+
+    def open_simulator_dialog(self):
+        """Connect to a simulated Keithley (FakeKeithley backed by a DummyCell).
+
+        Injects a SCPI-shaped fake into ``self.instrument`` so every measurement
+        mode runs end-to-end with no hardware. This is the same raw-SCPI path the
+        real instrument uses \u2014 it never touches the SourceMeter ABC (CLAUDE.md
+        two-instrument split).
+        """
+        mode = self._ask_simulator_mode()
+        if mode is None:
+            return
+
+        self._close_instrument()
+
+        self.instrument      = FakeKeithley.from_mode(mode)
+        self.instrument_addr = "SIMULATOR"
+        self.instrument_idn  = self.instrument.query("*IDN?").strip()
+        self._simulated = True
+
+        self._apply_connected_state(
+            f"\u2699  SIMULATION \u2014 {mode}  (no hardware)",
+            f"Simulator connected: cell mode '{mode}'")
+
+    def _ask_simulator_mode(self) -> str | None:
+        """Modal picker for the DummyCell behaviour. Returns the mode or None."""
+        dlg = Toplevel(self.root)
+        dlg.title("Connect to Simulator")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        Label(dlg, text="Simulated cell behaviour:",
+              font=("Arial", 10)).pack(padx=16, pady=(14, 6), anchor=W)
+
+        mode_var = StringVar(value="ideal_stable")
+        combo = ttk.Combobox(dlg, textvariable=mode_var, state="readonly",
+                             values=sorted(VALID_MODES), width=28)
+        combo.pack(padx=16, pady=(0, 10))
+
+        result = {"mode": None}
+
+        def _ok():
+            result["mode"] = mode_var.get()
+            dlg.destroy()
+
+        def _cancel():
+            dlg.destroy()
+
+        btns = Frame(dlg)
+        btns.pack(padx=16, pady=(0, 14), fill=X)
+        Button(btns, text="Connect", command=_ok, width=10).pack(side=RIGHT)
+        Button(btns, text="Cancel", command=_cancel, width=10).pack(
+            side=RIGHT, padx=(0, 6))
+
+        dlg.bind("<Return>", lambda _e: _ok())
+        dlg.bind("<Escape>", lambda _e: _cancel())
+        dlg.grab_set()
+        self.root.wait_window(dlg)
+        return result["mode"]
+
+    # ── Shutter control ──────────────────────────────────────────────────────
+    #
+    # The panel is generated from the selected backend's ``BackendSpec.fields``
+    # tuple, so adding support for new shutter hardware needs a backend module
+    # and a registry entry — no code in this file. See app/shutter/__init__.py.
+
+    def open_shutter_dialog(self):
+        """Open (or raise) the Shutter Control window."""
+        existing = getattr(self, "_shutter_dialog", None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_set()
+            return existing
+
+        dlg = ShutterDialog(self.root, self.shutter,
+                            self._shutter_busy, self.shutter_state_var)
+        self._shutter_dialog = dlg
+        dlg.set_badge_colour(self._shutter_badge_colour)
+        return dlg
+
+    def _shutter_busy(self) -> bool:
+        """True (with an explanation) when a measurement is using the hardware."""
+        if self._measurement_running:
+            messagebox.showinfo(
+                "Shutter",
+                "A measurement is running. Stop it before changing or testing "
+                "the shutter — it shares the instrument's connection.")
+            return True
+        return False
+
+    def _on_shutter_state_change(self, mgr) -> None:
+        """Manager callback — may arrive from the measurement thread.
+
+        On the Tk thread the badge is refreshed immediately: deferring it via
+        ``after`` would leave the indicator a step behind every button press,
+        since those callbacks only run when the event loop next spins.
+        """
+        state, ready, automatic = mgr.state, mgr.ready, mgr.is_automatic
+        if threading.current_thread() is threading.main_thread():
+            self._shutter_refresh_badge(state, ready, automatic)
+            return
+        self.root.after(
+            0, lambda: self._shutter_refresh_badge(state, ready, automatic))
+
+    def _shutter_refresh_badge(self, state, ready, automatic) -> None:
+        if not automatic:
+            text, colour = "Shutter: manual", "#757575"
+        elif not ready:
+            text, colour = "Shutter: unknown (connect instrument)", "#757575"
+        elif state == CLOSED:
+            text, colour = "Shutter: CLOSED", "#2E7D32"
+        elif state == OPEN:
+            text, colour = "Shutter: OPEN", "#E65100"
+        else:
+            text, colour = "Shutter: unknown", "#757575"
+        self.shutter_state_var.set(text)
+        # The colour is kept here as well as pushed to the window, so a dialog
+        # opened later starts with the right one instead of a stale grey.
+        self._shutter_badge_colour = colour
+        dlg = getattr(self, "_shutter_dialog", None)
+        if dlg is not None and dlg.winfo_exists():
+            dlg.set_badge_colour(colour)
+
+    def _shutter_operator_prompt(self, action: str) -> None:
+        """Modal prompt used by the manual backend; blocks until confirmed.
+
+        Safe from either thread: called from a measurement thread it posts to
+        the Tk thread and waits, and called from the Tk thread it shows the
+        dialog directly (posting and waiting there would deadlock).
+        """
+        if action == "open":
+            title = "Open Shutter"
+            body = ("Please open the solar simulator shutter, then click OK "
+                    "to continue.")
+        else:
+            title = "Close Shutter"
+            body = ("Please close the solar simulator shutter, then click OK "
+                    "to continue.")
+
+        if threading.current_thread() is threading.main_thread():
+            messagebox.showinfo(title, body)
+            return
+
+        done = threading.Event()
+        self.root.after(0, lambda: (messagebox.showinfo(title, body), done.set()))
+        done.wait()
+
+    def _shutter_close_if_automatic(self):
+        """Close the shutter when the backend can do it without a human.
+
+        Returns True/False for an attempt, or None when it was skipped.
+
+        Skipped for the manual backend on purpose. Connecting, disconnecting
+        and quitting all pass through here, and a modal "please close the
+        shutter" dialog on each of those would be intolerable — on a manual
+        setup the operator is the one in charge of the shutter anyway.
+        """
+        if not self.shutter.is_automatic or not self.shutter.ready:
+            return None
+        return self.shutter.close_quietly()
+
+    def _shutter_close_at_startup(self) -> None:
+        """Close the shutter at launch, for backends that need no instrument.
+
+        This is the one place the "shutter closed at startup" guarantee can be
+        met in full. Backends with ``requires_instrument`` (the Keithley digital
+        I/O one) have nothing to talk to yet and are skipped — the badge says
+        "unknown (connect instrument)" until the SourceMeter arrives.
+        """
+        if not self.shutter.is_automatic or self.shutter.requires_instrument:
+            return
+        if self.shutter.close_quietly():
+            self.status_var.set("Shutter closed.")
+        else:
+            self.status_var.set(
+                "Shutter could not be closed at startup — check "
+                "Instrument → Shutter Control…")
+
+    def _shutter_close_on_connect(self) -> None:
+        """Put the shutter in a known-closed state as soon as we can reach it.
+
+        The application cannot guarantee a closed shutter at startup: with the
+        2600's lines idling high through their pull-ups and a non-inverting
+        interface box, the shutter may already be open before any software is
+        listening. The first moment it *can* be commanded is when the
+        SourceMeter connects — so that is where the state is asserted.
+        """
+        closed = self._shutter_close_if_automatic()
+        if closed is None:
+            return
+        if closed:
+            # Append rather than replace: the connection message was just set.
+            self.status_var.set(f"{self.status_var.get()} — shutter closed.")
+        else:
+            messagebox.showwarning(
+                "Shutter",
+                "The instrument is connected, but the shutter could not be "
+                "closed.\n\nCheck the shutter settings in the Instrument tab "
+                "and use Test: Close.\n\nUntil then the illumination state is "
+                "unknown — do not trust a dark measurement.")
+
+    def _apply_connected_state(self, label_text, status_text):
+        """Flip the UI into the 'instrument connected' state (real or simulated)."""
+        self.instrument_label_var.set(label_text)
+        self.status_var.set(status_text)
+        for btn in (self.start_btn, self.light_jv_start_btn, self.mpp_start_btn,
+                    self.stab_start_btn, self.pmpp_start_btn, self.isos_start_btn):
+            btn.config(state=NORMAL)
+        self.instrument_menu.entryconfig("Disconnect",       state=NORMAL)
+        self.instrument_menu.entryconfig("Send *IDN? query", state=NORMAL)
 
     def disconnect_instrument(self):
         self._close_instrument()
@@ -652,6 +980,7 @@ class JVMeasurementApp:
             "\u26a0  No instrument connected \u2014 use Instrument \u2192 Connect")
         self.status_var.set("Instrument disconnected.")
         self.start_btn.config(state=DISABLED)
+        self.light_jv_start_btn.config(state=DISABLED)
         self.mpp_start_btn.config(state=DISABLED)
         self.stab_start_btn.config(state=DISABLED)
         self.isos_start_btn.config(state=DISABLED)
@@ -660,6 +989,13 @@ class JVMeasurementApp:
 
     def _close_instrument(self):
         if self.instrument is not None:
+            # Close the shutter BEFORE the session goes away — afterwards there
+            # is no way to command it, and on non-fail-safe wiring an idle line
+            # leaves the shutter open. This also covers application exit, which
+            # routes through here via _on_exit(). Manual backends are skipped:
+            # see _shutter_close_if_automatic().
+            self._shutter_close_if_automatic()
+            self.shutter.detach_instrument()
             try:
                 self.instrument.write(":OUTP OFF")
                 self.instrument.close()
@@ -668,6 +1004,7 @@ class JVMeasurementApp:
             self.instrument      = None
             self.instrument_addr = None
             self.instrument_idn  = None
+            self._simulated      = False
 
     def _query_idn_live(self):
         if self.instrument is None:
@@ -716,6 +1053,25 @@ class JVMeasurementApp:
         )
         abs_path = os.path.abspath(help_path).replace("\\", "/")
         webbrowser.open(f"file:///{abs_path}")
+
+    def _open_samples_folder(self):
+        """Open the bundled Samples/ folder of example measurement files."""
+        import os
+        samples_path = os.path.abspath(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "Samples"
+        ))
+        if not os.path.isdir(samples_path):
+            messagebox.showinfo(
+                "Samples",
+                "The Samples folder was not found next to the application.\n\n"
+                f"Expected at:\n{samples_path}")
+            return
+        try:
+            os.startfile(samples_path)            # Windows file explorer
+        except Exception:
+            import webbrowser
+            webbrowser.open(f"file:///{samples_path.replace(os.sep, '/')}")
 
     def _show_about(self):
         version = get_local_version()
@@ -844,33 +1200,50 @@ class JVMeasurementApp:
             pass
 
     def validate_inputs(self):
+        from app.gui.input_validation import (
+            validate_filename, validate_voltage_range,
+            validate_cell_area, validate_delay_ms, validate_nplc,
+            validate_illumination,
+        )
+
+        def _sv(var, fallback=""):
+            """Return the string value of a Tkinter Var; fallback on error."""
+            try:
+                return str(var.get())
+            except Exception:
+                return fallback
+
         try:
-            if not self.sample_name_var.get():
-                raise ValueError("Sample name is required")
+            res = validate_filename(self.sample_name_var.get())
+            if res.error:
+                raise ValueError(res.error.message)
             if not self.export_folder_var.get():
                 self.export_entry.config(fg="red")
                 raise ValueError("Select an export folder")
             if self.instrument is None:
                 raise ValueError("No instrument connected.\nUse Instrument \u2192 Connect.")
-            if self.start_voltage_var.get() >= self.end_voltage_var.get():
-                raise ValueError("Start voltage must be less than end voltage")
+            res = validate_voltage_range(
+                self.start_voltage_var.get(), self.end_voltage_var.get()
+            )
+            if res.error:
+                raise ValueError(res.error.message)
             if self.step_voltage_var.get() <= 0:
                 raise ValueError("Step voltage must be positive")
-            if self.cell_area_var.get() <= 0:
-                raise ValueError("Cell area must be positive")
-            if self.delay_ms_var.get() < 0:
-                raise ValueError("Delay cannot be negative")
-            if not (0.01 <= self.nplc_var.get() <= 25):
-                raise ValueError("NPLC must be between 0.01 and 25")
+            res = validate_cell_area(_sv(self.cell_area_var))
+            if res.error:
+                raise ValueError(res.error.message)
+            res = validate_delay_ms(_sv(self.delay_ms_var, "0"))
+            if res.error:
+                raise ValueError(res.error.message)
+            res = validate_nplc(_sv(self.nplc_var))
+            if res.error:
+                raise ValueError(res.error.message)
             if self.prebias_enabled_var.get() and self.prebias_duration_var.get() <= 0:
                 raise ValueError("Pre-bias duration must be positive")
             if self.light_soaking_var.get() and self.light_soaking_duration_var.get() <= 0:
                 raise ValueError("Light soaking duration must be positive")
-            try:
-                illum = float(self.illumination_var.get())
-            except ValueError:
-                illum = 0.0
-            if illum <= 0:
+            res = validate_illumination(self.illumination_var.get())
+            if res.error:
                 raise ValueError(
                     "Illumination is 0 mW/cm\u00b2.\n\n"
                     "Enter the detector power in the Illumination Settings panel\n"
@@ -898,7 +1271,7 @@ class JVMeasurementApp:
         self.ax.clear()
         self.ax2.clear()
         self.ax2.yaxis.set_label_position("right")
-        self.ax.set_xlim(0, 1.1)
+        self.ax.set_xlim(0, 1.2)
         self.ax.set_ylim(0, 30)
         self.ax2.set_ylim(0, 30)
         self.ax.set_xlabel("Voltage (V)", fontsize=12, labelpad=10)
@@ -924,16 +1297,16 @@ class JVMeasurementApp:
         if self.dark_jv_var.get():
             safety_msg = (
                 "1. Verify all connections to the SourceMeter\n"
-                "2. Confirm the solar simulator shutter is CLOSED\n\n"
+                f"{self._shutter_safety_line(want_open=False)}\n\n"
                 "The software will first measure J-V in the dark, save a\n"
-                "separate Excel file, then prompt you to open the shutter\n"
+                "separate Excel file, then handle the shutter\n"
                 "before the illuminated measurement.\n\n"
                 "Click OK to start."
             )
         else:
             safety_msg = (
                 "1. Verify all connections to the SourceMeter\n"
-                "2. Confirm solar simulator shutter is open\n\n"
+                f"{self._shutter_safety_line()}\n\n"
                 "Click OK to start measurement."
             )
 
@@ -962,16 +1335,6 @@ class JVMeasurementApp:
         self.log_text.insert(END, results)
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
-
-    def _ask_open_shutter(self, event):
-        """Called on the main thread to show the open-shutter prompt."""
-        messagebox.showinfo(
-            "Dark J-V Complete \u2014 Open Shutter",
-            "Dark J-V measurement complete.\n\n"
-            "Please open the solar simulator shutter, then click OK\n"
-            "to begin the illuminated J-V measurement."
-        )
-        event.set()
 
     def _log_dark_jv(self, v_df, j_df, v_dr, j_dr, filepath):
         """Append a Dark J-V entry to the measurement log."""
@@ -1017,7 +1380,9 @@ class JVMeasurementApp:
             "Voc_fwd": Voc_f, "Jsc_fwd": Jsc_f, "FF_fwd": FF_f, "PCE_fwd": PCE_f,
             "Voc_rev": Voc_r, "Jsc_rev": Jsc_r, "FF_rev": FF_r, "PCE_rev": PCE_r,
             "HI": HI,
+            "scan_order": self._scan_order_label(),
             "color": color,
+            "single_diode_fit": None,   # populated later if auto-fit is enabled
         })
         pb = (f"Pre-bias: {self.prebias_voltage_var.get():.2f} V "
               f"for {self.prebias_duration_var.get():.1f} s\n"
@@ -1031,6 +1396,7 @@ class JVMeasurementApp:
             f"Delay/pt: {self.delay_ms_var.get():.0f} ms  |  "
             f"NPLC: {self.nplc_var.get():.2f}  |  "
             f"4-Wire: {'ON' if self.four_wire_var.get() else 'OFF'}\n"
+            f"Scan order: {self._scan_order_label()}\n"
             f"{pb}{ls}\n"
             f"Forward Scan:\n"
             f"  Voc:  {Voc_f:.3f} V\n  Jsc:  {Jsc_f:.3f} mA/cm\u00b2\n"
@@ -1045,9 +1411,267 @@ class JVMeasurementApp:
 
     # ── Measurement thread ────────────────────────────────────────────────────
 
+    def _sim_set_light(self, on: bool) -> None:
+        """Toggle the simulated cell's illumination; no-op for real hardware.
+
+        Lets dark scans read a dark curve and illuminated scans read the lit
+        curve when a FakeKeithley is connected. With real hardware the shutter
+        backend does the work, so this does nothing.
+        """
+        if self._simulated and hasattr(self.instrument, "set_light"):
+            self.instrument.set_light(on)
+
+    # ── Shutter, from the measurement threads ────────────────────────────────
+
+    def _shutter_set(self, open_: bool, *, prompt_if_manual: bool) -> bool:
+        """Put the shutter in the requested state, blocking until it settles.
+
+        Returns True to carry on, False when the operator aborted — in which
+        case ``stop_event`` is set, so the caller's existing stop checks unwind
+        the measurement the way a Stop button would.
+
+        ``prompt_if_manual`` is True only at the boundaries that already showed
+        a dialog before shutter automation existed (the dark/illuminated
+        handover in J-V and ISOS-D-1, and the ISOS-V-1 scan boundaries). Every
+        other call site passes False, so a rig left on the manual backend sees
+        exactly the dialogs it always saw — no more, no fewer — while an
+        automatic backend drives the shutter everywhere.
+        """
+        action = "open" if open_ else "close"
+
+        if self._simulated:
+            # The fake cell follows the shutter; never ask anyone to move a
+            # physical blade during a hardware-free run.
+            self._sim_set_light(open_)
+            return True
+
+        if not self.shutter.is_automatic and not prompt_if_manual:
+            return True
+
+        try:
+            self.shutter.open() if open_ else self.shutter.close()
+        except ShutterError as exc:
+            if not self.shutter.is_automatic:
+                stop_event.set()          # the operator refused the prompt
+                return False
+            if not self._shutter_manual_fallback(action, exc):
+                stop_event.set()
+                return False
+            return True
+
+        return self._shutter_verify(open_)
+
+    def _shutter_manual_fallback(self, action: str, exc) -> bool:
+        """Automation failed — offer to carry on with a hand-moved shutter.
+
+        The manager has already retried once, so this is a second consecutive
+        failure. Returns True to continue, False to abort the measurement.
+        """
+        done = "opened" if action == "open" else "closed"
+        return bool(self._ask_main_thread(lambda: messagebox.askokcancel(
+            "Shutter failed",
+            f"The shutter could not be {done} automatically:\n\n{exc}\n\n"
+            f"{action.capitalize()} it by hand now and click OK to continue,\n"
+            "or click Cancel to abort the measurement.",
+            icon="warning")))
+
+    def _shutter_verify(self, expect_light: bool) -> bool:
+        """Optionally confirm the light state with an SMU reading.
+
+        The shutter can only report what it *commanded*. The SMU can report what
+        the cell actually sees, which is the only closed-loop check available —
+        and the one that catches the dangerous case on non-fail-safe wiring: a
+        "dark" scan that silently ran illuminated looks perfectly plausible.
+
+        Off by default (it needs a cell connected). Returns True to carry on.
+        """
+        if not self.shutter.verify_with_current or self.instrument is None:
+            return True
+        try:
+            current = self._read_cell_current_at_zero_v()
+        except Exception as exc:
+            self.status_var.set(f"Shutter verification skipped: {exc}")
+            return True                      # never fail a run on the check itself
+
+        lit = abs(current) > self.shutter.verify_threshold_a
+        if lit == expect_light:
+            return True
+
+        expected = "illuminated" if expect_light else "dark"
+        seen = "illuminated" if lit else "dark"
+        if self._ask_main_thread(lambda: messagebox.askokcancel(
+                "Shutter verification failed",
+                f"The shutter was commanded {expected.upper()}, but the cell "
+                f"reads {seen}.\n\n"
+                f"Current at 0 V: {abs(current) * 1e3:.4g} mA "
+                f"(threshold {self.shutter.verify_threshold_a * 1e3:.4g} mA)\n\n"
+                "Likely causes: the simulator's SHUTTER CONTROL switch is not "
+                "in EXTERNAL, the lamp is off, or no cell is connected.\n\n"
+                "Click OK to continue anyway, or Cancel to abort.",
+                icon="warning")):
+            return True
+        stop_event.set()
+        return False
+
+    def _read_cell_current_at_zero_v(self) -> float:
+        """Read the cell current at 0 V, in amps.
+
+        Uses the plain SCPI vocabulary so it works on a 2400 and, through
+        ``TSPTransport``, on a 2600. It leaves the instrument reset with the
+        output off — every call site re-initialises before measuring, which is
+        why verification only runs at phase boundaries.
+        """
+        inst = self.instrument
+        inst.write("*RST")
+        inst.write(":SOUR:FUNC VOLT")
+        inst.write(":SOUR:VOLT 0")
+        inst.write(":SENS:FUNC 'CURR:DC'")
+        inst.write(":SENS:CURR:PROT 0.1")
+        inst.write(":SENS:CURR:NPLC 1.000")
+        inst.write(":OUTP ON")
+        try:
+            return float(inst.query(":READ?").split(",")[1])
+        finally:
+            try:
+                inst.write(":OUTP OFF")
+            except Exception:
+                pass
+
+    def _shutter_safety_line(self, want_open: bool = True) -> str:
+        """The shutter line for a pre-flight Safety Check dialog.
+
+        Telling an operator to "confirm the shutter is open" while the software
+        is about to open it itself is worse than saying nothing, so the text
+        follows the configured backend.
+        """
+        if self._simulated:
+            return "2. Simulated run \u2014 no physical shutter involved"
+        if self.shutter.is_automatic:
+            state = "opened" if want_open else "closed"
+            return f"2. The shutter will be {state} automatically"
+        state = "open" if want_open else "CLOSED"
+        return f"2. Confirm the solar simulator shutter is {state}"
+
+    def _run_illuminated(self, work):
+        """Wrap a thread target so it runs with the shutter open, then closed.
+
+        MPP and Pure MPP hand their run loop straight to a daemon thread with no
+        wrapper of their own, so the open/close bracket lives here rather than
+        being duplicated inside each tracker.
+        """
+        def target():
+            try:
+                if not self._shutter_set(True, prompt_if_manual=False):
+                    return
+                work()
+            finally:
+                self._shutter_close_if_automatic()
+        return target
+
+    def _ask_main_thread(self, func):
+        """Run *func* on the Tk thread and return its result, from any thread."""
+        if threading.current_thread() is threading.main_thread():
+            return func()
+        result = {}
+        done = threading.Event()
+
+        def run():
+            try:
+                result["value"] = func()
+            finally:
+                done.set()
+
+        self.root.after(0, run)
+        done.wait()
+        return result.get("value")
+
+    @staticmethod
+    def _safe_float(var):
+        """A Tk variable's value as float, or None if it does not parse —
+        a metadata column must never be the reason a measurement fails."""
+        try:
+            return float(var.get())
+        except Exception:
+            return None
+
+    def _scan_order_label(self):
+        """The scan order as written to the Excel file and the log."""
+        return "REV->FWD" if self.rev_first_var.get() else "FWD->REV"
+
+    def _measure_jv_pair(self, status_prefix, readback_f=None, readback_r=None,
+                         before_rev=None):
+        """Measure one forward + one reverse scan, in the order the
+        "Measure from REV to FWD" box asks for.
+
+        Forward is always Start -> End and reverse End -> Start; only which
+        one runs first changes. *before_rev* (the pre-bias) runs right before
+        the reverse scan whichever order is chosen, because that is what it
+        conditions. Returns ``(v_f, j_f, v_r, j_r)``, or ``None`` when the
+        run was stopped.
+        """
+        start = self.start_voltage_var.get()
+        end   = self.end_voltage_var.get()
+        step  = self.step_voltage_var.get()
+        area  = self.cell_area_var.get()
+
+        def fwd():
+            self.status_var.set(f"{status_prefix}Measuring forward scan\u2026")
+            return measure_scan(self.instrument, start, end, step, area,
+                                stop_event, readback=readback_f)
+
+        def rev():
+            if before_rev is not None:
+                before_rev()
+                if stop_event.is_set():
+                    return None, None
+            self.status_var.set(f"{status_prefix}Measuring reverse scan\u2026")
+            return measure_scan(self.instrument, end, start, -step, area,
+                                stop_event, readback=readback_r)
+
+        result = {}
+        for name, scan in ((("rev", rev), ("fwd", fwd)) if self.rev_first_var.get()
+                           else (("fwd", fwd), ("rev", rev))):
+            result[name] = scan()
+            if stop_event.is_set():
+                return None
+        return (*result["fwd"], *result["rev"])
+
+    def _check_open_circuit(self, scans, cell_area):
+        """Warn when an illuminated scan lost the cell mid-sweep.
+
+        *scans* is an iterable of ``(label, voltages, j)``. Returns the
+        warning lines (empty when every scan is sound) so they can also be
+        written into the saved workbook. The dialog is posted to the Tk
+        thread and does not block the measurement thread.
+        """
+        notes = []
+        for label, v, j in scans:
+            ev = detect_open_circuit(v, j, cell_area)
+            if ev is not None:
+                notes.append(
+                    f"{label} scan: |I| < 1 nA from {ev.voltage:.3f} V on "
+                    f"({ev.n_points} points). The SMU stopped seeing the cell "
+                    f"- likely an open contact (probe, clip or cable).")
+        if notes:
+            msg = ("\n\n".join(notes)
+                   + "\n\nAn illuminated cell always drives far more than "
+                     "1 nA, so these points are not device physics. The data "
+                     "is saved, but the parameters of the affected scan are "
+                     "not meaningful. Check the contacts and measure again. "
+                     "The SMU_Readback sheet in the file holds the measured "
+                     "voltage and raw current of every point.")
+            self.root.after(0, lambda: messagebox.showwarning(
+                "Possible open contact", msg))
+        return notes
+
     def run_measurement(self):
         v_df = j_df = v_dr = j_dr = None   # dark J-V data (None if not measured)
         try:
+            # Put the shutter where this run starts: a dark J-V begins closed,
+            # anything else begins open.
+            if not self._shutter_set(not self.dark_jv_var.get(),
+                                     prompt_if_manual=False):
+                return
             init_instrument(
                 self.instrument,
                 self.nplc_var.get(),
@@ -1057,29 +1681,10 @@ class JVMeasurementApp:
 
             # ── Dark J-V (optional) ───────────────────────────────────────
             if self.dark_jv_var.get():
-                self.status_var.set("Dark J-V: measuring forward scan\u2026")
-                v_df, j_df = measure_scan(
-                    self.instrument,
-                    self.start_voltage_var.get(),
-                    self.end_voltage_var.get(),
-                    self.step_voltage_var.get(),
-                    self.cell_area_var.get(),
-                    stop_event,
-                )
-                if stop_event.is_set():
+                dark = self._measure_jv_pair("Dark J-V: ")
+                if dark is None:
                     return
-
-                self.status_var.set("Dark J-V: measuring reverse scan\u2026")
-                v_dr, j_dr = measure_scan(
-                    self.instrument,
-                    self.end_voltage_var.get(),
-                    self.start_voltage_var.get(),
-                    -self.step_voltage_var.get(),
-                    self.cell_area_var.get(),
-                    stop_event,
-                )
-                if stop_event.is_set():
-                    return
+                v_df, j_df, v_dr, j_dr = dark
 
                 # Return to 0 V and turn output OFF before waiting for user
                 try:
@@ -1097,15 +1702,16 @@ class JVMeasurementApp:
                     self.nplc_var.get(),
                     self.four_wire_var.get(),
                     self.instrument_idn or "",
+                    scan_order=self._scan_order_label(),
                 )
                 self._log_dark_jv(v_df, j_df, v_dr, j_dr, dark_fp)
-                self.status_var.set("Dark J-V complete \u2014 waiting for shutter\u2026")
+                self.status_var.set(
+                    "Dark J-V complete — opening shutter…")
 
-                # Show open-shutter dialog on the main thread; block here until OK
-                shutter_ready = threading.Event()
-                self.root.after(0, lambda ev=shutter_ready: self._ask_open_shutter(ev))
-                shutter_ready.wait()
-
+                # A boundary that always prompted on a manual rig, so it
+                # still does; an automatic backend just opens the shutter.
+                if not self._shutter_set(True, prompt_if_manual=True):
+                    return
                 if stop_event.is_set():
                     return
 
@@ -1129,19 +1735,9 @@ class JVMeasurementApp:
                     return
 
             # ── Illuminated J-V ───────────────────────────────────────────
-            self.status_var.set("Measuring forward scan\u2026")
-            v_f, j_f = measure_scan(
-                self.instrument,
-                self.start_voltage_var.get(),
-                self.end_voltage_var.get(),
-                self.step_voltage_var.get(),
-                self.cell_area_var.get(),
-                stop_event,
-            )
-            if stop_event.is_set():
-                return
+            rb_f, rb_r = [], []    # (v_set, v_meas, i_raw) per point
 
-            if self.prebias_enabled_var.get():
+            def prebias():
                 apply_prebias(
                     self.instrument,
                     self.prebias_voltage_var.get(),
@@ -1149,20 +1745,20 @@ class JVMeasurementApp:
                     stop_event,
                     self.status_var.set,
                 )
-                if stop_event.is_set():
-                    return
 
-            self.status_var.set("Measuring reverse scan\u2026")
-            v_r, j_r = measure_scan(
-                self.instrument,
-                self.end_voltage_var.get(),
-                self.start_voltage_var.get(),
-                -self.step_voltage_var.get(),
-                self.cell_area_var.get(),
-                stop_event,
-            )
-            if stop_event.is_set():
+            illum_pair = self._measure_jv_pair(
+                "", readback_f=rb_f, readback_r=rb_r,
+                before_rev=prebias if self.prebias_enabled_var.get() else None)
+            if illum_pair is None:
                 return
+            v_f, j_f, v_r, j_r = illum_pair
+
+            # Checked before the parameters: a lost contact usually also
+            # breaks the Voc search, and the operator must hear about the
+            # wiring rather than about a missing zero-crossing.
+            oc_notes = self._check_open_circuit(
+                (("Forward", v_f, j_f), ("Reverse", v_r, j_r)),
+                self.cell_area_var.get())
 
             illum = float(self.illumination_var.get())
 
@@ -1179,6 +1775,17 @@ class JVMeasurementApp:
                                         v_df=v_df, j_df=j_df,
                                         v_dr=v_dr, j_dr=j_dr)
             self.update_plot()
+
+            # \u2500\u2500 Auto single-diode fit (reverse scan) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+            fit_result = None
+            if self.auto_single_diode_fit_var.get():
+                self.status_var.set("Fitting single-diode model\u2026")
+                try:
+                    fit_result = fit_single_diode(v_r, j_r)
+                    self.session_data[-1]["single_diode_fit"] = fit_result
+                except Exception:
+                    pass   # fit failure must not abort the measurement
+
             save_data(
                 self.export_folder_var.get(),
                 self.sample_name_var.get(),
@@ -1194,9 +1801,20 @@ class JVMeasurementApp:
                 self.prebias_duration_var.get(),
                 self.instrument_idn or "",
                 scan_rate=float(self.scan_rate_var.get()) if self.scan_rate_var.get() != "\u2014" else None,
+                fit_result=fit_result,
+                readback_fwd=rb_f,
+                readback_rev=rb_r,
+                readback_notes=oc_notes,
+                scan_order=self._scan_order_label(),
+                detector_power=self._safe_float(self.detector_power_var),
+                detector_area=self._safe_float(self.detector_area_var),
             )
 
-            self.status_var.set("Measurement complete.")
+            if oc_notes:
+                self.status_var.set(
+                    "Measurement complete \u2014 WARNING: possible open contact.")
+            else:
+                self.status_var.set("Measurement complete.")
             play_completion_sound()
 
         except Exception as exc:
@@ -1204,6 +1822,9 @@ class JVMeasurementApp:
             self.status_var.set("Measurement failed.")
             winsound.Beep(500, 500)
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             try:
                 self.instrument.write(":OUTP OFF")
             except Exception:
@@ -1237,15 +1858,16 @@ class JVMeasurementApp:
         # Check whether any entry has dark data
         has_any_dark = any(e["v_dark_fwd"] is not None for e in self.session_data)
         if has_any_dark:
-            self.ax.set_ylim(-20, 30)
-            self.ax2.set_ylim(-20, 30)
             self.ax.axhline(0, color="#aaaaaa", linewidth=0.8,
                             linestyle="--", zorder=1)
-        else:
-            self.ax.set_ylim(0, 30)
-            self.ax2.set_ylim(0, 30)
 
-        self.ax.set_xlim(left=0)   # X axis always starts at 0 V
+        # The frame follows the data (see jv_plot_limits). ax2 is the power
+        # twinx and keeps sharing ax's scale, as it always has, so the power
+        # curve stays directly comparable to the current curve.
+        xlim, ylim = jv_plot_limits(self.session_data)
+        self.ax.set_xlim(*xlim)
+        self.ax.set_ylim(*ylim)
+        self.ax2.set_ylim(*ylim)
 
         all_lines   = []   # every line object (for mplcursors + legend map)
         jv_lines    = []   # J-V lines only (hover attached here)
@@ -1423,6 +2045,730 @@ class JVMeasurementApp:
         self.canvas.draw_idle()
 
     # ══════════════════════════════════════════════════════════════════════════
+    # LIGHT-INTENSITY J-V — panel builder
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_light_intensity_jv_panel(self, left_container, right_container):
+        """Build Light-Intensity J-V left panel and right plot area."""
+        # ── Left panel ────────────────────────────────────────────────────────
+        self.light_jv_panel = Frame(left_container, bg="#ececec")
+
+        # Title
+        Label(self.light_jv_panel,
+              text="Light-Intensity Dependent J-V",
+              font=("Arial", 10, "bold"), bg="#ececec", fg="#1565C0",
+              anchor="w").pack(fill=X, padx=8, pady=(6, 2))
+
+        # ── Settings notebook ─────────────────────────────────────────────────
+        nb = ttk.Notebook(self.light_jv_panel)
+        nb.pack(fill=X, padx=6, pady=(0, 4))
+
+        # ─── Tab 1: Scan ─────────────────────────────────────────────────────
+        tab_scan = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_scan, text="  Scan  ")
+
+        sf = LabelFrame(tab_scan, text="Sample Information", padx=6, pady=4)
+        sf.pack(fill=X, pady=(0, 6))
+        Label(sf, text="Sample Name:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.lij_sample_name_var = StringVar()
+        Entry(sf, textvariable=self.lij_sample_name_var, width=22).grid(
+            row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
+        Label(sf, text="Export Folder:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.lij_export_folder_var = StringVar()
+        lij_exp_entry = Entry(sf, textvariable=self.lij_export_folder_var, width=18)
+        lij_exp_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Button(sf, text="Browse…",
+               command=lambda: self._browse_folder_for(self.lij_export_folder_var),
+               font=("Arial", 8), pady=1
+               ).grid(row=1, column=2, padx=(2, 4), pady=3)
+
+        pf = LabelFrame(tab_scan, text="Scan Parameters", padx=6, pady=4)
+        pf.pack(fill=X, pady=(0, 6))
+        for row, (label, attr, default, unit) in enumerate([
+            ("Start Voltage:", "lij_start_v_var",  -0.1,  "V"),
+            ("End Voltage:",   "lij_end_v_var",    1.05,  "V"),
+            ("Step Voltage:",  "lij_step_v_var",   0.025, "V"),
+            ("Cell Area:",     "lij_cell_area_var", 0.07, "cm²"),
+        ]):
+            Label(pf, text=label).grid(row=row, column=0, sticky=W, padx=4, pady=3)
+            var = DoubleVar(value=default)
+            setattr(self, attr, var)
+            Entry(pf, textvariable=var, width=10).grid(row=row, column=1, sticky=W, padx=4, pady=3)
+            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+
+        # Illumination reference
+        ilf = LabelFrame(tab_scan, text="Illumination Reference", padx=6, pady=4)
+        ilf.pack(fill=X, pady=(0, 4))
+        Label(ilf, text="1 sun =").grid(row=0, column=0, sticky=W, padx=4, pady=3)
+        self.lij_ref_illum_var = DoubleVar(value=100.0)
+        Entry(ilf, textvariable=self.lij_ref_illum_var, width=10).grid(
+            row=0, column=1, sticky=W, padx=4, pady=3)
+        Label(ilf, text="mW/cm²", fg="#666666").grid(row=0, column=2, sticky=W)
+        ToolTip(ilf,
+                "Reference illumination intensity for PCE calculation.\n"
+                "Intensity values entered in the sequence are multiplied by\n"
+                "this number to get mW/cm² for each measurement.\n"
+                "Standard: 100 mW/cm² per 1 sun (AM1.5G).")
+
+        # ─── Tab 2: Instrument ───────────────────────────────────────────────
+        tab_inst = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_inst, text="  Instrument  ")
+
+        inf = LabelFrame(tab_inst, text="Keithley 2400 Settings", padx=6, pady=4)
+        inf.pack(fill=X, pady=(0, 6))
+
+        self.lij_scan_rate_mode = StringVar(value="advanced")
+        mode_frame = Frame(inf)
+        mode_frame.grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=(4, 2))
+        Radiobutton(mode_frame, text="Advanced (manual delay)",
+                    variable=self.lij_scan_rate_mode, value="advanced",
+                    command=self._lij_on_scan_mode_change).pack(side=LEFT)
+        Radiobutton(mode_frame, text="Scan rate (mV/s)",
+                    variable=self.lij_scan_rate_mode, value="scan_rate",
+                    command=self._lij_on_scan_mode_change).pack(side=LEFT, padx=(12, 0))
+
+        Label(inf, text="Delay per point:").grid(row=1, column=0, sticky=W, padx=4, pady=4)
+        self.lij_delay_ms_var = DoubleVar(value=100.0)
+        self.lij_delay_entry = Entry(inf, textvariable=self.lij_delay_ms_var, width=10)
+        self.lij_delay_entry.grid(row=1, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="ms", fg="#666666").grid(row=1, column=2, sticky=W)
+
+        Label(inf, text="NPLC:").grid(row=2, column=0, sticky=W, padx=4, pady=4)
+        self.lij_nplc_var = DoubleVar(value=1.0)
+        Entry(inf, textvariable=self.lij_nplc_var, width=10).grid(
+            row=2, column=1, sticky=W, padx=4, pady=4)
+        Label(inf, text="(0.01–25)", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        self.lij_target_sr_var = DoubleVar(value=100.0)
+        self._lij_sr_label = Label(inf, text="Target scan rate:")
+        self._lij_sr_entry = Entry(inf, textvariable=self.lij_target_sr_var,
+                                   width=10, state=DISABLED)
+        self._lij_sr_unit  = Label(inf, text="mV/s", fg="#666666")
+        self._lij_sr_label.grid(row=3, column=0, sticky=W, padx=4, pady=4)
+        self._lij_sr_entry.grid(row=3, column=1, sticky=W, padx=4, pady=4)
+        self._lij_sr_unit.grid( row=3, column=2, sticky=W)
+        self._lij_sr_label.grid_remove()
+        self._lij_sr_entry.grid_remove()
+        self._lij_sr_unit.grid_remove()
+
+        srf = LabelFrame(tab_inst, text="Calculated Scan Rate", padx=6, pady=4)
+        srf.pack(fill=X, pady=(0, 4))
+        self.lij_scan_rate_var = StringVar(value="—")
+        Label(srf, textvariable=self.lij_scan_rate_var,
+              font=("Arial", 11, "bold"), fg="#1565C0").grid(
+            row=0, column=0, sticky=W, padx=4, pady=4)
+        Label(srf, text="mV/s", fg="#666666").grid(row=0, column=1, sticky=W)
+
+        self.lij_four_wire_var = BooleanVar(value=False)
+        Checkbutton(inf, text="4-Wire (Kelvin) sensing",
+                    variable=self.lij_four_wire_var
+                    ).grid(row=4, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+
+        # Trace variables for scan rate display
+        self.lij_step_v_var.trace("w",   self._lij_params_changed)
+        self.lij_delay_ms_var.trace("w",  self._lij_params_changed)
+        self.lij_nplc_var.trace("w",      self._lij_params_changed)
+        self.lij_target_sr_var.trace("w", self._lij_recalc_delay)
+        self._lij_update_scan_rate()
+
+        # ─── Tab 3: Conditioning ─────────────────────────────────────────────
+        tab_cond = Frame(nb, padx=6, pady=4, bg="#ececec")
+        nb.add(tab_cond, text="  Conditioning  ")
+
+        pbf = LabelFrame(tab_cond, text="Pre-bias Conditioning", padx=6, pady=4)
+        pbf.pack(fill=X, pady=(0, 6))
+        self.lij_prebias_enabled_var = BooleanVar(value=False)
+        Checkbutton(pbf, text="Enable pre-bias before reverse scan",
+                    variable=self.lij_prebias_enabled_var,
+                    command=self._lij_toggle_prebias).grid(
+            row=0, column=0, columnspan=3, sticky=W, padx=4, pady=2)
+        Label(pbf, text="Voltage:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.lij_prebias_v_var = DoubleVar(value=1.2)
+        self.lij_prebias_v_entry = Entry(pbf, textvariable=self.lij_prebias_v_var, width=10,
+                                         state=DISABLED)
+        self.lij_prebias_v_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="V", fg="#666666").grid(row=1, column=2, sticky=W)
+        Label(pbf, text="Duration:").grid(row=2, column=0, sticky=W, padx=4, pady=3)
+        self.lij_prebias_t_var = DoubleVar(value=2.0)
+        self.lij_prebias_t_entry = Entry(pbf, textvariable=self.lij_prebias_t_var, width=10,
+                                         state=DISABLED)
+        self.lij_prebias_t_entry.grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        Label(pbf, text="s", fg="#666666").grid(row=2, column=2, sticky=W)
+
+        lsf = LabelFrame(tab_cond, text="Light Soaking", padx=6, pady=4)
+        lsf.pack(fill=X, pady=(0, 6))
+        self.lij_ls_enabled_var = BooleanVar(value=False)
+        Checkbutton(lsf, text="Enable light soaking before each scan",
+                    variable=self.lij_ls_enabled_var,
+                    command=self._lij_toggle_ls).grid(
+            row=0, column=0, columnspan=3, sticky=W, padx=4, pady=2)
+        Label(lsf, text="Duration:").grid(row=1, column=0, sticky=W, padx=4, pady=3)
+        self.lij_ls_dur_var = DoubleVar(value=60.0)
+        self.lij_ls_entry = Entry(lsf, textvariable=self.lij_ls_dur_var, width=10,
+                                  state=DISABLED)
+        self.lij_ls_entry.grid(row=1, column=1, sticky=W, padx=4, pady=3)
+        Label(lsf, text="s", fg="#666666").grid(row=1, column=2, sticky=W)
+
+        fitf = LabelFrame(tab_cond, text="Analysis", padx=6, pady=4)
+        fitf.pack(fill=X, pady=(0, 4))
+        self.lij_auto_fit_var = BooleanVar(value=True)
+        Checkbutton(fitf, text="Auto single-diode fit",
+                    variable=self.lij_auto_fit_var
+                    ).grid(row=0, column=0, columnspan=3, sticky=W, padx=4, pady=4)
+
+        # ── Intensity Sequence frame ──────────────────────────────────────────
+        seq_frame = LabelFrame(self.light_jv_panel, text="Intensity Sequence",
+                               padx=6, pady=4)
+        seq_frame.pack(fill=X, padx=6, pady=(0, 4))
+
+        # Add intensity row
+        add_row = Frame(seq_frame)
+        add_row.pack(fill=X, pady=(0, 4))
+        Label(add_row, text="Add intensity (suns):").pack(side=LEFT, padx=(0, 4))
+        self.lij_add_intensity_var = StringVar()
+        add_entry = Entry(add_row, textvariable=self.lij_add_intensity_var, width=10)
+        add_entry.pack(side=LEFT)
+        add_entry.bind("<Return>", lambda e: self._lij_add_intensity())
+        Button(add_row, text="Add", command=self._lij_add_intensity,
+               font=("Arial", 8), pady=1).pack(side=LEFT, padx=(4, 0))
+        self.lij_add_warn_var = StringVar()
+        Label(add_row, textvariable=self.lij_add_warn_var,
+              fg="#E65100", font=("Arial", 8)).pack(side=LEFT, padx=(6, 0))
+
+        # Listbox
+        lb_frame = Frame(seq_frame)
+        lb_frame.pack(fill=X, pady=(0, 4))
+        lb_vsb = ttk.Scrollbar(lb_frame, orient="vertical")
+        self.lij_listbox = Listbox(lb_frame, height=6, font=("Consolas", 9),
+                                   yscrollcommand=lb_vsb.set,
+                                   exportselection=False)
+        lb_vsb.config(command=self.lij_listbox.yview)
+        self.lij_listbox.pack(side=LEFT, fill=X, expand=True)
+        lb_vsb.pack(side=LEFT, fill=Y)
+
+        # Listbox button row
+        btn_row = Frame(seq_frame)
+        btn_row.pack(fill=X, pady=(0, 6))
+        for txt, cmd in [
+            ("Remove",  self._lij_remove_selected),
+            ("Up",      self._lij_move_up),
+            ("Down",    self._lij_move_down),
+            ("Clear",   self._lij_clear_all),
+        ]:
+            Button(btn_row, text=txt, command=cmd,
+                   font=("Arial", 8), pady=1, width=8).pack(side=LEFT, padx=(0, 3))
+
+        # Stabilization time
+        stab_row = Frame(seq_frame)
+        stab_row.pack(fill=X)
+        Label(stab_row, text="Stabilization time (s):").pack(side=LEFT, padx=(0, 4))
+        self.lij_stab_time_var = DoubleVar(value=180.0)
+        Entry(stab_row, textvariable=self.lij_stab_time_var, width=8).pack(side=LEFT)
+
+        # ── Control buttons ───────────────────────────────────────────────────
+        btn_frame = Frame(self.light_jv_panel, bg="#ececec")
+        btn_frame.pack(fill=X, padx=8, pady=6)
+
+        self.light_jv_start_btn = Button(
+            btn_frame, text="Start Measurements",
+            command=self._lij_start_sequence,
+            bg="#1565C0", fg="white",
+            font=("Arial", 9, "bold"),
+            pady=4, state=DISABLED)
+        self.light_jv_start_btn.pack(side=LEFT, padx=(0, 6))
+
+        self.light_jv_stop_btn = Button(
+            btn_frame, text="Stop",
+            command=self._lij_stop_sequence,
+            bg="#C62828", fg="white",
+            font=("Arial", 9, "bold"),
+            width=8, pady=4)
+        self.light_jv_stop_btn.pack(side=LEFT)
+        self.light_jv_stop_btn.pack_forget()
+
+        # ── Status bar ────────────────────────────────────────────────────────
+        lij_status_bar = Frame(self.light_jv_panel, bg="#37474F", height=24)
+        lij_status_bar.pack(fill=X, side="bottom")
+        lij_status_bar.pack_propagate(False)
+        self.lij_status_var = StringVar(value="Ready — add intensities and press Start Measurements.")
+        Label(lij_status_bar, textvariable=self.lij_status_var,
+              bg="#37474F", fg="#CFD8DC",
+              font=("Arial", 8), anchor=W,
+              ).pack(side=LEFT, padx=10, fill=X, expand=True)
+
+        # ── Right plot frame ──────────────────────────────────────────────────
+        self.light_jv_plot_frame = Frame(right_container, bg="#ffffff")
+
+        self.lij_fig, (self.lij_ax_jv, self.lij_ax) = plt.subplots(
+            2, 1, figsize=(8, 5.5),
+            gridspec_kw={"height_ratios": [3, 2], "hspace": 0.55},
+        )
+        self.lij_ax_jv.set_xlabel("Voltage (V)", fontsize=10)
+        self.lij_ax_jv.set_ylabel("Current Density (mA/cm²)", fontsize=10)
+        self.lij_ax_jv.set_title("J-V Curves — by intensity (rev scan)",
+                                  fontsize=11, fontweight="bold")
+        self.lij_ax_jv.text(0.5, 0.5, "No data yet\nAdd intensities and start measurements",
+                             ha="center", va="center", fontsize=10, color="gray",
+                             transform=self.lij_ax_jv.transAxes)
+        self.lij_ax_jv.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--")
+        self.lij_ax_jv.grid(True, alpha=0.3)
+        self.lij_ax.set_xlabel("ln(L / L_max)", fontsize=10)
+        self.lij_ax.set_ylabel("Voc (V)", fontsize=10)
+        self.lij_ax.set_title("Voc vs ln(L/L_max) — Light Ideality Factor",
+                               fontsize=11, fontweight="bold")
+        self.lij_ax.text(0.5, 0.5, "Waiting for ≥ 2 measurements…",
+                         ha="center", va="center", fontsize=10, color="gray",
+                         transform=self.lij_ax.transAxes)
+        self.lij_ax.grid(True, alpha=0.3)
+        self.lij_canvas = FigureCanvasTkAgg(self.lij_fig, self.light_jv_plot_frame)
+        self.lij_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+        self.lij_canvas.draw_idle()
+
+        # Internal state
+        self._lij_running = False
+        self._lij_results = []
+
+    # ── Light-Intensity JV scan rate helpers ──────────────────────────────────
+
+    def _lij_update_scan_rate(self, *_args):
+        try:
+            step_mv = self.lij_step_v_var.get() * 1000.0
+            delay   = self.lij_delay_ms_var.get()
+            nplc_ms = self.lij_nplc_var.get() * (1000.0 / 60.0)
+            tpp     = (delay + nplc_ms + 50.0) / 1000.0
+            self.lij_scan_rate_var.set(
+                f"{step_mv / tpp:.1f}" if tpp > 0 and step_mv > 0 else "—"
+            )
+        except Exception:
+            self.lij_scan_rate_var.set("—")
+
+    def _lij_params_changed(self, *_args):
+        if self.lij_scan_rate_mode.get() == "scan_rate":
+            self._lij_recalc_delay()
+        else:
+            self._lij_update_scan_rate()
+
+    def _lij_on_scan_mode_change(self):
+        mode = self.lij_scan_rate_mode.get()
+        if mode == "advanced":
+            self.lij_delay_entry.config(state=NORMAL)
+            self._lij_sr_entry.config(state=DISABLED)
+            self._lij_sr_label.grid_remove()
+            self._lij_sr_entry.grid_remove()
+            self._lij_sr_unit.grid_remove()
+            self._lij_update_scan_rate()
+        else:
+            self.lij_delay_entry.config(state="readonly")
+            self._lij_sr_entry.config(state=NORMAL)
+            self._lij_sr_label.grid()
+            self._lij_sr_entry.grid()
+            self._lij_sr_unit.grid()
+            self._lij_recalc_delay()
+
+    def _lij_recalc_delay(self, *_args):
+        if self.lij_scan_rate_mode.get() != "scan_rate":
+            return
+        try:
+            step_mv = self.lij_step_v_var.get() * 1000.0
+            rate    = self.lij_target_sr_var.get()
+            nplc_ms = self.lij_nplc_var.get() * (1000.0 / 60.0)
+            if step_mv <= 0 or rate <= 0:
+                return
+            tpp_ms  = (step_mv / rate) * 1000.0
+            delay   = max(0.0, tpp_ms - nplc_ms - 50.0)
+            self.lij_delay_ms_var.set(round(delay, 1))
+            actual  = step_mv / ((delay + nplc_ms + 50.0) / 1000.0)
+            warning = " ⚠" if delay == 0.0 else ""
+            self.lij_scan_rate_var.set(f"{actual:.1f}{warning}")
+        except Exception:
+            pass
+
+    def _lij_toggle_prebias(self):
+        state = NORMAL if self.lij_prebias_enabled_var.get() else DISABLED
+        self.lij_prebias_v_entry.config(state=state)
+        self.lij_prebias_t_entry.config(state=state)
+
+    def _lij_toggle_ls(self):
+        state = NORMAL if self.lij_ls_enabled_var.get() else DISABLED
+        self.lij_ls_entry.config(state=state)
+
+    # ── Intensity sequence list management ────────────────────────────────────
+
+    def _lij_add_intensity(self):
+        raw = self.lij_add_intensity_var.get().strip()
+        self.lij_add_warn_var.set("")
+        try:
+            val = float(raw)
+        except ValueError:
+            self.lij_add_warn_var.set("Not a number")
+            return
+        if val <= 0 or val > 10.0:
+            self.lij_add_warn_var.set("Must be 0.001–10.0")
+            return
+        # Warn on duplicate but still add
+        existing = [self.lij_listbox.get(i) for i in range(self.lij_listbox.size())]
+        formatted = f"[ ] {val:.4g}"
+        if any(f"[ ] {val:.4g}" in e or f"[✔] {val:.4g}" in e for e in existing):
+            self.lij_add_warn_var.set("Duplicate value added")
+        self.lij_listbox.insert(END, formatted)
+        self.lij_add_intensity_var.set("")
+
+    def _lij_remove_selected(self):
+        sel = self.lij_listbox.curselection()
+        for idx in reversed(sel):
+            self.lij_listbox.delete(idx)
+
+    def _lij_move_up(self):
+        sel = self.lij_listbox.curselection()
+        if not sel or sel[0] == 0:
+            return
+        idx = sel[0]
+        text = self.lij_listbox.get(idx)
+        fg   = self.lij_listbox.itemcget(idx, "foreground")
+        self.lij_listbox.delete(idx)
+        self.lij_listbox.insert(idx - 1, text)
+        if fg:
+            self.lij_listbox.itemconfig(idx - 1, foreground=fg)
+        self.lij_listbox.selection_set(idx - 1)
+
+    def _lij_move_down(self):
+        sel = self.lij_listbox.curselection()
+        if not sel or sel[0] >= self.lij_listbox.size() - 1:
+            return
+        idx = sel[0]
+        text = self.lij_listbox.get(idx)
+        fg   = self.lij_listbox.itemcget(idx, "foreground")
+        self.lij_listbox.delete(idx)
+        self.lij_listbox.insert(idx + 1, text)
+        if fg:
+            self.lij_listbox.itemconfig(idx + 1, foreground=fg)
+        self.lij_listbox.selection_set(idx + 1)
+
+    def _lij_clear_all(self):
+        self.lij_listbox.delete(0, END)
+
+    def _lij_get_intensities(self):
+        """Return list of float intensities from the listbox."""
+        result = []
+        for i in range(self.lij_listbox.size()):
+            text = self.lij_listbox.get(i)
+            # text is like "[ ] 1.00" or "[✔] 0.50" — value is the last token
+            try:
+                result.append(float(text.split()[-1]))
+            except (ValueError, IndexError):
+                pass
+        return result
+
+    # ── Start/Stop logic ─────────────────────────────────────────────────────
+
+    def _lij_start_sequence(self):
+        if not self.lij_sample_name_var.get():
+            messagebox.showerror("Input Error", "Sample name is required.")
+            return
+        if not self.lij_export_folder_var.get():
+            messagebox.showerror("Input Error", "Export folder is required.")
+            return
+        if self.instrument is None:
+            messagebox.showerror("Input Error", "No instrument connected.")
+            return
+        intensities = self._lij_get_intensities()
+        if not intensities:
+            messagebox.showerror("Input Error",
+                                 "Add at least one intensity to the sequence.")
+            return
+        try:
+            stab = self.lij_stab_time_var.get()
+            if stab <= 0:
+                raise ValueError("Stabilization time must be positive.")
+            ref_illum = self.lij_ref_illum_var.get()
+            if ref_illum <= 0:
+                raise ValueError("Reference illumination must be positive.")
+        except Exception as exc:
+            messagebox.showerror("Input Error", str(exc))
+            return
+
+        self._measurement_running = True
+        self._lij_running         = True
+        self._lij_results         = []
+        self.light_jv_start_btn.config(state=DISABLED)
+        self.light_jv_stop_btn.pack(side=LEFT)
+        # Reset listbox status markers to pending
+        for i in range(self.lij_listbox.size()):
+            text = self.lij_listbox.get(i)
+            val_str = text.split()[-1]
+            self.lij_listbox.delete(i)
+            self.lij_listbox.insert(i, f"[ ] {val_str}")
+            self.lij_listbox.itemconfig(i, foreground="")
+        stop_event.clear()
+        threading.Thread(target=self._lij_run_thread,
+                         args=(intensities,), daemon=True).start()
+
+    def _lij_stop_sequence(self):
+        stop_event.set()
+        self.lij_status_var.set("Stopping…")
+
+    def _lij_run_thread(self, intensities):
+        from pathlib import Path
+        sp = {
+            "start_v":  self.lij_start_v_var.get(),
+            "end_v":    self.lij_end_v_var.get(),
+            "step_v":   self.lij_step_v_var.get(),
+            "delay_ms": self.lij_delay_ms_var.get(),
+            "nplc":     self.lij_nplc_var.get(),
+            "cell_area":self.lij_cell_area_var.get(),
+            "four_wire":self.lij_four_wire_var.get(),
+            "reference_illumination_mw_cm2": self.lij_ref_illum_var.get(),
+        }
+        prebias = {
+            "enabled":  self.lij_prebias_enabled_var.get(),
+            "voltage":  self.lij_prebias_v_var.get(),
+            "duration": self.lij_prebias_t_var.get(),
+        }
+        ls = {
+            "enabled":  self.lij_ls_enabled_var.get(),
+            "duration": self.lij_ls_dur_var.get(),
+        }
+        smu = Keithley2400SourceMeter(self.instrument)
+
+        measurement = LightIntensityJVMeasurement(
+            sourcemeter           = smu,
+            intensities           = intensities,
+            scan_params           = sp,
+            stabilization_time_s  = self.lij_stab_time_var.get(),
+            pre_bias_settings     = prebias,
+            light_soaking_settings= ls,
+            sample_name           = self.lij_sample_name_var.get(),
+            output_folder         = Path(self.lij_export_folder_var.get()),
+            auto_single_diode_fit = self.lij_auto_fit_var.get(),
+            on_status             = self.lij_status_var.set,
+            on_prompt_user        = self._lij_prompt_user,
+            on_progress           = lambda cur, tot, status:
+                                    self.lij_status_var.set(
+                                        f"Step {cur}/{tot} — {status}"),
+            on_measurement_done   = self._lij_on_step_done,
+            on_complete           = self._lij_on_complete,
+            stop_event            = stop_event,
+            instrument_idn        = self.instrument_idn or "",
+        )
+        try:
+            if not self._shutter_set(True, prompt_if_manual=False):
+                return
+            measurement.run()
+        except Exception as exc:
+            messagebox.showerror("Measurement Error", str(exc))
+            self.lij_status_var.set("Sequence failed.")
+        finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
+            self._measurement_running = False
+            self._lij_running         = False
+            self.root.after(0, self._lij_restore_controls)
+            stop_event.clear()
+
+    def _lij_restore_controls(self):
+        if self.instrument is not None:
+            self.light_jv_start_btn.config(state=NORMAL)
+        self.light_jv_stop_btn.pack_forget()
+
+    def _lij_on_step_done(self, index, result):
+        """Called from measurement thread — schedules GUI update on main thread."""
+        self.root.after(0, lambda: self._lij_update_listbox(index, result))
+        self.root.after(0, lambda: self._lij_update_plot())
+
+    def _lij_update_listbox(self, index, result):
+        if index >= self.lij_listbox.size():
+            return
+        intensity = result.intensity
+        if result.status == "completed":
+            marker = "✔"
+            color  = "green"
+        elif result.status == "failed":
+            marker = "✗"
+            color  = "red"
+        else:
+            marker = "✗"
+            color  = "#E65100"
+        text = f"[{marker}] {intensity:.4g}"
+        self.lij_listbox.delete(index)
+        self.lij_listbox.insert(index, text)
+        self.lij_listbox.itemconfig(index, foreground=color)
+        self._lij_results = list(self._lij_results)
+        if len(self._lij_results) <= index:
+            self._lij_results.extend([None] * (index + 1 - len(self._lij_results)))
+        self._lij_results[index] = result
+
+    def _lij_update_plot(self):
+        """Redraw JV curves (top) and Voc vs ln(L) (bottom) with completed results."""
+        import math as _math
+        import numpy as np
+        from scipy.stats import linregress
+
+        completed = [r for r in self._lij_results
+                     if r is not None and r.status == "completed"]
+
+        # ── Top: J-V curves ───────────────────────────────────────────────────
+        self.lij_ax_jv.clear()
+        self.lij_ax_jv.set_xlabel("Voltage (V)", fontsize=10)
+        self.lij_ax_jv.set_ylabel("Current Density (mA/cm²)", fontsize=10)
+        self.lij_ax_jv.set_title("J-V Curves — by intensity (rev scan)",
+                                  fontsize=11, fontweight="bold")
+        self.lij_ax_jv.axhline(0, color="#aaaaaa", linewidth=0.8, linestyle="--", zorder=1)
+        self.lij_ax_jv.grid(True, alpha=0.3)
+
+        if completed:
+            for i, r in enumerate(completed):
+                color = PLOT_COLORS[i % len(PLOT_COLORS)]
+                v = r.v_rev if r.v_rev is not None else r.v_fwd
+                j = r.j_rev if r.j_rev is not None else r.j_fwd
+                if v is not None and j is not None and len(v) > 0:
+                    self.lij_ax_jv.plot(v, j, color=color, linewidth=1.5,
+                                        label=f"{r.intensity:.4g} sun", zorder=3)
+            self.lij_ax_jv.legend(fontsize=8, loc="upper right")
+        else:
+            self.lij_ax_jv.text(0.5, 0.5, "No data yet",
+                                 ha="center", va="center", fontsize=10,
+                                 color="gray", transform=self.lij_ax_jv.transAxes)
+
+        # ── Bottom: Voc vs ln(L/Lmax) ─────────────────────────────────────────
+        self.lij_ax.clear()
+        self.lij_ax.set_xlabel("ln(L / L_max)", fontsize=10)
+        self.lij_ax.set_ylabel("Voc (V)", fontsize=10)
+        self.lij_ax.set_title("Voc vs ln(L/L_max) — Light Ideality Factor",
+                               fontsize=11, fontweight="bold")
+        self.lij_ax.grid(True, alpha=0.3)
+
+        if len(completed) >= 2:
+            intensities = [r.intensity for r in completed]
+            l_max  = max(intensities)
+            ln_l   = np.array([_math.log(i / l_max) if i > 0 else float("nan")
+                                for i in intensities])
+            voc_f  = np.array([r.Voc_fwd for r in completed])
+            voc_r  = np.array([r.Voc_rev for r in completed])
+            valid  = np.isfinite(ln_l)
+            self.lij_ax.plot(ln_l[valid], voc_f[valid], "o", color="#1565C0",
+                             markersize=5, label="Fwd Voc", zorder=3)
+            self.lij_ax.plot(ln_l[valid], voc_r[valid], "s", color="#B71C1C",
+                             markersize=5, label="Rev Voc", zorder=3)
+            if valid.sum() >= 3:
+                vt = 1.380649e-23 * 298.15 / 1.602176634e-19
+                x_line = np.linspace(ln_l[valid].min(), ln_l[valid].max(), 50)
+                res_f = linregress(ln_l[valid], voc_f[valid])
+                res_r = linregress(ln_l[valid], voc_r[valid])
+                n_f = res_f.slope / vt
+                n_r = res_r.slope / vt
+                self.lij_ax.plot(x_line, res_f.intercept + res_f.slope * x_line,
+                                 "--", color="#1565C0", alpha=0.75,
+                                 label=f"Fwd fit  n_idL = {n_f:.2f}")
+                self.lij_ax.plot(x_line, res_r.intercept + res_r.slope * x_line,
+                                 "--", color="#B71C1C", alpha=0.75,
+                                 label=f"Rev fit  n_idL = {n_r:.2f}")
+            self.lij_ax.legend(fontsize=8, loc="upper left")
+        else:
+            self.lij_ax.text(0.5, 0.5, "Waiting for ≥ 2 measurements…",
+                              ha="center", va="center", fontsize=10,
+                              color="gray", transform=self.lij_ax.transAxes)
+
+        self.lij_canvas.draw_idle()
+
+    def _lij_on_complete(self, consolidated_path):
+        self.root.after(0, lambda: self._lij_sequence_complete(consolidated_path))
+
+    def _lij_sequence_complete(self, path):
+        self.lij_status_var.set(
+            f"Sequence complete — saved: {path.name}")
+        from app.utils.sound import play_completion_sound
+        play_completion_sound()
+
+    # ── Illumination prompt modal ─────────────────────────────────────────────
+
+    def _lij_prompt_user(self, message: str, intensity: float) -> bool:
+        """Block the measurement thread until the user confirms or cancels.
+
+        Opens a modal Toplevel on the main thread via root.after() + Event.wait().
+        Returns True if the user clicked OK (checkbox ticked), False otherwise.
+        """
+        result = [False]
+        ready  = threading.Event()
+
+        def _show():
+            from tkinter import Toplevel, BooleanVar, Checkbutton, WORD
+            dlg = Toplevel(self.root)
+            dlg.title("Set Illumination Intensity")
+            dlg.resizable(False, False)
+            dlg.grab_set()
+
+            # Prevent window-close button and Esc from bypassing
+            dlg.protocol("WM_DELETE_WINDOW", lambda: None)
+            dlg.bind("<Escape>", lambda e: None)
+
+            # Message
+            msg_frame = Frame(dlg, padx=16, pady=12)
+            msg_frame.pack(fill=X)
+            from tkinter import Text as _Text
+            msg_widget = _Text(msg_frame, wrap=WORD, relief="flat",
+                               bg=dlg.cget("bg"), font=("Arial", 10),
+                               height=5, width=50)
+            msg_widget.insert("1.0", message)
+            msg_widget.config(state=DISABLED)
+            msg_widget.pack()
+
+            # Checkbox
+            ck_var = BooleanVar(value=False)
+            ck_frame = Frame(dlg, padx=16, pady=4)
+            ck_frame.pack(fill=X)
+            ck = Checkbutton(
+                ck_frame,
+                text=f"I confirm the simulator is set to {intensity:.4g} sun",
+                variable=ck_var,
+                font=("Arial", 10),
+            )
+            ck.pack(anchor=W)
+
+            # Buttons
+            btn_frame = Frame(dlg, padx=16, pady=12)
+            btn_frame.pack(fill=X)
+
+            ok_btn = Button(btn_frame, text="OK", width=10,
+                            bg="#1565C0", fg="white",
+                            font=("Arial", 9, "bold"),
+                            state=DISABLED,
+                            command=lambda: _confirm(True))
+            ok_btn.pack(side=RIGHT, padx=(6, 0))
+            Button(btn_frame, text="Cancel", width=10,
+                   font=("Arial", 9),
+                   command=lambda: _confirm(False)).pack(side=RIGHT)
+
+            def _on_ck_change(*_):
+                ok_btn.config(state=NORMAL if ck_var.get() else DISABLED)
+            ck_var.trace("w", _on_ck_change)
+
+            def _confirm(ok: bool):
+                result[0] = ok
+                dlg.grab_release()
+                dlg.destroy()
+                ready.set()
+
+            # Centre over main window
+            self.root.update_idletasks()
+            x = self.root.winfo_x() + (self.root.winfo_width()  - 450) // 2
+            y = self.root.winfo_y() + (self.root.winfo_height() - 260) // 2
+            dlg.geometry(f"450x260+{x}+{y}")
+
+        self.root.after(0, _show)
+        ready.wait()
+        if result[0]:
+            # In simulation, "setting the lamp" scales the cell's photocurrent so
+            # the intensity series actually varies (1.0 sun → factor 1.0).
+            self._sim_set_intensity(intensity)
+        return result[0]
+
+    def _sim_set_intensity(self, suns: float) -> None:
+        """Scale the simulated cell's photocurrent to *suns*; no-op for hardware."""
+        if self._simulated and hasattr(self.instrument, "cell"):
+            self.instrument.cell.set_illumination_factor(max(float(suns), 1e-6))
+
+    # ══════════════════════════════════════════════════════════════════════════
     # MPP TRACKING — panel builder
     # ══════════════════════════════════════════════════════════════════════════
 
@@ -1462,23 +2808,15 @@ class JVMeasurementApp:
                ).grid(row=1, column=2, padx=(2, 4), pady=3)
 
         # J-V Scan Settings
-        pf = LabelFrame(tab_scan, text="J-V Scan Settings", padx=6, pady=4)
+        pf, _ = build_mpp_settings_frame(tab_scan, "mpp", [
+            ("Start Voltage:", "start_v",  -0.1,  "V"),
+            ("End Voltage:",   "end_v",     1.05, "V"),
+            ("Step Voltage:",  "step_v",    0.025, "V"),
+            ("Cell Area:",     "cell_area", 0.07, "cm\u00b2"),
+            ("Delay/point:",   "delay",     200.0, "ms"),
+            ("NPLC:",          "nplc",      1.0,  "(0.01\u201325)"),
+        ], self, title="J-V Scan Settings")
         pf.pack(fill=X, pady=(0, 6))
-
-        for row, (lbl, attr, default, unit) in enumerate([
-            ("Start Voltage:", "mpp_start_v_var",  -0.1,  "V"),
-            ("End Voltage:",   "mpp_end_v_var",     1.05, "V"),
-            ("Step Voltage:",  "mpp_step_v_var",    0.025, "V"),
-            ("Cell Area:",     "mpp_cell_area_var", 0.07, "cm\u00b2"),
-            ("Delay/point:",   "mpp_delay_var",     200.0, "ms"),
-            ("NPLC:",          "mpp_nplc_var",      1.0,  "(0.01\u201325)"),
-        ]):
-            Label(pf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            Entry(pf, textvariable=var, width=10).grid(
-                row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
 
         srf = LabelFrame(tab_scan, text="Calculated Scan Rate", padx=6, pady=4)
         srf.pack(fill=X, pady=(0, 6))
@@ -1549,33 +2887,24 @@ class JVMeasurementApp:
         Label(pbf, text="s", fg="#666666").grid(row=2, column=2, sticky=W)
 
         # MPP Tracking Settings
-        mf = LabelFrame(tab_mpp, text="MPP Tracking Settings", padx=6, pady=4)
-        mf.pack(fill=X, pady=(0, 4))
-
-        for row, (lbl, attr, default, unit, tip) in enumerate([
-            ("Total duration:", "mpp_total_min_var",      60.0,  "min",
+        mf, _ = build_mpp_settings_frame(tab_mpp, "mpp", [
+            ("Total duration:", "total_min",      60.0,  "min",
              "Total duration of the MPP tracking experiment in minutes.\n"
              "Minimum recommended: 5 min for stabilized PCE.\n"
              "For stability studies: 60\u20131000 min."),
-            ("SPO duration:",   "mpp_spo_duration_var",  120.0,  "s",
+            ("SPO duration:",   "spo_duration",  120.0,  "s",
              "Time spent at Vmpp between J-V scans (Stabilized Power Output phase).\n"
              "Literature recommendation: 60\u2013300 s.\n"
              "Longer SPO gives more stable readings but fewer J-V cycles."),
-            ("SPO interval:",   "mpp_spo_interval_var",  500.0,  "ms",
+            ("SPO interval:",   "spo_interval",  500.0,  "ms",
              "How often current is read during the SPO phase.\n"
              "500 ms is a good balance of time resolution and noise."),
-            ("Stab. threshold:", "mpp_stab_threshold_var", 0.1, "%/min",
+            ("Stab. threshold:", "stab_threshold", 0.1, "%/min",
              "Current change rate below which the device is considered stabilized.\n"
              "Criterion: |\u0394J/\u0394t| < threshold over a 60 s window.\n"
              "Literature standard: 0.05\u20130.1 %/min (NREL protocol)."),
-        ]):
-            Label(mf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            e = Entry(mf, textvariable=var, width=10)
-            e.grid(row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(mf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
-            ToolTip(e, tip)
+        ], self, title="MPP Tracking Settings")
+        mf.pack(fill=X, pady=(0, 4))
 
         # ── Control Buttons ───────────────────────────────────────────────────
         btn_frame = Frame(self.mpp_panel, bg="#ececec")
@@ -2400,8 +3729,6 @@ class JVMeasurementApp:
 
     def _build_pure_mpp_panel(self, left_container, right_container):
         """Build Pure MPP Tracking (P&O) left panel and right plot area."""
-        from matplotlib.gridspec import GridSpec
-
         # ── Left panel ────────────────────────────────────────────────────────
         self.pmpp_panel = Frame(left_container, bg="#ececec")
 
@@ -2467,54 +3794,39 @@ class JVMeasurementApp:
                 "real Vmpp. The P&O algorithm then starts from that voltage.\n"
                 "Use the same voltage range as your regular J-V measurements.")
 
-        for row, (lbl, attr, default, unit) in enumerate([
-            ("Start Voltage:", "pmpp_scan_start_v_var", -0.1,  "V"),
-            ("End Voltage:",   "pmpp_scan_end_v_var",    1.05, "V"),
-            ("Step Voltage:",  "pmpp_scan_step_v_var",   0.025, "V"),
-        ]):
-            Label(jvsf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            Entry(jvsf, textvariable=var, width=10).grid(
-                row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(jvsf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
+        build_param_grid(jvsf, "pmpp", [
+            ("Start Voltage:", "scan_start_v", -0.1,  "V"),
+            ("End Voltage:",   "scan_end_v",    1.05, "V"),
+            ("Step Voltage:",  "scan_step_v",   0.025, "V"),
+        ], self)
 
         # ─── Tab 2: P&O Settings ──────────────────────────────────────────────
         tab_po = Frame(nb, padx=6, pady=4, bg="#ececec")
         nb.add(tab_po, text="  P&O Settings  ")
 
-        pf = LabelFrame(tab_po, text="Tracking Parameters", padx=6, pady=4)
-        pf.pack(fill=X, pady=(0, 6))
-
-        for row, (lbl, attr, default, unit, tip) in enumerate([
-            ("Total duration:", "pmpp_total_min_var",   60.0,  "min",
+        pf, _ = build_mpp_settings_frame(tab_po, "pmpp", [
+            ("Total duration:", "total_min",   60.0,  "min",
              "Total duration of the Pure MPP tracking experiment.\n"
              "Recommended: 60\u2013600 min for stability studies."),
-            ("Perturb step:",   "pmpp_step_mv_var",     10.0,  "mV",
+            ("Perturb step:",   "step_mv",     10.0,  "mV",
              "Voltage perturbation step for the P&O algorithm.\n"
              "Smaller step = more accurate tracking, slower convergence.\n"
              "Larger step = faster convergence, more oscillation around MPP.\n"
              "Recommended: 5\u201320 mV."),
-            ("Interval:",       "pmpp_interval_ms_var", 500.0, "ms",
+            ("Interval:",       "interval_ms", 500.0, "ms",
              "Time between consecutive P&O measurements.\n"
              "500 ms gives good time resolution without excessive noise."),
-            ("V min:",          "pmpp_v_min_var",        0.0,  "V",
+            ("V min:",          "v_min",        0.0,  "V",
              "Minimum allowed tracking voltage (safety clamp)."),
-            ("V max:",          "pmpp_v_max_var",        1.20, "V",
+            ("V max:",          "v_max",        1.20, "V",
              "Maximum allowed tracking voltage (safety clamp)."),
-            ("NPLC:",           "pmpp_nplc_var",         1.0,  "(0.01\u201325)",
+            ("NPLC:",           "nplc",         1.0,  "(0.01\u201325)",
              "Number of power line cycles for each current reading.\n"
              "Higher = less noise, slower measurement."),
-            ("Delay/point:",    "pmpp_delay_ms_var",    20.0,  "ms",
+            ("Delay/point:",    "delay_ms",    20.0,  "ms",
              "Source delay after voltage change before reading current."),
-        ]):
-            Label(pf, text=lbl).grid(row=row, column=0, sticky=W, padx=4, pady=3)
-            var = DoubleVar(value=default)
-            setattr(self, attr, var)
-            e = Entry(pf, textvariable=var, width=10)
-            e.grid(row=row, column=1, sticky=W, padx=4, pady=3)
-            Label(pf, text=unit, fg="#666666").grid(row=row, column=2, sticky=W)
-            ToolTip(e, tip)
+        ], self, title="Tracking Parameters")
+        pf.pack(fill=X, pady=(0, 6))
 
         # ── Control Buttons ───────────────────────────────────────────────────
         btn_frame = Frame(self.pmpp_panel, bg="#ececec")
@@ -2550,37 +3862,17 @@ class JVMeasurementApp:
         # ── Right plot area ───────────────────────────────────────────────────
         self.pmpp_plot_frame = Frame(right_container, bg="#ffffff")
 
-        self.pmpp_fig = plt.figure(figsize=(8, 9), constrained_layout=True)
-        gs = GridSpec(3, 2, figure=self.pmpp_fig, height_ratios=[4, 3, 3])
-        self.pmpp_ax_pce = self.pmpp_fig.add_subplot(gs[0, :])   # full width
-        self.pmpp_ax_j   = self.pmpp_fig.add_subplot(gs[1, :])   # full width
-        self.pmpp_ax_v   = self.pmpp_fig.add_subplot(gs[2, 0])   # bottom-left
-        self.pmpp_ax_jv  = self.pmpp_fig.add_subplot(gs[2, 1])   # bottom-right
+        # Built via the shared plot factory so the L-1 continuous panel (later
+        # sessions) and this Pure-MPP panel stay visually identical.
+        from app.gui.mpp_plot_factory import build_mpp_continuous_panel
 
-        for ax, title, xl, yl in [
-            (self.pmpp_ax_pce,
-             "PCE(t) \u2014 Pure MPP Tracking (P&O)",
-             "Time (min)", "PCE (%)"),
-            (self.pmpp_ax_j,
-             "Current Density at Vmpp",
-             "Time (min)", "J (mA/cm\u00b2)"),
-            (self.pmpp_ax_v,
-             "Tracked Vmpp",
-             "Time (min)", "Vmpp (V)"),
-            (self.pmpp_ax_jv,
-             "Initial J-V Scan",
-             "Voltage (V)", "J (mA/cm\u00b2)"),
-        ]:
-            ax.set_title(title, fontsize=10, fontweight="bold")
-            ax.set_xlabel(xl, fontsize=9)
-            ax.set_ylabel(yl, fontsize=9)
-            ax.grid(True)
-            ax.text(0.5, 0.5, "No data yet", transform=ax.transAxes,
-                    ha="center", va="center", color="gray", fontsize=10)
-
-        self.pmpp_canvas = FigureCanvasTkAgg(
-            self.pmpp_fig, master=self.pmpp_plot_frame)
-        self.pmpp_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
+        panel = build_mpp_continuous_panel(self.pmpp_plot_frame)
+        self.pmpp_fig    = panel["fig"]
+        self.pmpp_canvas = panel["canvas"]
+        self.pmpp_ax_pce = panel["ax_pce"]
+        self.pmpp_ax_j   = panel["ax_j"]
+        self.pmpp_ax_v   = panel["ax_v"]
+        self.pmpp_ax_jv  = panel["ax_jv"]
 
     # ══════════════════════════════════════════════════════════════════════════
     # PURE MPP TRACKING — runner and plot-update methods
@@ -2614,7 +3906,7 @@ class JVMeasurementApp:
         if not messagebox.askokcancel(
             "Safety Check",
             "1. Verify all connections to the Keithley SourceMeter\n"
-            "2. Confirm solar simulator shutter is open\n"
+            f"{self._shutter_safety_line()}\n"
             "3. Confirm only ONE cell is connected\n\n"
             "Click OK to start Pure MPP Tracking (P&O).",
             icon="warning"
@@ -2652,7 +3944,8 @@ class JVMeasurementApp:
 
         from app.measurement.pure_mpp_tracker import PureMPPTracker
         tracker = PureMPPTracker(self.instrument, params, callbacks, stop_event)
-        threading.Thread(target=tracker.run, daemon=True).start()
+        threading.Thread(target=self._run_illuminated(tracker.run),
+                         daemon=True).start()
 
     def stop_pure_mpp(self):
         stop_event.set()
@@ -2796,7 +4089,7 @@ class JVMeasurementApp:
         if not messagebox.askokcancel(
             "Safety Check",
             "1. Verify all connections to the Keithley SourceMeter\n"
-            "2. Confirm solar simulator shutter is open\n"
+            f"{self._shutter_safety_line()}\n"
             "3. Confirm only ONE cell is connected\n\n"
             "Click OK to start MPP Tracking.",
             icon="warning"
@@ -2837,7 +4130,8 @@ class JVMeasurementApp:
 
         from app.measurement.mpp_tracker import MPPTracker
         tracker = MPPTracker(self.instrument, params, callbacks, stop_event)
-        threading.Thread(target=tracker.run, daemon=True).start()
+        threading.Thread(target=self._run_illuminated(tracker.run),
+                         daemon=True).start()
 
     def stop_mpp_tracking(self):
         stop_event.set()
@@ -3027,7 +4321,7 @@ class JVMeasurementApp:
         if not messagebox.askokcancel(
             "Safety Check",
             "1. Verify all connections to the Keithley SourceMeter\n"
-            "2. Confirm solar simulator shutter is open\n\n"
+            f"{self._shutter_safety_line()}\n\n"
             "Click OK to start.",
             icon="warning"
         ):
@@ -3041,6 +4335,9 @@ class JVMeasurementApp:
         # Clear plot
         self.stab_ax_j.clear()
         self.stab_ax_pce.clear()
+        # clear() resets the twin axis ticks/label to the left \u2014 restore right.
+        self.stab_ax_pce.yaxis.set_label_position("right")
+        self.stab_ax_pce.yaxis.set_ticks_position("right")
         self.stab_ax_j.set_xlabel("Time (s)", fontsize=11)
         self.stab_ax_j.set_ylabel("Current Density (mA/cm\u00b2)",
                                    fontsize=11, color="#1565C0")
@@ -3060,6 +4357,8 @@ class JVMeasurementApp:
     def run_stabilized_current(self):
         import numpy as np, time as _time
         try:
+            if not self._shutter_set(True, prompt_if_manual=False):
+                return
             inst = self.instrument
             inst.write("*RST")
             _time.sleep(0.3)
@@ -3127,6 +4426,9 @@ class JVMeasurementApp:
         except Exception as exc:
             self.root.after(0, messagebox.showerror, "Error", str(exc))
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             try:
                 self.instrument.write(":OUTP OFF")
             except Exception:
@@ -3139,6 +4441,9 @@ class JVMeasurementApp:
     def _stab_update_plot(self, times, j_vals, pce_vals, stabilized_at):
         self.stab_ax_j.clear()
         self.stab_ax_pce.clear()
+        # clear() resets the twin axis ticks/label to the left — restore right.
+        self.stab_ax_pce.yaxis.set_label_position("right")
+        self.stab_ax_pce.yaxis.set_ticks_position("right")
 
         self.stab_ax_j.plot(times, j_vals, color="#1565C0", linewidth=1.4,
                              label="J (mA/cm\u00b2)")
@@ -3199,6 +4504,12 @@ class JVMeasurementApp:
         # ── Notebook tabs ─────────────────────────────────────────────────────
         nb = ttk.Notebook(self.isos_panel)
         nb.pack(fill=X, padx=6, pady=(6, 4))
+        self.isos_nb = nb
+        # Fit the notebook to the active tab's height so short tabs (Experiment)
+        # do not inherit the tall Conditioning tab's height (see _isos_fit_notebook).
+        # Deferred to after_idle so the newly-shown page is laid out before measuring.
+        nb.bind("<<NotebookTabChanged>>",
+                lambda _e: self.root.after_idle(self._isos_fit_notebook))
 
         # Tab 1: Experiment
         tab_exp = Frame(nb, padx=6, pady=4, bg="#ececec")
@@ -3210,7 +4521,7 @@ class JVMeasurementApp:
         Label(exp_f, text="Protocol:").grid(row=0, column=0, sticky=W, padx=4, pady=3)
         self.isos_protocol_var = StringVar(value="ISOS-D-1")
         proto_cb = ttk.Combobox(exp_f, textvariable=self.isos_protocol_var,
-                                values=["ISOS-D-1"], state="readonly", width=12)
+                                values=list_protocol_labels(), state="readonly", width=12)
         proto_cb.grid(row=0, column=1, columnspan=2, sticky=W, padx=4, pady=3)
         proto_cb.bind("<<ComboboxSelected>>", self._isos_on_protocol_change)
 
@@ -3416,9 +4727,15 @@ class JVMeasurementApp:
               ).grid(row=1, column=1, sticky=W, padx=4, pady=3)
         Label(ls_f, text="s", fg="#666666").grid(row=1, column=2, sticky=W)
 
-        # ── History Treeview ──────────────────────────────────────────────────
+        # ── ISOS-L-1 continuous-stress sub-frame (shown only for L-1) ───────────
+        self._build_isos_l1_subframe(tab_cond)
+        # ── ISOS-V-1 dark-bias sub-frame (shown only for V-1) ───────────────────
+        self._build_isos_v1_subframe(tab_cond)
+
+        # ── History Treeview (shown only for ISOS-D-1) ────────────────────────
         hist_f = LabelFrame(self.isos_panel, text="Measurement History", padx=4, pady=4)
         hist_f.pack(fill=X, padx=6, pady=(0, 4))
+        self.isos_hist_frame = hist_f
 
         cols = ("#", "Date", "Elapsed_h", "PCE_rev", "PCE_norm")
         self.isos_tree = ttk.Treeview(hist_f, columns=cols, show="headings", height=5)
@@ -3429,6 +4746,9 @@ class JVMeasurementApp:
         self.isos_tree.configure(yscrollcommand=vsb.set)
         self.isos_tree.pack(side=LEFT, fill=BOTH, expand=True)
         vsb.pack(side=RIGHT, fill=Y)
+
+        # ── Stability Metrics panel (T80 / T95 / Ts80 / T_S / PCE_S / n_1000) ───
+        self._build_isos_metrics_panel(self.isos_panel)
 
         # ── Run/Stop buttons ──────────────────────────────────────────────────
         btn_ctrl = Frame(self.isos_panel, bg="#ececec")
@@ -3474,6 +4794,12 @@ class JVMeasurementApp:
         isos_sb = Frame(self.isos_panel, bg="#37474F", height=24)
         isos_sb.pack(fill=X, side="bottom")
         isos_sb.pack_propagate(False)
+        # Autosave health dot (gray idle / green flushing / red on error).
+        self.isos_autosave_dot = Label(isos_sb, text="●", bg="#37474F",
+                                       fg="#607D8B", font=("Arial", 11))
+        self.isos_autosave_dot.pack(side=RIGHT, padx=(0, 10))
+        self._isos_autosave_tip = ToolTip(self.isos_autosave_dot, "Autosave idle")
+        self._isos_autosave_reset_id = None
         self.isos_status_var = StringVar(value="Ready")
         Label(isos_sb, textvariable=self.isos_status_var,
               bg="#37474F", fg="#CFD8DC",
@@ -3481,6 +4807,22 @@ class JVMeasurementApp:
               ).pack(side=LEFT, padx=10, fill=X, expand=True)
 
         # ── Matplotlib figure: PCE stability (top) + latest J-V (bottom) ───────
+        # The active plot layout depends on the selected protocol/load — D-1 uses
+        # this two-axis stability figure; L-1 swaps in a continuous OC / MPP panel
+        # (see _isos_rebuild_plot_area). Live L-1 stress traces are buffered here.
+        self._isos_plot_layout    = None
+        self.isos_l1_plot_axes    = None
+        self.isos_v1_plot_axes    = None
+        self._isos_l1_last_draw   = 0.0
+        self._isos_l1_reset_traces()
+        self._isos_build_d1_figure()
+        self._isos_plot_layout = "d1"
+
+        self._isos_update_scan_rate()
+        self._isos_on_protocol_change()
+
+    def _isos_build_d1_figure(self):
+        """Create the ISOS-D-1 two-axis figure (PCE stability + latest J-V)."""
         self.isos_fig, (self.isos_ax_pce, self.isos_ax_jv) = plt.subplots(
             2, 1, figsize=(7, 7), gridspec_kw={"height_ratios": [1, 1]})
         self.isos_fig.patch.set_facecolor("#ffffff")
@@ -3498,10 +4840,467 @@ class JVMeasurementApp:
         self.isos_canvas = FigureCanvasTkAgg(self.isos_fig, self.isos_plot_frame)
         self.isos_canvas.get_tk_widget().pack(fill=BOTH, expand=True)
 
-        self._isos_update_scan_rate()
-        self._isos_on_protocol_change()
+    def _isos_l1_reset_traces(self):
+        """Clear the buffered L-1 live-stress traces."""
+        self._isos_l1_t    = []
+        self._isos_l1_v    = []
+        self._isos_l1_j    = []
+        self._isos_l1_pce  = []
+        self._isos_l1_voc  = []
+        self._isos_l1_latest_jv = None
 
     # ── ISOS helper methods ───────────────────────────────────────────────────
+
+    def _scan_for_inprogress_isos(self):
+        """Offer to recover interrupted ISOS stress runs at startup.
+
+        Continuous runs (L-1 / V-1) stream to ``*_stress_inprogress_*.csv`` files
+        that are renamed to ``.consumed`` once consolidated. A leftover file means
+        a run was interrupted. We scan every recent ISOS folder (plus the current
+        export folder), pair each orphan with its tracking workbook, and offer a
+        recovery dialog. Detection lives in ``app.io.isos_recovery`` so it is
+        unit-testable without Tk; this method is just the GUI wrapper.
+        """
+        folders = list(load_recent_folders())
+        try:
+            cur = self.isos_export_folder_var.get().strip()
+        except Exception:
+            cur = ""
+        if cur and cur not in folders:
+            folders.append(cur)
+        try:
+            orphans = find_orphan_stress_csvs(folders)
+        except Exception:
+            orphans = []
+        if orphans:
+            self._show_recovery_dialog(orphans)
+
+    def _show_recovery_dialog(self, orphans):
+        """Modal recovery dialog for a list of ``(csv_path, xlsx_path)`` orphans."""
+        # Group orphans by their tracking workbook for the summary list.
+        by_xlsx = {}
+        for csv_path, xlsx_path in orphans:
+            by_xlsx.setdefault(xlsx_path, []).append(csv_path)
+
+        win = Toplevel(self.root)
+        win.title("Recover Unsaved Stress Logs")
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        Label(win, text=f"Found {len(orphans)} unsaved stress log(s) from a "
+              "previous run:", font=("Arial", 10, "bold"),
+              anchor=W, justify=LEFT).pack(fill=X, padx=14, pady=(14, 6))
+
+        listbox = Frame(win)
+        listbox.pack(fill=X, padx=20, pady=(0, 8))
+        for xlsx_path, csvs in by_xlsx.items():
+            name = os.path.basename(xlsx_path) if xlsx_path else "(no tracking file)"
+            Label(listbox, text=f"• {name}  →  {len(csvs)} orphan CSV(s)",
+                  anchor=W, justify=LEFT, font=("Consolas", 9)).pack(fill=X)
+
+        Label(win, text="Consolidate them into the tracking files now?",
+              anchor=W, justify=LEFT).pack(fill=X, padx=14, pady=(4, 10))
+
+        btns = Frame(win)
+        btns.pack(fill=X, padx=14, pady=(0, 14))
+
+        def _finish(consolidated, discarded, errors):
+            win.grab_release()
+            win.destroy()
+            parts = []
+            if consolidated:
+                parts.append(f"{consolidated} consolidated")
+            if discarded:
+                parts.append(f"{discarded} discarded")
+            if errors:
+                parts.append(f"{errors} failed")
+            self.status_var.set("ISOS recovery: " + (", ".join(parts)
+                                if parts else "nothing to do") + ".")
+
+        def _consolidate_all():
+            done = err = 0
+            for csv_path, xlsx_path in orphans:
+                if not xlsx_path:
+                    continue
+                try:
+                    consolidate_orphan(csv_path, xlsx_path)
+                    done += 1
+                except Exception:
+                    err += 1
+            _finish(done, 0, err)
+
+        def _discard_all():
+            done = err = 0
+            for csv_path, _ in orphans:
+                try:
+                    discard_orphan(csv_path)
+                    done += 1
+                except Exception:
+                    err += 1
+            _finish(0, done, err)
+
+        def _decide_individually():
+            win.grab_release()
+            win.destroy()
+            self._show_recovery_individual_dialog(orphans, _finish)
+
+        Button(btns, text="Consolidate all", command=_consolidate_all,
+               width=16).pack(side=LEFT, padx=4)
+        Button(btns, text="Discard all", command=_discard_all,
+               width=14).pack(side=LEFT, padx=4)
+        Button(btns, text="Decide individually…",
+               command=_decide_individually, width=18).pack(side=LEFT, padx=4)
+
+    def _show_recovery_individual_dialog(self, orphans, finish_cb):
+        """Per-file checkbox dialog: checked = consolidate, unchecked = discard."""
+        win = Toplevel(self.root)
+        win.title("Recover Stress Logs — Choose")
+        win.transient(self.root)
+        win.grab_set()
+
+        Label(win, text="Check the logs to consolidate; unchecked logs are "
+              "discarded (preserved as .discarded).", anchor=W, justify=LEFT
+              ).pack(fill=X, padx=14, pady=(12, 8))
+
+        rows = []
+        body = Frame(win)
+        body.pack(fill=BOTH, expand=True, padx=18, pady=(0, 8))
+        for csv_path, xlsx_path in orphans:
+            var = BooleanVar(value=bool(xlsx_path))   # only check if pairable
+            label = os.path.basename(csv_path)
+            if xlsx_path:
+                label += f"  →  {os.path.basename(xlsx_path)}"
+            else:
+                label += "  (no tracking file — can only discard)"
+            cb = Checkbutton(body, text=label, variable=var, anchor=W,
+                             font=("Consolas", 9))
+            cb.pack(fill=X)
+            if not xlsx_path:
+                cb.config(state=DISABLED)
+            rows.append((csv_path, xlsx_path, var))
+
+        def _apply():
+            done = disc = err = 0
+            for csv_path, xlsx_path, var in rows:
+                try:
+                    if var.get() and xlsx_path:
+                        consolidate_orphan(csv_path, xlsx_path)
+                        done += 1
+                    else:
+                        discard_orphan(csv_path)
+                        disc += 1
+                except Exception:
+                    err += 1
+            win.grab_release()
+            win.destroy()
+            finish_cb(done, disc, err)
+
+        Button(win, text="Apply", command=_apply, width=12).pack(pady=(0, 14))
+
+    def _build_isos_l1_subframe(self, parent):
+        """Build the ISOS-L-1 continuous-stress controls (hidden until L-1)."""
+        self.isos_l1_subframe = LabelFrame(
+            parent, text="ISOS-L-1 Continuous Stress", padx=6, pady=4)
+        # Not packed here — _isos_on_protocol_change shows/hides it.
+        l1 = self.isos_l1_subframe
+
+        def _num_row(r, label, attr, default, unit, vartype=DoubleVar):
+            Label(l1, text=label).grid(row=r, column=0, sticky=W, padx=4, pady=2)
+            var = vartype(value=default)
+            Entry(l1, textvariable=var, width=8).grid(row=r, column=1, sticky=W, padx=2)
+            Label(l1, text=unit, fg="#666666").grid(row=r, column=2, sticky=W)
+            setattr(self, attr, var)
+
+        _num_row(0, "Total duration:",     "isos_l1_total_h_var",        24.0, "h")
+        _num_row(1, "Scan interval:",      "isos_l1_interval_min_var",   15.0, "min")
+        _num_row(2, "Pre-scan relaxation:", "isos_l1_relax_s_var",       60.0, "s")
+        _num_row(3, "SPO after scan:",     "isos_l1_spo_s_var",          20.0, "s (0=off)")
+
+        self.isos_l1_equil_enabled_var = BooleanVar(value=False)
+        Checkbutton(l1, text="Equilibration before start",
+                    variable=self.isos_l1_equil_enabled_var
+                    ).grid(row=4, column=0, columnspan=3, sticky=W, padx=4, pady=(6, 0))
+        _num_row(5, "  Duration:", "isos_l1_equil_h_var", 0.0, "h")
+
+        _num_row(6, "Baseline scans:", "isos_l1_baseline_n_var", 4, "", IntVar)
+        _num_row(7, "Baseline rest:",  "isos_l1_baseline_rest_s_var", 60.0, "s")
+
+        fail_f = LabelFrame(l1, text="Failure detection", padx=4, pady=2)
+        fail_f.grid(row=8, column=0, columnspan=3, sticky="ew", padx=2, pady=(6, 2))
+        Label(fail_f, text="PCE threshold:").grid(row=0, column=0, sticky=W, padx=2)
+        self.isos_l1_fail_pct_var = DoubleVar(value=20.0)
+        Entry(fail_f, textvariable=self.isos_l1_fail_pct_var, width=6
+              ).grid(row=0, column=1, sticky=W, padx=2)
+        Label(fail_f, text="% of PCE₀", fg="#666666").grid(row=0, column=2, sticky=W)
+        self.isos_l1_auto_stop_var = BooleanVar(value=True)
+        Checkbutton(fail_f, text="Auto-stop on failure",
+                    variable=self.isos_l1_auto_stop_var
+                    ).grid(row=1, column=0, columnspan=3, sticky=W)
+
+        # MPP-only settings (revealed when load == MPP)
+        self.isos_l1_mpp_frame = LabelFrame(l1, text="MPP load settings", padx=4, pady=2)
+        Label(self.isos_l1_mpp_frame, text="Engine:").grid(row=0, column=0, sticky=W, padx=2)
+        self.isos_l1_mpp_engine_var = StringVar(value="PO")
+        Radiobutton(self.isos_l1_mpp_frame, text="P&O",
+                    variable=self.isos_l1_mpp_engine_var, value="PO"
+                    ).grid(row=0, column=1, sticky=W)
+        Radiobutton(self.isos_l1_mpp_frame, text="JV-SPO",
+                    variable=self.isos_l1_mpp_engine_var, value="SPO"
+                    ).grid(row=0, column=2, sticky=W)
+        mpp_params = Frame(self.isos_l1_mpp_frame)
+        mpp_params.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 0))
+        build_param_grid(mpp_params, "isos_l1", [
+            ("Perturb step:",     "perturb_step_mv",        10.0, "mV"),
+            ("V min:",            "v_min",                  0.0,  "V"),
+            ("V max:",            "v_max",                  1.2,  "V"),
+            ("MPP log interval:", "stress_log_interval_s",  2.0,  "s"),
+        ], self)
+
+        # OC-only settings (revealed when load == OC)
+        self.isos_l1_oc_frame = LabelFrame(l1, text="OC load settings", padx=4, pady=2)
+        Label(self.isos_l1_oc_frame, text="Voc read interval:"
+              ).grid(row=0, column=0, sticky=W, padx=2)
+        self.isos_l1_voc_interval_ms_var = DoubleVar(value=1000.0)
+        Entry(self.isos_l1_oc_frame, textvariable=self.isos_l1_voc_interval_ms_var,
+              width=8).grid(row=0, column=1, sticky=W, padx=2)
+        Label(self.isos_l1_oc_frame, text="ms", fg="#666666").grid(row=0, column=2, sticky=W)
+
+        self._isos_l1_mpp_row = 9
+        self._isos_l1_oc_row  = 10
+
+        # Switching load reveals the matching sub-frame and swaps the plot layout.
+        self.isos_load_var.trace("w", self._isos_on_load_change)
+
+    # ── ISOS-V-1 sub-frame (dark electrical-bias stress) ────────────────────────
+
+    _V1_TIER_DEFAULTS = [(0.0, 5.0, 60.0), (5.0, 24.0, 240.0), (24.0, 99999.0, 1440.0)]
+
+    def _build_isos_v1_subframe(self, parent):
+        """Build the ISOS-V-1 dark-bias controls (hidden until V-1 selected)."""
+        self._isos_v1_custom_schedule = None
+        self._isos_v1_scan_blocked    = False
+
+        self.isos_v1_subframe = LabelFrame(
+            parent, text="ISOS-V-1 Dark Electrical-Bias Stress", padx=6, pady=4)
+        v1 = self.isos_v1_subframe
+
+        r = 0
+        Label(v1, text="Stress is performed in DARK. Shutter opens only briefly\n"
+                       "for periodic illuminated J-V scans.",
+              bg="#FFF59D", justify="left", font=("Arial", 8)
+              ).grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=(0, 4))
+        r += 1
+
+        def _num_row(label, attr, default, unit, vartype=DoubleVar):
+            nonlocal r
+            Label(v1, text=label).grid(row=r, column=0, sticky=W, padx=4, pady=2)
+            var = vartype(value=default)
+            Entry(v1, textvariable=var, width=8).grid(row=r, column=1, sticky=W, padx=2)
+            Label(v1, text=unit, fg="#666666").grid(row=r, column=2, sticky=W)
+            setattr(self, attr, var)
+            r += 1
+
+        _num_row("Total duration:", "isos_v1_total_h_var", 24.0, "h")
+
+        # ── Measurement schedule ───────────────────────────────────────────────
+        sched_f = LabelFrame(v1, text="Measurement schedule", padx=4, pady=2)
+        sched_f.grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=(4, 2))
+        r += 1
+        self.isos_v1_schedule_mode_var = StringVar(value="tiered")
+        Radiobutton(sched_f, text="Fixed interval (min):",
+                    variable=self.isos_v1_schedule_mode_var, value="fixed",
+                    command=self._isos_v1_on_schedule_mode_change
+                    ).grid(row=0, column=0, sticky=W)
+        self.isos_v1_interval_min_var = DoubleVar(value=60.0)
+        Entry(sched_f, textvariable=self.isos_v1_interval_min_var, width=7
+              ).grid(row=0, column=1, sticky=W, padx=2)
+        Radiobutton(sched_f, text="Tiered (recommended)",
+                    variable=self.isos_v1_schedule_mode_var, value="tiered",
+                    command=self._isos_v1_on_schedule_mode_change
+                    ).grid(row=1, column=0, columnspan=2, sticky=W)
+
+        # Editable 3-row tier table.
+        self.isos_v1_tier_frame = Frame(sched_f)
+        self.isos_v1_tier_frame.grid(row=2, column=0, columnspan=3, sticky="ew")
+        for c, h in enumerate(("Start h", "End h", "Interval min")):
+            Label(self.isos_v1_tier_frame, text=h, font=("Arial", 8),
+                  fg="#666666").grid(row=0, column=c + 1, padx=2)
+        self.isos_v1_tier_vars = []
+        for i, (s0, e0, iv0) in enumerate(self._V1_TIER_DEFAULTS):
+            Label(self.isos_v1_tier_frame, text=f"Phase {i + 1}:"
+                  ).grid(row=i + 1, column=0, sticky=W, padx=2)
+            sv, ev, ivv = DoubleVar(value=s0), DoubleVar(value=e0), DoubleVar(value=iv0)
+            Entry(self.isos_v1_tier_frame, textvariable=sv, width=6
+                  ).grid(row=i + 1, column=1, padx=2, pady=1)
+            Entry(self.isos_v1_tier_frame, textvariable=ev, width=6
+                  ).grid(row=i + 1, column=2, padx=2, pady=1)
+            Entry(self.isos_v1_tier_frame, textvariable=ivv, width=7
+                  ).grid(row=i + 1, column=3, padx=2, pady=1)
+            self.isos_v1_tier_vars.append((sv, ev, ivv))
+
+        self.isos_v1_custom_path_var = StringVar(value="")
+        Radiobutton(sched_f, text="Custom (CSV)",
+                    variable=self.isos_v1_schedule_mode_var, value="custom",
+                    command=self._isos_v1_on_schedule_mode_change
+                    ).grid(row=3, column=0, sticky=W)
+        Button(sched_f, text="Import…", font=("Arial", 8), pady=0,
+               command=self._isos_v1_import_schedule_csv
+               ).grid(row=3, column=1, sticky=W, padx=2)
+
+        # ── Dark J-V scan range + ideality fit window ──────────────────────────
+        dark_f = LabelFrame(v1, text="Dark J-V scan", padx=4, pady=2)
+        dark_f.grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=2)
+        r += 1
+        for c, (label, attr, default) in enumerate([
+            ("Start (V):", "isos_v1_dark_start_v_var", -0.2),
+            ("End (V):",   "isos_v1_dark_end_v_var",    1.1),
+            ("Step (V):",  "isos_v1_dark_step_v_var",   0.025),
+        ]):
+            Label(dark_f, text=label).grid(row=0, column=c * 2, sticky=W, padx=2)
+            var = DoubleVar(value=default)
+            Entry(dark_f, textvariable=var, width=6
+                  ).grid(row=0, column=c * 2 + 1, sticky=W, padx=2)
+            setattr(self, attr, var)
+        for c, (label, attr, default) in enumerate([
+            ("Fit V_min:", "isos_v1_fit_vmin_var", 0.5),
+            ("Fit V_max:", "isos_v1_fit_vmax_var", 0.8),
+        ]):
+            Label(dark_f, text=label).grid(row=1, column=c * 2, sticky=W, padx=2)
+            var = DoubleVar(value=default)
+            Entry(dark_f, textvariable=var, width=6
+                  ).grid(row=1, column=c * 2 + 1, sticky=W, padx=2)
+            setattr(self, attr, var)
+
+        # ── Illuminated scan-rate warning (real-time) ──────────────────────────
+        self.isos_v1_scan_warn_var = StringVar(value="")
+        self._isos_v1_warn_lbl = Label(v1, textvariable=self.isos_v1_scan_warn_var,
+                                       wraplength=240, justify="left",
+                                       font=("Arial", 8), fg="#B71C1C")
+        self._isos_v1_warn_lbl.grid(row=r, column=0, columnspan=3, sticky="ew",
+                                    padx=2, pady=(2, 2))
+        r += 1
+
+        self.isos_v1_log_idark_var = BooleanVar(value=True)
+        Checkbutton(v1, text="Log I_dark during stress",
+                    variable=self.isos_v1_log_idark_var
+                    ).grid(row=r, column=0, columnspan=3, sticky=W, padx=4)
+        r += 1
+
+        _num_row("Pre-scan relaxation:", "isos_v1_relax_s_var", 60.0, "s")
+        _num_row("SPO after scan:",      "isos_v1_spo_s_var",   20.0, "s (0=off)")
+
+        self.isos_v1_equil_enabled_var = BooleanVar(value=True)
+        Checkbutton(v1, text="Equilibration before start",
+                    variable=self.isos_v1_equil_enabled_var
+                    ).grid(row=r, column=0, columnspan=3, sticky=W, padx=4, pady=(6, 0))
+        r += 1
+        _num_row("  Duration:", "isos_v1_equil_h_var", 12.0, "h")
+
+        _num_row("Baseline scans:", "isos_v1_baseline_n_var", 4, "", IntVar)
+        _num_row("Baseline rest:",  "isos_v1_baseline_rest_s_var", 60.0, "s")
+
+        fail_f = LabelFrame(v1, text="Failure detection", padx=4, pady=2)
+        fail_f.grid(row=r, column=0, columnspan=3, sticky="ew", padx=2, pady=(6, 2))
+        r += 1
+        Label(fail_f, text="PCE threshold (% of PCE₀):").grid(row=0, column=0, sticky=W)
+        self.isos_v1_fail_pct_var = DoubleVar(value=20.0)
+        Entry(fail_f, textvariable=self.isos_v1_fail_pct_var, width=6
+              ).grid(row=0, column=1, sticky=W, padx=2)
+        Label(fail_f, text="I_dark × baseline:").grid(row=1, column=0, sticky=W)
+        self.isos_v1_fail_idark_mult_var = DoubleVar(value=5.0)
+        Entry(fail_f, textvariable=self.isos_v1_fail_idark_mult_var, width=6
+              ).grid(row=1, column=1, sticky=W, padx=2)
+        Label(fail_f, text="R_sh_dark min (Ω·cm²):").grid(row=2, column=0, sticky=W)
+        self.isos_v1_fail_rsh_dark_var = DoubleVar(value=0.0)
+        Entry(fail_f, textvariable=self.isos_v1_fail_rsh_dark_var, width=6
+              ).grid(row=2, column=1, sticky=W, padx=2)
+        self.isos_v1_auto_stop_var = BooleanVar(value=True)
+        Checkbutton(fail_f, text="Auto-stop on failure",
+                    variable=self.isos_v1_auto_stop_var
+                    ).grid(row=3, column=0, columnspan=2, sticky=W)
+
+        # MPP hold settings (reused parameter grid; shown when load == MPP).
+        self.isos_v1_mpp_frame = LabelFrame(v1, text="MPP hold settings", padx=4, pady=2)
+        Label(self.isos_v1_mpp_frame,
+              text="Hold last Vmpp from scan (constant V, dark).",
+              font=("Arial", 8), fg="#666666"
+              ).grid(row=0, column=0, columnspan=3, sticky=W)
+        mpp_params = Frame(self.isos_v1_mpp_frame)
+        mpp_params.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 0))
+        build_param_grid(mpp_params, "isos_v1", [
+            ("V min:",            "v_min",                 0.0,  "V"),
+            ("V max:",            "v_max",                 1.2,  "V"),
+            ("I_dark log interval:", "stress_log_interval_s", 2.0, "s"),
+        ], self)
+        self._isos_v1_mpp_row = r
+        r += 1
+
+        self._isos_v1_on_schedule_mode_change()
+
+    def _isos_v1_on_schedule_mode_change(self):
+        # The fixed-interval entry and tier table stay visible in all modes; the
+        # active schedule is resolved from the selected mode at run time by
+        # _isos_v1_build_schedule(). This hook exists for the radiobuttons and
+        # is a placeholder for future enable/disable styling.
+        pass
+
+    def _isos_v1_import_schedule_csv(self):
+        path = filedialog.askopenfilename(
+            title="Import V-1 schedule CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        if not path:
+            return
+        sched = self._isos_v1_read_schedule_csv(path)
+        if not sched:
+            messagebox.showerror(
+                "Invalid Schedule",
+                "Could not parse a schedule from this CSV.\n"
+                "Expected rows of: start_h, end_h, interval_min")
+            return
+        self._isos_v1_custom_schedule = sched
+        self.isos_v1_custom_path_var.set(path)
+        self.isos_v1_schedule_mode_var.set("custom")
+        self.isos_status_var.set(
+            f"Loaded {len(sched)} schedule tiers from {os.path.basename(path)}")
+
+    @staticmethod
+    def _isos_v1_read_schedule_csv(path):
+        import csv
+        sched = []
+        try:
+            with open(path, newline="") as fh:
+                for row in csv.reader(fh):
+                    cells = [c.strip() for c in row if c.strip() != ""]
+                    if len(cells) < 3:
+                        continue
+                    try:
+                        s0, e0, iv0 = float(cells[0]), float(cells[1]), float(cells[2])
+                    except ValueError:
+                        continue          # header or comment row
+                    sched.append((s0, e0, iv0))
+        except Exception:
+            return []
+        return sched
+
+    def _isos_v1_build_schedule(self):
+        """Return the active V-1 schedule as a list of (start_h, end_h, int_min).
+
+        Fixed mode returns None (the runner falls back to scan_interval_min).
+        """
+        mode = self.isos_v1_schedule_mode_var.get()
+        if mode == "fixed":
+            return None
+        if mode == "custom" and self._isos_v1_custom_schedule:
+            return list(self._isos_v1_custom_schedule)
+        # tiered
+        tiers = []
+        for sv, ev, ivv in self.isos_v1_tier_vars:
+            try:
+                tiers.append((float(sv.get()), float(ev.get()), float(ivv.get())))
+            except Exception:
+                continue
+        return tiers or None
 
     def _isos_on_protocol_change(self, *_):
         protocol = self.isos_protocol_var.get()
@@ -3510,9 +5309,145 @@ class JVMeasurementApp:
             self.isos_load_var.set("OC")
             self.isos_load_rb_oc.config(state=DISABLED)
             self.isos_load_rb_mpp.config(state=DISABLED)
-        else:
+            self.isos_l1_subframe.pack_forget()
+            self.isos_v1_subframe.pack_forget()
+        elif protocol == "ISOS-V-1":
             self.isos_load_rb_oc.config(state=NORMAL)
             self.isos_load_rb_mpp.config(state=NORMAL)
+            self.isos_l1_subframe.pack_forget()
+            self.isos_v1_subframe.pack(fill=X, pady=(6, 0))
+            self._isos_v1_reveal_load_frame()
+            self._isos_v1_update_scan_warn()
+        else:  # ISOS-L-1 (and future continuous protocols)
+            self.isos_load_rb_oc.config(state=NORMAL)
+            self.isos_load_rb_mpp.config(state=NORMAL)
+            self.isos_v1_subframe.pack_forget()
+            self.isos_l1_subframe.pack(fill=X, pady=(6, 0))
+            self._isos_l1_reveal_load_frame()
+        self._isos_toggle_history(protocol == "ISOS-D-1")
+        self._isos_rebuild_plot_area()
+        self.root.after_idle(self._isos_fit_notebook)
+
+    def _isos_toggle_history(self, show: bool):
+        """Show the Measurement History panel only for ISOS-D-1.
+
+        The per-measurement history table is the primary readout for the sparse
+        dark-storage D-1 campaign. For the continuous L-1 / V-1 protocols the
+        live plots and the Stability Metrics panel carry the information, so the
+        table is hidden to declutter the panel.
+        """
+        hist = getattr(self, "isos_hist_frame", None)
+        if hist is None:
+            return
+        if show:
+            if not hist.winfo_manager():     # currently hidden → restore order
+                hist.pack(before=self.isos_metrics_frame, fill=X,
+                          padx=6, pady=(0, 4))
+        else:
+            hist.pack_forget()
+
+    def _isos_fit_notebook(self, *_):
+        """Resize the ISOS notebook to the active tab's natural height.
+
+        ``ttk.Notebook`` otherwise reserves the height of its tallest tab (the
+        Conditioning tab with the L-1/V-1 sub-frames), leaving a large empty gap
+        below shorter tabs such as Experiment. Fitting per tab removes that gap.
+        """
+        nb = getattr(self, "isos_nb", None)
+        if nb is None:
+            return
+        try:
+            nb.update_idletasks()
+            page = nb.nametowidget(nb.select())
+            nb.configure(height=max(page.winfo_reqheight(), 1))
+        except Exception:
+            pass
+
+    def _isos_on_load_change(self, *_):
+        """React to an OC ↔ MPP change while a continuous protocol is active."""
+        protocol = self.isos_protocol_var.get()
+        if protocol == "ISOS-D-1":
+            return
+        if self._measurement_running:
+            return
+        if protocol == "ISOS-V-1":
+            self._isos_v1_reveal_load_frame()
+        else:
+            self._isos_l1_reveal_load_frame()
+        self._isos_rebuild_plot_area()
+
+    def _isos_v1_reveal_load_frame(self):
+        """Show the MPP hold settings only when the V-1 load is MPP."""
+        if self.isos_load_var.get() == "MPP":
+            self.isos_v1_mpp_frame.grid(row=self._isos_v1_mpp_row, column=0,
+                                        columnspan=3, sticky="ew", padx=2, pady=2)
+        else:
+            self.isos_v1_mpp_frame.grid_remove()
+
+    def _isos_l1_reveal_load_frame(self):
+        """Show the MPP- or OC-specific settings frame to match the load."""
+        if self.isos_load_var.get() == "MPP":
+            self.isos_l1_oc_frame.grid_remove()
+            self.isos_l1_mpp_frame.grid(row=self._isos_l1_mpp_row, column=0,
+                                        columnspan=3, sticky="ew", padx=2, pady=2)
+        else:
+            self.isos_l1_mpp_frame.grid_remove()
+            self.isos_l1_oc_frame.grid(row=self._isos_l1_oc_row, column=0,
+                                       columnspan=3, sticky="ew", padx=2, pady=2)
+
+    # ── Dynamic plot area ──────────────────────────────────────────────────────
+
+    def _isos_target_plot_layout(self):
+        protocol = self.isos_protocol_var.get()
+        if protocol == "ISOS-D-1":
+            return "d1"
+        if protocol == "ISOS-V-1":
+            return "v1"
+        return "mpp" if self.isos_load_var.get() == "MPP" else "oc"
+
+    def _isos_rebuild_plot_area(self):
+        """Swap the embedded figure to match the active protocol / load.
+
+        D-1 keeps the two-axis stability figure; L-1 uses the continuous OC or
+        MPP panel from the plot factory. No-ops when the layout is unchanged.
+        """
+        layout = self._isos_target_plot_layout()
+        if layout == self._isos_plot_layout:
+            return
+        try:
+            self.isos_canvas.get_tk_widget().destroy()
+        except Exception:
+            pass
+        try:
+            plt.close(self.isos_fig)
+        except Exception:
+            pass
+        self.isos_l1_plot_axes = None
+        self.isos_v1_plot_axes = None
+        self.isos_ax_pce = None
+        self.isos_ax_jv  = None
+
+        if layout == "d1":
+            self._isos_build_d1_figure()
+        elif layout == "oc":
+            from app.gui.mpp_plot_factory import build_oc_continuous_panel
+            panel = build_oc_continuous_panel(self.isos_plot_frame)
+            self.isos_fig    = panel["fig"]
+            self.isos_canvas = panel["canvas"]
+            self.isos_l1_plot_axes = panel
+        elif layout == "v1":
+            from app.gui.mpp_plot_factory import build_v1_diagnostic_panel
+            panel = build_v1_diagnostic_panel(self.isos_plot_frame)
+            self.isos_fig    = panel["fig"]
+            self.isos_canvas = panel["canvas"]
+            self.isos_v1_plot_axes = panel
+        else:  # mpp
+            from app.gui.mpp_plot_factory import build_mpp_continuous_panel
+            panel = build_mpp_continuous_panel(self.isos_plot_frame)
+            self.isos_fig    = panel["fig"]
+            self.isos_canvas = panel["canvas"]
+            self.isos_l1_plot_axes = panel
+        self._isos_plot_layout = layout
 
     def _isos_add_to_log(self, text: str):
         self.isos_log_text.config(state=NORMAL)
@@ -3558,6 +5493,55 @@ class JVMeasurementApp:
             self._isos_recalculate_delay_from_scan_rate()
         else:
             self._isos_update_scan_rate()
+        self._isos_v1_update_scan_warn()
+
+    def _isos_current_scan_rate_mvs(self):
+        """Effective illuminated scan rate (mV/s), or None if not computable."""
+        try:
+            step_mv  = abs(self.isos_step_v_var.get()) * 1000.0
+            nplc_ms  = self.isos_nplc_var.get() * (1000.0 / 60.0)
+            delay_ms = self.isos_delay_ms_var.get()
+            t_per_pt = (delay_ms + nplc_ms + 50.0) / 1000.0
+            if t_per_pt <= 0 or step_mv <= 0:
+                return None
+            return step_mv / t_per_pt
+        except Exception:
+            return None
+
+    def _isos_v1_update_scan_warn(self, *_):
+        """Real-time illuminated scan-rate guard for V-1.
+
+        A too-slow illuminated scan exposes the cell to light long enough to
+        contaminate the dark-bias V-1 stress with L-1/T effects. Warn below
+        50 mV/s; block (and disable Run) below 25 mV/s.
+        """
+        if not hasattr(self, "isos_v1_scan_warn_var"):
+            return
+        active = self.isos_protocol_var.get() == "ISOS-V-1"
+        rate = self._isos_current_scan_rate_mvs()
+        blocked = False
+        if not active or rate is None:
+            self.isos_v1_scan_warn_var.set("")
+        elif rate < 25.0:
+            blocked = True
+            self.isos_v1_scan_warn_var.set(
+                f"⛔ {rate:.0f} mV/s — too slow. Illuminated scan would "
+                f"contaminate V-1 (light exposure). Run disabled until ≥ 25 mV/s.")
+            self._isos_v1_warn_lbl.config(fg="#B71C1C")
+        elif rate < 50.0:
+            self.isos_v1_scan_warn_var.set(
+                f"⚠ {rate:.0f} mV/s — slow illuminated scan may contaminate "
+                f"V-1 (light exposure). Aim for ≥ 50 mV/s.")
+            self._isos_v1_warn_lbl.config(fg="#E65100")
+        else:
+            self.isos_v1_scan_warn_var.set(f"✔ {rate:.0f} mV/s illuminated scan.")
+            self._isos_v1_warn_lbl.config(fg="#2E7D32")
+        self._isos_v1_scan_blocked = blocked
+        # Reflect the block on the Run button when V-1 is active and the
+        # instrument is connected (do not override the disconnected state).
+        if active and getattr(self, "instrument", None) is not None \
+                and not self._measurement_running:
+            self.isos_start_btn.config(state=DISABLED if blocked else NORMAL)
 
     def _isos_on_scan_mode_change(self):
         mode = self.isos_scan_rate_mode.get()
@@ -3603,19 +5587,21 @@ class JVMeasurementApp:
         if not os.path.isdir(folder):
             messagebox.showwarning("Invalid Folder", f"Folder does not exist:\n{folder}")
             return
-        name = self.isos_sample_name_var.get().strip() or "Sample"
+        name     = self.isos_sample_name_var.get().strip() or "Sample"
+        protocol = self.isos_protocol_var.get()
         if not messagebox.askyesno("New Experiment",
-                                   f"Create a new ISOS-D-1 tracking file for '{name}'?\n\n"
+                                   f"Create a new {protocol} tracking file for '{name}'?\n\n"
                                    "A new file will be created — it will NOT overwrite "
                                    "any existing tracking file."):
             return
         config = self._isos_build_config()
         try:
-            path = create_isos_d1_tracking_file(folder, config)
+            path = create_isos_tracking_file(folder, config)
         except Exception as exc:
             messagebox.showerror("Error", f"Could not create tracking file:\n{exc}")
             return
         self.isos_tracking_file = path
+        add_recent_folder(folder)
         self.isos_t0_var.set(
             f"Tracking file: {os.path.basename(path)}\nt₀: {config.get('t0_timestamp', '')}")
         self.isos_status_var.set(f"New experiment: {os.path.basename(path)}")
@@ -3623,31 +5609,40 @@ class JVMeasurementApp:
 
     def _isos_load_experiment(self):
         path = filedialog.askopenfilename(
-            title="Load ISOS-D-1 Tracking File",
+            title="Load ISOS Tracking File",
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
         )
         if not path:
             return
-        cfg = read_isos_d1_config(path)
+        cfg = read_isos_config(path)
         if not cfg:
             messagebox.showerror("Error", "Could not read config from this file.\n"
-                                 "Make sure it is a valid ISOS-D-1 tracking file.")
+                                 "Make sure it is a valid ISOS tracking file.")
             return
+        # Restore the protocol first so the panel reconfigures (load radios,
+        # L-1 sub-frame, plot layout) before the rest of the config is applied.
+        protocol = cfg.get("protocol_id") or "ISOS-D-1"
+        if protocol in list_protocol_labels():
+            self.isos_protocol_var.set(protocol)
+        self._isos_on_protocol_change()
         self.isos_tracking_file = path
         self.isos_export_folder_var.set(os.path.dirname(path))
+        add_recent_folder(os.path.dirname(path))
         self._isos_populate_from_config(cfg)
         self.root.update_idletasks()
-        rows = read_isos_d1_log(path)
+        rows = read_isos_log(path)
         self._isos_update_treeview(rows)
         t0 = cfg.get("t0_timestamp", "")
         self.isos_t0_var.set(
             f"Tracking file: {os.path.basename(path)}\nt₀: {t0}")
         self.isos_status_var.set(
             f"Loaded: {os.path.basename(path)}  ({len(rows)} measurements)")
-        try:
-            self._isos_redraw_curves(path)
-        except Exception:
-            pass
+        if self._isos_plot_layout == "d1":
+            try:
+                self._isos_d1_update_metrics(rows, persist=False)
+                self._isos_redraw_curves(path)
+            except Exception:
+                pass
 
     def _isos_populate_from_config(self, cfg: dict):
         def _set(var, key, cast=str):
@@ -3685,6 +5680,79 @@ class JVMeasurementApp:
                     pass
         if cfg.get("electrical_load"):
             self.isos_load_var.set(str(cfg["electrical_load"]))
+        # ISOS-L-1 fields (nullable; blank in D-1 files)
+        _set(self.isos_l1_total_h_var,            "total_duration_h",          float)
+        _set(self.isos_l1_interval_min_var,       "scan_interval_min",         float)
+        _set(self.isos_l1_relax_s_var,            "pre_scan_relaxation_s",     float)
+        _set(self.isos_l1_spo_s_var,              "spo_duration_s",            float)
+        _set(self.isos_l1_baseline_rest_s_var,    "baseline_rest_s",           float)
+        _set(self.isos_l1_fail_pct_var,           "failure_pce_threshold_pct", float)
+        _set(self.isos_l1_voc_interval_ms_var,    "voc_read_interval_ms",      float)
+        _set(self.isos_l1_perturb_step_mv_var,    "perturb_step_mv",           float)
+        _set(self.isos_l1_v_min_var,              "mpp_v_min",                 float)
+        _set(self.isos_l1_v_max_var,              "mpp_v_max",                 float)
+        _set(self.isos_l1_stress_log_interval_s_var, "mpp_log_interval_s",     float)
+        _set(self.isos_l1_baseline_n_var,         "baseline_n_scans",          int)
+        if cfg.get("mpp_engine") in ("PO", "SPO"):
+            self.isos_l1_mpp_engine_var.set(str(cfg["mpp_engine"]))
+        equil_h = cfg.get("equilibration_duration_h")
+        if equil_h not in (None, ""):
+            try:
+                self.isos_l1_equil_h_var.set(float(equil_h))
+                self.isos_l1_equil_enabled_var.set(float(equil_h) > 0)
+            except Exception:
+                pass
+        auto_stop = cfg.get("auto_stop_on_failure")
+        if auto_stop is not None and auto_stop != "":
+            try:
+                self.isos_l1_auto_stop_var.set(bool(auto_stop))
+            except Exception:
+                pass
+        # ISOS-V-1 fields (nullable; blank in D-1 / L-1 files)
+        _set(self.isos_v1_total_h_var,            "total_duration_h",          float)
+        _set(self.isos_v1_interval_min_var,       "scan_interval_min",         float)
+        _set(self.isos_v1_relax_s_var,            "pre_scan_relaxation_s",     float)
+        _set(self.isos_v1_spo_s_var,              "spo_duration_s",            float)
+        _set(self.isos_v1_baseline_rest_s_var,    "baseline_rest_s",           float)
+        _set(self.isos_v1_baseline_n_var,         "baseline_n_scans",          int)
+        _set(self.isos_v1_fail_pct_var,           "failure_pce_threshold_pct", float)
+        _set(self.isos_v1_v_min_var,              "mpp_v_min",                 float)
+        _set(self.isos_v1_v_max_var,              "mpp_v_max",                 float)
+        _set(self.isos_v1_stress_log_interval_s_var, "mpp_log_interval_s",     float)
+        _set(self.isos_v1_dark_start_v_var,       "dark_start_voltage",        float)
+        _set(self.isos_v1_dark_end_v_var,         "dark_end_voltage",          float)
+        _set(self.isos_v1_dark_step_v_var,        "dark_step_voltage",         float)
+        _set(self.isos_v1_fit_vmin_var,           "dark_fit_v_min",            float)
+        _set(self.isos_v1_fit_vmax_var,           "dark_fit_v_max",            float)
+        v1_equil = cfg.get("equilibration_duration_h")
+        if v1_equil not in (None, ""):
+            try:
+                self.isos_v1_equil_h_var.set(float(v1_equil))
+                self.isos_v1_equil_enabled_var.set(float(v1_equil) > 0)
+            except Exception:
+                pass
+        if auto_stop is not None and auto_stop != "":
+            try:
+                self.isos_v1_auto_stop_var.set(bool(auto_stop))
+            except Exception:
+                pass
+        sched_mode = cfg.get("schedule_mode")
+        if sched_mode in ("fixed", "tiered", "custom"):
+            self.isos_v1_schedule_mode_var.set(sched_mode)
+        log_idark = cfg.get("log_i_dark_during_stress")
+        if log_idark is not None and log_idark != "":
+            try:
+                self.isos_v1_log_idark_var.set(bool(log_idark))
+            except Exception:
+                pass
+        sched_json = cfg.get("tiered_schedule_json")
+        if sched_json:
+            try:
+                tiers = json.loads(sched_json)
+                for (sv, ev, ivv), tier in zip(self.isos_v1_tier_vars, tiers):
+                    sv.set(float(tier[0])); ev.set(float(tier[1])); ivv.set(float(tier[2]))
+            except Exception:
+                pass
         # Restore scan rate mode last — triggers show/hide of the scan rate row
         mode = cfg.get("scan_rate_mode")
         if mode in ("advanced", "scan_rate"):
@@ -3699,7 +5767,8 @@ class JVMeasurementApp:
             pin = float(self.isos_detector_power_var.get()) / float(self.isos_detector_area_var.get())
         except Exception:
             pin = 0.0
-        return {
+        cfg = {
+            "protocol_id":             self.isos_protocol_var.get(),
             "sample_name":             self.isos_sample_name_var.get().strip() or "Sample",
             "cell_area":               self.isos_cell_area_var.get(),
             "detector_power":          self.isos_detector_power_var.get(),
@@ -3720,6 +5789,55 @@ class JVMeasurementApp:
             "scan_rate_mode":          self.isos_scan_rate_mode.get(),
             "target_scan_rate":        self.isos_target_scan_rate_var.get(),
         }
+        # ISOS-L-1-specific config fields (persisted to the Config sheet).
+        protocol = self.isos_protocol_var.get()
+        if protocol == "ISOS-L-1":
+            cfg.update({
+                "total_duration_h":          self.isos_l1_total_h_var.get(),
+                "scan_interval_min":         self.isos_l1_interval_min_var.get(),
+                "pre_scan_relaxation_s":     self.isos_l1_relax_s_var.get(),
+                "spo_duration_s":            self.isos_l1_spo_s_var.get(),
+                "equilibration_duration_h":  (self.isos_l1_equil_h_var.get()
+                                              if self.isos_l1_equil_enabled_var.get() else 0.0),
+                "baseline_n_scans":          self.isos_l1_baseline_n_var.get(),
+                "baseline_rest_s":           self.isos_l1_baseline_rest_s_var.get(),
+                "mpp_engine":                self.isos_l1_mpp_engine_var.get(),
+                "failure_pce_threshold_pct": self.isos_l1_fail_pct_var.get(),
+                "auto_stop_on_failure":      self.isos_l1_auto_stop_var.get(),
+                "voc_read_interval_ms":      self.isos_l1_voc_interval_ms_var.get(),
+                "perturb_step_mv":           self.isos_l1_perturb_step_mv_var.get(),
+                "mpp_v_min":                 self.isos_l1_v_min_var.get(),
+                "mpp_v_max":                 self.isos_l1_v_max_var.get(),
+                "mpp_log_interval_s":        self.isos_l1_stress_log_interval_s_var.get(),
+            })
+        elif protocol == "ISOS-V-1":
+            sched = self._isos_v1_build_schedule()
+            cfg.update({
+                "total_duration_h":          self.isos_v1_total_h_var.get(),
+                "scan_interval_min":         self.isos_v1_interval_min_var.get(),
+                "pre_scan_relaxation_s":     self.isos_v1_relax_s_var.get(),
+                "spo_duration_s":            self.isos_v1_spo_s_var.get(),
+                "equilibration_duration_h":  (self.isos_v1_equil_h_var.get()
+                                              if self.isos_v1_equil_enabled_var.get() else 0.0),
+                "baseline_n_scans":          self.isos_v1_baseline_n_var.get(),
+                "baseline_rest_s":           self.isos_v1_baseline_rest_s_var.get(),
+                "mpp_engine":                "HOLD",
+                "failure_pce_threshold_pct": self.isos_v1_fail_pct_var.get(),
+                "auto_stop_on_failure":      self.isos_v1_auto_stop_var.get(),
+                "mpp_v_min":                 self.isos_v1_v_min_var.get(),
+                "mpp_v_max":                 self.isos_v1_v_max_var.get(),
+                "mpp_log_interval_s":        self.isos_v1_stress_log_interval_s_var.get(),
+                "stress_with_light":         False,
+                "schedule_mode":             self.isos_v1_schedule_mode_var.get(),
+                "log_i_dark_during_stress":  self.isos_v1_log_idark_var.get(),
+                "dark_start_voltage":        self.isos_v1_dark_start_v_var.get(),
+                "dark_end_voltage":          self.isos_v1_dark_end_v_var.get(),
+                "dark_step_voltage":         self.isos_v1_dark_step_v_var.get(),
+                "dark_fit_v_min":            self.isos_v1_fit_vmin_var.get(),
+                "dark_fit_v_max":            self.isos_v1_fit_vmax_var.get(),
+                "tiered_schedule_json":      json.dumps(sched) if sched else "",
+            })
+        return cfg
 
     def _isos_update_treeview(self, rows: list):
         for item in self.isos_tree.get_children():
@@ -3735,6 +5853,278 @@ class JVMeasurementApp:
         if rows:
             last = self.isos_tree.get_children()[-1]
             self.isos_tree.see(last)
+
+    # ── Stability metrics panel ────────────────────────────────────────────────
+
+    def _build_isos_metrics_panel(self, parent):
+        """Live T80/T95/Ts80/T_S/PCE_S/n_1000 readout + burn-in controls."""
+        mf = LabelFrame(parent, text="Stability Metrics", padx=6, pady=4)
+        mf.pack(fill=X, padx=6, pady=(0, 4))
+        self.isos_metrics_frame = mf
+        self.isos_metric_lbls = {}
+
+        def _row(r, c, key, caption, tip):
+            Label(mf, text=caption, font=("Arial", 9, "bold")
+                  ).grid(row=r, column=c * 2, sticky=W, padx=(4, 2), pady=1)
+            lbl = Label(mf, text="—", font=("Consolas", 9), fg="#999999",
+                        anchor=W, width=20)
+            lbl.grid(row=r, column=c * 2 + 1, sticky=W, padx=(0, 10), pady=1)
+            self.isos_metric_lbls[key] = lbl
+            ToolTip(lbl, tip)
+
+        _row(0, 0, "t80",  "T80",   "First time PCE/PCE₀ ≤ 0.80.")
+        _row(1, 0, "t95",  "T95",   "First time PCE/PCE₀ ≤ 0.95 (IEC-aligned).")
+        _row(2, 0, "ts80", "Ts80",  "Time from T_S until PCE ≤ 0.80·PCE_S.")
+        _row(0, 1, "ts",   "T_S",   "End of burn-in (stabilization time). "
+             "Not applicable to dark-storage (ISOS-D) protocols.")
+        _row(1, 1, "pces", "PCE_S", "PCE at the end of burn-in (t = T_S).")
+        _row(2, 1, "n1000", "n_1000",
+             "PCE(1000 h)/PCE(0); extrapolated when the run is < 1000 h.")
+
+        ctrl = Frame(mf)
+        ctrl.grid(row=3, column=0, columnspan=4, sticky=W, pady=(5, 0))
+        Label(ctrl, text="Burn-in:", font=("Arial", 9, "bold")
+              ).pack(side=LEFT, padx=(4, 4))
+        self.isos_burnin_mode_var = StringVar(value="auto")
+        for val, txt in (("auto", "Auto"), ("manual", "Manual"),
+                         ("fallback", "Fallback")):
+            Radiobutton(ctrl, text=txt, variable=self.isos_burnin_mode_var,
+                        value=val, command=self._isos_on_burnin_change
+                        ).pack(side=LEFT)
+        Label(ctrl, text="T_S (h):").pack(side=LEFT, padx=(8, 2))
+        self.isos_manual_ts_var = DoubleVar(value=0.0)
+        ts_entry = Entry(ctrl, textvariable=self.isos_manual_ts_var, width=7)
+        ts_entry.pack(side=LEFT)
+        ts_entry.bind("<Return>", lambda *_: self._isos_on_burnin_change())
+        Button(ctrl, text="Override…", command=self._isos_burnin_override
+               ).pack(side=LEFT, padx=(6, 0))
+
+        ctrl2 = Frame(mf)
+        ctrl2.grid(row=4, column=0, columnspan=4, sticky=W, pady=(4, 0))
+        self.isos_overlay_var = BooleanVar(value=True)
+        Checkbutton(ctrl2, text="Show overlay on plot",
+                    variable=self.isos_overlay_var,
+                    command=self._isos_on_overlay_toggle).pack(side=LEFT, padx=(4, 8))
+        Button(ctrl2, text="Copy metrics to clipboard",
+               command=self._isos_copy_metrics).pack(side=LEFT)
+
+    def _isos_on_overlay_toggle(self):
+        """Redraw the active panel so the overlay appears/disappears at once."""
+        self._isos_redraw_active_overlay()
+
+    def _isos_copy_metrics(self):
+        """Copy a formatted stability-metrics text block to the clipboard."""
+        m = getattr(self, "_isos_last_metrics", None)
+        if m is None:
+            self.isos_status_var.set("No stability metrics to copy yet.")
+            return
+        proto  = self.isos_protocol_var.get()
+        sample = self.isos_sample_name_var.get().strip() or "(unnamed)"
+
+        def _h(value, reached):
+            if value is None:
+                return "not reached" if reached is False else "—"
+            return f"{value:.1f} h"
+
+        lines = [f"{proto} Stability Metrics", f"Sample: {sample}"]
+        # PCE_0 ± std — std comes from the active runner's baseline when available.
+        pce_0 = getattr(m, "pce_0", None)
+        std = None
+        runner = getattr(self, "_isos_active_runner", None)
+        if runner is not None and getattr(runner, "baseline", None):
+            std = runner.baseline.get("PCE_0_std")
+        if pce_0 is not None:
+            if std is not None:
+                lines.append(f"PCE_0 = {pce_0:.2f} ± {std:.2f} %")
+            else:
+                lines.append(f"PCE_0 = {pce_0:.2f} %")
+        lines.append(f"T80   = {_h(m.t80_h, m.t80_reached)}")
+        lines.append(f"T95   = {_h(m.t95_h, m.t95_reached)}")
+        if getattr(m, "burn_in_method", "") == "none":
+            lines.append("T_S   = n/a (dark)")
+            lines.append("PCE_S = n/a (dark)")
+            lines.append("Ts80  = n/a (dark)")
+        else:
+            lines.append(f"T_S   = {_h(m.t_s_h, None)}")
+            lines.append(f"PCE_S = {m.pce_s:.2f} %" if m.pce_s is not None
+                         else "PCE_S = —")
+            lines.append(f"Ts80  = {_h(m.ts80_h, m.ts80_reached)}")
+        if m.n_1000 is not None:
+            tag = ""
+            if m.n_1000_extrapolated:
+                conf = m.n_1000_confidence
+                tag = (f" (extrapolated, ±{conf:.2f})" if conf is not None
+                       else " (extrapolated)")
+            lines.append(f"n_1000 = {m.n_1000:.2f}{tag}")
+        else:
+            lines.append("n_1000 = —")
+
+        text = "\n".join(lines)
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.isos_status_var.set("Stability metrics copied to clipboard.")
+        except Exception:
+            self.isos_status_var.set("Could not access clipboard.")
+
+    def _isos_reset_metrics_panel(self):
+        for lbl in getattr(self, "isos_metric_lbls", {}).values():
+            lbl.config(text="—", fg="#999999")
+
+    def _isos_update_metrics_panel(self, m):
+        lbls = getattr(self, "isos_metric_lbls", None)
+        if not lbls or m is None:
+            return
+
+        def _set_time(key, value, reached):
+            lbl = lbls.get(key)
+            if lbl is None:
+                return
+            if value is None:
+                lbl.config(text=("> experiment" if reached is False else "—"),
+                           fg="#999999")
+            else:
+                mark = " ✓" if reached else ""
+                lbl.config(text=f"{value:.1f} h{mark}",
+                           fg="#2E7D32" if reached else "#333333")
+
+        _set_time("t80",  m.t80_h,  m.t80_reached)
+        _set_time("t95",  m.t95_h,  m.t95_reached)
+
+        # Burn-in metrics (T_S / PCE_S / Ts80) do not apply to dark-storage
+        # protocols, where the runner reports burn_in_method == "none".
+        if getattr(m, "burn_in_method", "") == "none":
+            for key in ("ts", "pces", "ts80"):
+                lbls[key].config(text="n/a (dark)", fg="#999999")
+        else:
+            _set_time("ts80", m.ts80_h, m.ts80_reached)
+            if m.t_s_h is not None:
+                lbls["ts"].config(text=f"{m.t_s_h:.1f} h ({m.burn_in_method})",
+                                  fg="#333333")
+            else:
+                lbls["ts"].config(text="—", fg="#999999")
+            if m.pce_s is not None:
+                lbls["pces"].config(text=f"{m.pce_s:.2f} %", fg="#333333")
+            else:
+                lbls["pces"].config(text="—", fg="#999999")
+
+        if m.n_1000 is not None:
+            txt = f"{m.n_1000:.2f}"
+            if m.n_1000_extrapolated:
+                conf = m.n_1000_confidence
+                txt += (f" (extrap. ±{conf:.2f})" if conf is not None
+                        else " (extrap.)")
+            lbls["n1000"].config(text=txt, fg="#333333")
+        else:
+            lbls["n1000"].config(text="—", fg="#999999")
+
+    def _isos_on_metrics_updated(self, metrics):
+        """Runner-thread callback (posted to the GUI thread) for new metrics."""
+        self._isos_last_metrics = metrics
+        self._isos_update_metrics_panel(metrics)
+        self._isos_redraw_active_overlay()
+
+    def _isos_d1_update_metrics(self, rows, persist=True):
+        """Light-independent metrics (T80 + n_1000) for ISOS-D dark storage.
+
+        Burn-in (T_S / PCE_S / Ts80) is intentionally omitted — it is a
+        light-driven phenomenon, so an auto-detected burn-in on a dark-storage
+        curve would be spurious (see Khenkin et al., Nat. Energy 2020). Computed
+        on the GUI thread from the already-read log (D-1 measurements are sparse,
+        so this is cheap and there is no separate runner thread).
+        """
+        from app.measurement.stability_metrics import compute_stability_metrics
+        times, pce = [], []
+        for r in rows:
+            t = r.get("Elapsed_h")
+            p = r.get("PCE_rev (%)")
+            if t is None or p in (None, ""):
+                continue
+            try:
+                times.append(float(t))
+                pce.append(float(p))
+            except (TypeError, ValueError):
+                continue
+        if len(times) < 2:
+            self._isos_last_metrics = None
+            self._isos_reset_metrics_panel()
+            return None
+
+        metrics = compute_stability_metrics(
+            times, pce, None,
+            extrapolate_n1000=True,
+            pce_column_used="PCE_rev",
+            compute_burn_in=False,
+        )
+        self._isos_last_metrics = metrics
+        self._isos_update_metrics_panel(metrics)
+        if persist:
+            try:
+                append_metrics_row(self.isos_tracking_file, len(times),
+                                   float(times[-1]), metrics)
+            except Exception:
+                pass
+        return metrics
+
+    def _isos_on_burnin_change(self, *_):
+        """Recompute + redraw within ~200 ms when the burn-in mode/T_S changes."""
+        runner = getattr(self, "_isos_active_runner", None)
+        mode   = self.isos_burnin_mode_var.get()
+        try:
+            manual = float(self.isos_manual_ts_var.get())
+        except Exception:
+            manual = None
+        if runner is not None:
+            metrics = runner.recompute_metrics(burn_in_mode=mode,
+                                               manual_burn_in_h=manual)
+            if metrics is not None:
+                self._isos_last_metrics = metrics
+                self._isos_update_metrics_panel(metrics)
+                self._isos_redraw_active_overlay()
+        elif getattr(self, "_isos_last_metrics", None) is not None:
+            self._isos_update_metrics_panel(self._isos_last_metrics)
+
+    def _isos_burnin_override(self):
+        from tkinter import simpledialog
+        try:
+            cur = float(self.isos_manual_ts_var.get())
+        except Exception:
+            cur = 0.0
+        val = simpledialog.askfloat(
+            "Manual Burn-in T_S", "Burn-in end T_S (hours):",
+            initialvalue=cur, minvalue=0.0)
+        if val is not None:
+            self.isos_manual_ts_var.set(val)
+            self.isos_burnin_mode_var.set("manual")
+            self._isos_on_burnin_change()
+
+    def _isos_redraw_active_overlay(self):
+        """Redraw whichever continuous panel is live (applies the overlay)."""
+        try:
+            if getattr(self, "isos_v1_plot_axes", None):
+                self._isos_v1_redraw()
+            elif getattr(self, "isos_l1_plot_axes", None):
+                self._isos_l1_redraw_stress()
+        except Exception:
+            pass
+
+    def _isos_overlay_metrics(self, axes):
+        """Overlay the latest stability metrics on a panel's PCE axis, if any."""
+        overlay_var = getattr(self, "isos_overlay_var", None)
+        if overlay_var is not None and not overlay_var.get():
+            return
+        m = getattr(self, "_isos_last_metrics", None)
+        if m is None or not axes or "ax_pce" not in axes:
+            return
+        from app.gui.mpp_plot_factory import overlay_stability_metrics
+        overlay_stability_metrics(axes["ax_pce"], m,
+                                  getattr(self, "_isos_total_h", 0.0))
+        canvas = axes.get("canvas")
+        if canvas is not None:
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
 
     def _isos_redraw_curves(self, tracking_path: str, new_measurement: bool = False):
         # ── Top: PCE_norm vs time ─────────────────────────────────────────────
@@ -3818,6 +6208,17 @@ class JVMeasurementApp:
         if fwd_curves or rev_curves:
             self.isos_ax_jv.legend(fontsize=9, loc="lower left")
 
+        # Overlay the light-independent stability markers (T80 / T95) on the
+        # normalized PCE axis — burn-in markers are absent for dark storage.
+        m = getattr(self, "_isos_last_metrics", None)
+        if m is not None and rows:
+            from app.gui.mpp_plot_factory import overlay_stability_metrics
+            total = max((float(r.get("Elapsed_h") or 0) for r in rows), default=0.0)
+            try:
+                overlay_stability_metrics(self.isos_ax_pce, m, total)
+            except Exception:
+                pass
+
         # Fixed axes — same as J-V Measurement mode
         self.isos_ax_jv.set_xlim(0.0, 1.2)
         self.isos_ax_jv.set_ylim(0.0, 30.0)
@@ -3831,7 +6232,7 @@ class JVMeasurementApp:
         if self.isos_tracking_file is None:
             messagebox.showwarning(
                 "No Experiment",
-                "Please create or load an ISOS-D-1 tracking file first.\n"
+                "Please create or load an ISOS tracking file first.\n"
                 "Use 'New Experiment' or 'Load Experiment…' in the Experiment tab.")
             return
         if not os.path.isfile(self.isos_tracking_file):
@@ -3840,11 +6241,30 @@ class JVMeasurementApp:
             return
         if self._measurement_running:
             return
+        protocol = self.isos_protocol_var.get()
+        # V-1: refuse to start while the illuminated scan rate is too slow.
+        if protocol == "ISOS-V-1":
+            self._isos_v1_update_scan_warn()
+            if self._isos_v1_scan_blocked:
+                rate = self._isos_current_scan_rate_mvs() or 0.0
+                messagebox.showwarning(
+                    "Scan Too Slow",
+                    f"The illuminated J-V scan rate is {rate:.0f} mV/s.\n\n"
+                    "ISOS-V-1 requires a fast illuminated scan (≥ 25 mV/s) so "
+                    "light exposure does not contaminate the dark-bias stress.\n"
+                    "Reduce the delay/NPLC or increase the step voltage.")
+                return
         self._measurement_running = True
         stop_event.clear()
         self.isos_start_btn.config(state=DISABLED)
         self.isos_stop_btn.config(state=NORMAL)
-        t = threading.Thread(target=self.run_isos_d1_measurement, daemon=True)
+        if protocol == "ISOS-D-1":
+            target = self.run_isos_d1_measurement
+        elif protocol == "ISOS-V-1":
+            target = self.run_isos_v1_measurement
+        else:
+            target = self.run_isos_l1_measurement
+        t = threading.Thread(target=target, daemon=True)
         t.start()
 
     def stop_isos_measurement(self):
@@ -3857,12 +6277,9 @@ class JVMeasurementApp:
         def log(msg):
             self.root.after(0, lambda m=msg: self.isos_status_var.set(m))
 
-        def _wait_shutter(title, body):
-            ev = threading.Event()
-            self.root.after(0, lambda: (messagebox.showinfo(title, body), ev.set()))
-            ev.wait()
-
         try:
+            self._isos_last_metrics = None
+            self.root.after(0, self._isos_reset_metrics_panel)
             inst      = self.instrument
             folder    = self.isos_export_folder_var.get() or tempfile.gettempdir()
             name      = self.isos_sample_name_var.get().strip() or "Sample"
@@ -3886,6 +6303,8 @@ class JVMeasurementApp:
 
             # ── Optional dark J-V (instrument on during dark scans) ───────────
             if do_dark:
+                if not self._shutter_set(False, prompt_if_manual=False):
+                    return
                 init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
                 log("Dark J-V: forward scan…")
                 v_df, j_df = measure_scan(inst, start_v, end_v, step_v, cell_area, stop_event)
@@ -3906,23 +6325,16 @@ class JVMeasurementApp:
                     cell_area, delay_ms, nplc, four_wire,
                     self.instrument_idn or "",
                 )
-                log("Dark J-V complete — waiting for shutter…")
-                _wait_shutter(
-                    "Dark J-V Complete — Open Shutter",
-                    "Dark J-V measurement complete.\n\n"
-                    "Please open the solar simulator shutter, then click OK\n"
-                    "to begin the illuminated J-V measurement.",
-                )
+                log("Dark J-V complete — opening shutter…")
+                if not self._shutter_set(True, prompt_if_manual=True):
+                    return
                 if stop_event.is_set():
                     return
                 init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
             else:
-                # No dark J-V: confirm shutter BEFORE turning on the instrument
-                _wait_shutter(
-                    "Open Shutter",
-                    "Please open the solar simulator shutter, then click OK\n"
-                    "to begin the illuminated J-V measurement.",
-                )
+                # No dark J-V: open the shutter BEFORE turning the output on.
+                if not self._shutter_set(True, prompt_if_manual=True):
+                    return
                 if stop_event.is_set():
                     return
                 init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
@@ -3977,6 +6389,8 @@ class JVMeasurementApp:
                 pb_en, pb_v, pb_t,
                 self.instrument_idn or "",
                 scan_rate=scan_rate_val,
+                detector_power=self._safe_float(self.isos_detector_power_var),
+                detector_area=self._safe_float(self.isos_detector_area_var),
             )
 
             # ── Append to cumulative tracking file ────────────────────────────
@@ -4028,6 +6442,7 @@ class JVMeasurementApp:
                 last  = rows[-1] if rows else {}
                 pce_r = last.get("PCE_rev (%)", "?")
                 self._isos_update_treeview(rows)
+                self._isos_d1_update_metrics(rows)
                 self._isos_redraw_curves(self.isos_tracking_file, new_measurement=True)
                 self._isos_add_to_log(lt)
                 self.isos_status_var.set(f"Done — PCE_rev = {pce_r}%")
@@ -4039,7 +6454,457 @@ class JVMeasurementApp:
                 "ISOS Measurement Error", str(e)))
             self.root.after(0, lambda: self.isos_status_var.set(f"Error: {exc}"))
         finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
             self._measurement_running = False
+            self._isos_active_runner = None
             stop_event.clear()
             self.root.after(0, lambda: self.isos_start_btn.config(state=NORMAL))
             self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
+
+    # ── ISOS-L-1 continuous-stress measurement ─────────────────────────────────
+
+    def _isos_build_l1_runner_config(self) -> dict:
+        """Assemble the ContinuousISOSRunner config from the L-1 sub-frame vars."""
+        protocol = self.isos_protocol_var.get()
+        spec     = get_protocol(protocol)
+        try:
+            pin = self.isos_detector_power_var.get() / self.isos_detector_area_var.get()
+        except Exception:
+            pin = 0.0
+        load = self.isos_load_var.get()
+        if load == "MPP":
+            stress_log_interval_s = self.isos_l1_stress_log_interval_s_var.get()
+        else:
+            stress_log_interval_s = self.isos_l1_voc_interval_ms_var.get() / 1000.0
+        return {
+            "protocol_id":              protocol,
+            "sample_name":              self.isos_sample_name_var.get().strip() or "Sample",
+            "folder":                   self.isos_export_folder_var.get() or tempfile.gettempdir(),
+            "tracking_file_path":       self.isos_tracking_file,
+            "instrument_idn":           self.instrument_idn or "",
+            "cell_area":                self.isos_cell_area_var.get(),
+            "pin":                      pin,
+            "start_v":                  self.isos_start_v_var.get(),
+            "end_v":                    self.isos_end_v_var.get(),
+            "step_v":                   self.isos_step_v_var.get(),
+            "delay_ms":                 self.isos_delay_ms_var.get(),
+            "nplc":                     self.isos_nplc_var.get(),
+            "four_wire":                self.isos_four_wire_var.get(),
+            "total_duration_h":         self.isos_l1_total_h_var.get(),
+            "scan_interval_min":        self.isos_l1_interval_min_var.get(),
+            "load_mode":                load,
+            "mpp_engine":               self.isos_l1_mpp_engine_var.get(),
+            "stress_with_light":        spec.stress_with_light,
+            "requires_dark_jv":         spec.requires_dark_jv,
+            "pre_scan_relaxation_s":    self.isos_l1_relax_s_var.get(),
+            "spo_duration_s":           self.isos_l1_spo_s_var.get(),
+            "equilibration_duration_h": (self.isos_l1_equil_h_var.get()
+                                         if self.isos_l1_equil_enabled_var.get() else 0.0),
+            "baseline_n_scans":         self.isos_l1_baseline_n_var.get(),
+            "baseline_rest_s":          self.isos_l1_baseline_rest_s_var.get(),
+            "auto_stop_on_failure":     self.isos_l1_auto_stop_var.get(),
+            "failure_thresholds":       {"pce_norm": self.isos_l1_fail_pct_var.get() / 100.0},
+            "stress_log_interval_s":    stress_log_interval_s,
+            "perturb_step_mv":          self.isos_l1_perturb_step_mv_var.get(),
+            "v_min":                    self.isos_l1_v_min_var.get(),
+            "v_max":                    self.isos_l1_v_max_var.get(),
+            "prebias_enabled":          self.isos_prebias_enabled_var.get(),
+            "prebias_v":                self.isos_prebias_voltage_var.get(),
+            "prebias_t":                self.isos_prebias_duration_var.get(),
+            "light_soaking_enabled":    self.isos_ls_enabled_var.get(),
+            "light_soaking_duration":   self.isos_ls_duration_var.get(),
+            "burn_in_mode":             self._isos_burnin_mode(),
+            "manual_burn_in_h":         self._isos_manual_burnin_h(),
+        }
+
+    def _isos_burnin_mode(self):
+        return getattr(self, "isos_burnin_mode_var", None).get() \
+            if getattr(self, "isos_burnin_mode_var", None) else "auto"
+
+    def _isos_manual_burnin_h(self):
+        if self._isos_burnin_mode() != "manual":
+            return None
+        try:
+            return float(self.isos_manual_ts_var.get())
+        except Exception:
+            return None
+
+    # ── Status-bar ETA + autosave indicator ────────────────────────────────────
+
+    @staticmethod
+    def _fmt_duration_h(hours):
+        """Format a duration in hours as ``Xh Ym`` / ``Xh`` / ``Ym``."""
+        total_min = int(round(max(0.0, float(hours)) * 60))
+        h, m = divmod(total_min, 60)
+        if h and m:
+            return f"{h}h {m}m"
+        if h:
+            return f"{h}h"
+        return f"{m}m"
+
+    def _isos_format_eta(self, elapsed_h):
+        """Build the continuous-experiment ETA status string, or ``None``.
+
+        Example: ``"L-1 running — 3h 24m of 24h — next scan in 12m —
+        ETA 2026-05-16 14:30"``.
+        """
+        total_h = float(getattr(self, "_isos_total_h", 0) or 0)
+        if total_h <= 0:
+            return None
+        proto = self.isos_protocol_var.get().replace("ISOS-", "")
+        next_txt = ""
+        runner = getattr(self, "_isos_active_runner", None)
+        if runner is not None:
+            try:
+                next_h = runner.next_scan_time(elapsed_h)
+                next_txt = (" — next scan in "
+                            f"{self._fmt_duration_h(max(0.0, next_h - elapsed_h))}")
+            except Exception:
+                next_txt = ""
+        eta = datetime.now() + timedelta(hours=max(0.0, total_h - elapsed_h))
+        return (f"{proto} running — {self._fmt_duration_h(elapsed_h)} of "
+                f"{self._fmt_duration_h(total_h)}{next_txt} — "
+                f"ETA {eta.strftime('%Y-%m-%d %H:%M')}")
+
+    def _isos_update_eta(self, t_s, force=False):
+        """Refresh the ETA status (at most once / 10 s unless ``force``)."""
+        self._isos_last_stress_t_s = t_s
+        now = time.time()
+        if not force and (now - getattr(self, "_isos_eta_last", 0.0)) < 10.0:
+            return
+        self._isos_eta_last = now
+        txt = self._isos_format_eta(t_s / 3600.0)
+        if txt:
+            self.isos_status_var.set(txt)
+
+    def _isos_refresh_eta(self):
+        """Force an ETA refresh (e.g. right after a scan completes)."""
+        t_s = getattr(self, "_isos_last_stress_t_s", None)
+        if t_s is not None:
+            self._isos_update_eta(t_s, force=True)
+
+    def _isos_on_autosave(self, ok, error):
+        """Runner-thread autosave callback → flash the status-bar dot."""
+        self.root.after(0, lambda: self._isos_set_autosave_dot(ok, error))
+
+    def _isos_set_autosave_dot(self, ok, error):
+        dot = getattr(self, "isos_autosave_dot", None)
+        if dot is None:
+            return
+        if self._isos_autosave_reset_id is not None:
+            try:
+                self.root.after_cancel(self._isos_autosave_reset_id)
+            except Exception:
+                pass
+            self._isos_autosave_reset_id = None
+        if ok:
+            dot.config(fg="#43A047")                 # green — flushing
+            self._isos_autosave_tip.text = "Autosaving…"
+            self._isos_autosave_reset_id = self.root.after(
+                1200, self._isos_reset_autosave_dot)
+        else:
+            dot.config(fg="#E53935")                 # red — last flush failed
+            self._isos_autosave_tip.text = f"Autosave error: {error}"
+
+    def _isos_reset_autosave_dot(self):
+        self._isos_autosave_reset_id = None
+        dot = getattr(self, "isos_autosave_dot", None)
+        if dot is not None:
+            dot.config(fg="#607D8B")                 # gray — idle
+            self._isos_autosave_tip.text = "Autosave idle"
+
+    def run_isos_l1_measurement(self):
+        from app.measurement.isos_continuous_runner import ContinuousISOSRunner
+
+        def _after(fn, *a):
+            self.root.after(0, lambda: fn(*a))
+
+        try:
+            cfg = self._isos_build_l1_runner_config()
+            self._isos_l1_active_load = cfg.get("load_mode", "OC")
+            self._isos_total_h = float(cfg.get("total_duration_h", 0) or 0)
+            self._isos_last_metrics = None
+            self.root.after(0, self._isos_reset_metrics_panel)
+            # Fresh live buffers + a cleared plot for the new run.
+            self._isos_l1_reset_traces()
+            self._isos_l1_last_draw = 0.0
+            self.root.after(0, self._isos_l1_redraw_stress)
+
+            callbacks = {
+                "on_status":           lambda m: _after(self.isos_status_var.set, m),
+                "on_log":              lambda m: _after(self._isos_add_to_log, m),
+                "on_stress_update":    self._isos_l1_stress_update,
+                "on_autosave":         self._isos_on_autosave,
+                "on_scan_done":        lambda meas: _after(self._isos_l1_on_scan_done, meas),
+                "on_metrics_updated":  lambda mtr: _after(self._isos_on_metrics_updated, mtr),
+                "on_baseline_done":    lambda b: _after(self._isos_l1_on_baseline_done, b),
+                "on_failure_detected": lambda r: _after(self._isos_l1_on_failure, r),
+                "on_complete":         lambda: _after(self.isos_status_var.set,
+                                                      "ISOS-L-1 experiment complete."),
+            }
+            # L-1 stresses under light, V-1 in the dark. The runner then
+            # drives the scan boundaries itself via the on_shutter callback.
+            if not self._shutter_set(bool(cfg.get("stress_with_light", True)),
+                                     prompt_if_manual=False):
+                return
+            runner = ContinuousISOSRunner(self.instrument, cfg, callbacks, stop_event)
+            self._isos_active_runner = runner
+            runner.run()
+
+        except Exception as exc:
+            self.root.after(0, lambda e=exc: messagebox.showerror(
+                "ISOS-L-1 Measurement Error", str(e)))
+            self.root.after(0, lambda e=exc: self.isos_status_var.set(f"Error: {e}"))
+        finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
+            self._measurement_running = False
+            self._isos_active_runner = None
+            stop_event.clear()
+            self.root.after(0, lambda: self.isos_start_btn.config(state=NORMAL))
+            self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
+
+    def _isos_l1_stress_update(self, t_s, v, j, pce):
+        """Buffer one live stress sample and schedule a throttled (~5 Hz) redraw.
+
+        Called from the runner thread — only appends to plain lists and posts a
+        redraw onto the GUI thread via ``root.after``.
+        """
+        if getattr(self, "_isos_l1_active_load", "OC") == "MPP":
+            self._isos_l1_t.append(t_s / 60.0)
+            self._isos_l1_v.append(v)
+            self._isos_l1_j.append(j)
+            self._isos_l1_pce.append(pce)
+        else:
+            self._isos_l1_t.append(t_s / 3600.0)
+            self._isos_l1_voc.append(v)
+        # ETA refresh (self-throttled to 10 s on the GUI thread).
+        self.root.after(0, lambda ts=t_s: self._isos_update_eta(ts))
+        now = time.time()
+        if now - self._isos_l1_last_draw < 0.2:
+            return
+        self._isos_l1_last_draw = now
+        self.root.after(0, self._isos_l1_redraw_stress)
+
+    def _isos_l1_redraw_stress(self):
+        axes = self.isos_l1_plot_axes
+        if not axes:
+            return
+        from app.gui.mpp_plot_factory import update_oc_plot, update_mpp_plot
+        try:
+            if "ax_voc" in axes:
+                update_oc_plot(axes, list(self._isos_l1_t), list(self._isos_l1_voc),
+                               self._isos_l1_latest_jv)
+            else:
+                update_mpp_plot(axes, list(self._isos_l1_t), list(self._isos_l1_v),
+                                list(self._isos_l1_j), list(self._isos_l1_pce),
+                                self._isos_l1_latest_jv)
+                self._isos_overlay_metrics(axes)
+        except Exception:
+            pass
+
+    def _isos_l1_on_scan_done(self, meas):
+        v_r = meas.get("v_rev")
+        j_r = meas.get("j_rev")
+        if v_r is not None and j_r is not None:
+            self._isos_l1_latest_jv = {"v": list(v_r), "j": list(j_r),
+                                       "vmpp": meas.get("Vmpp")}
+        try:
+            rows = read_isos_log(self.isos_tracking_file)
+            self._isos_update_treeview(rows)
+        except Exception:
+            pass
+        self._isos_l1_redraw_stress()
+        self._isos_refresh_eta()
+        play_completion_sound()
+
+    def _isos_l1_on_baseline_done(self, baseline):
+        med = baseline.get("PCE_0_median") if baseline else None
+        if med:
+            self.isos_status_var.set(f"Baseline PCE₀ = {med:.3f}%")
+            self.isos_tree.insert("", END, values=(
+                "B", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "0.0", f"{med:.3f}", "1.000"))
+        else:
+            self.isos_status_var.set("Baseline conditioning complete.")
+
+    def _isos_l1_on_failure(self, reason):
+        cont = messagebox.askyesno(
+            "Cell Failure Detected",
+            f"Cell failure detected: {reason}\n\nContinue the experiment?")
+        if not cont:
+            stop_event.set()
+
+    # ── ISOS-V-1 dark-bias continuous measurement ──────────────────────────────
+
+    def _isos_build_v1_runner_config(self) -> dict:
+        """Assemble the ContinuousISOSRunner config from the V-1 sub-frame vars."""
+        protocol = self.isos_protocol_var.get()
+        spec     = get_protocol(protocol)
+        try:
+            pin = self.isos_detector_power_var.get() / self.isos_detector_area_var.get()
+        except Exception:
+            pin = 0.0
+        load = self.isos_load_var.get()
+        sched = self._isos_v1_build_schedule()
+        return {
+            "protocol_id":              protocol,
+            "sample_name":              self.isos_sample_name_var.get().strip() or "Sample",
+            "folder":                   self.isos_export_folder_var.get() or tempfile.gettempdir(),
+            "tracking_file_path":       self.isos_tracking_file,
+            "instrument_idn":           self.instrument_idn or "",
+            "cell_area":                self.isos_cell_area_var.get(),
+            "pin":                      pin,
+            # Illuminated scan range (fast scan) — shared scan-parameter vars.
+            "start_v":                  self.isos_start_v_var.get(),
+            "end_v":                    self.isos_end_v_var.get(),
+            "step_v":                   self.isos_step_v_var.get(),
+            "delay_ms":                 self.isos_delay_ms_var.get(),
+            "nplc":                     self.isos_nplc_var.get(),
+            "four_wire":                self.isos_four_wire_var.get(),
+            # Dark scan range + ideality fit window.
+            "dark_start_v":             self.isos_v1_dark_start_v_var.get(),
+            "dark_end_v":               self.isos_v1_dark_end_v_var.get(),
+            "dark_step_v":              self.isos_v1_dark_step_v_var.get(),
+            "dark_fit_v_min":           self.isos_v1_fit_vmin_var.get(),
+            "dark_fit_v_max":           self.isos_v1_fit_vmax_var.get(),
+            # Stress / scheduling.
+            "total_duration_h":         self.isos_v1_total_h_var.get(),
+            "scan_interval_min":        self.isos_v1_interval_min_var.get(),
+            "tiered_schedule":          sched,
+            "schedule_mode":            self.isos_v1_schedule_mode_var.get(),
+            "load_mode":                load,
+            "mpp_engine":               "HOLD",
+            "stress_with_light":        spec.stress_with_light,   # False for V-1
+            "requires_dark_jv":         spec.requires_dark_jv,    # True for V-1
+            "log_i_dark_during_stress": self.isos_v1_log_idark_var.get(),
+            "pre_scan_relaxation_s":    self.isos_v1_relax_s_var.get(),
+            "spo_duration_s":           self.isos_v1_spo_s_var.get(),
+            "equilibration_duration_h": (self.isos_v1_equil_h_var.get()
+                                         if self.isos_v1_equil_enabled_var.get() else 0.0),
+            "baseline_n_scans":         self.isos_v1_baseline_n_var.get(),
+            "baseline_rest_s":          self.isos_v1_baseline_rest_s_var.get(),
+            "auto_stop_on_failure":     self.isos_v1_auto_stop_var.get(),
+            "failure_thresholds": {
+                "pce_norm":    self.isos_v1_fail_pct_var.get() / 100.0,
+                "idark_ratio": (self.isos_v1_fail_idark_mult_var.get()
+                                if self.isos_v1_fail_idark_mult_var.get() > 0 else None),
+                "rsh_dark":    (self.isos_v1_fail_rsh_dark_var.get()
+                                if self.isos_v1_fail_rsh_dark_var.get() > 0 else None),
+            },
+            "stress_log_interval_s":    self.isos_v1_stress_log_interval_s_var.get(),
+            "v_min":                    self.isos_v1_v_min_var.get(),
+            "v_max":                    self.isos_v1_v_max_var.get(),
+            "prebias_enabled":          self.isos_prebias_enabled_var.get(),
+            "prebias_v":                self.isos_prebias_voltage_var.get(),
+            "prebias_t":                self.isos_prebias_duration_var.get(),
+            "light_soaking_enabled":    self.isos_ls_enabled_var.get(),
+            "light_soaking_duration":   self.isos_ls_duration_var.get(),
+            "burn_in_mode":             self._isos_burnin_mode(),
+            "manual_burn_in_h":         self._isos_manual_burnin_h(),
+        }
+
+    def run_isos_v1_measurement(self):
+        from app.measurement.isos_continuous_runner import ContinuousISOSRunner
+
+        def _after(fn, *a):
+            self.root.after(0, lambda: fn(*a))
+
+        try:
+            cfg = self._isos_build_v1_runner_config()
+            self._isos_total_h = float(cfg.get("total_duration_h", 0) or 0)
+            self._isos_last_metrics = None
+            self.root.after(0, self._isos_reset_metrics_panel)
+            self._isos_v1_latest_illum_jv = None
+            self._isos_v1_latest_dark_jv  = None
+            self.root.after(0, self._isos_v1_redraw)
+
+            callbacks = {
+                "on_status":           lambda m: _after(self.isos_status_var.set, m),
+                "on_log":              lambda m: _after(self._isos_add_to_log, m),
+                "on_shutter":          lambda a: self._isos_v1_shutter_prompt(a),
+                "on_scan_done":        lambda meas: _after(self._isos_v1_on_scan_done, meas),
+                "on_metrics_updated":  lambda mtr: _after(self._isos_on_metrics_updated, mtr),
+                "on_stress_update":    self._isos_v1_stress_update,
+                "on_autosave":         self._isos_on_autosave,
+                "on_baseline_done":    lambda b: _after(self._isos_l1_on_baseline_done, b),
+                "on_failure_detected": lambda r: _after(self._isos_l1_on_failure, r),
+                "on_complete":         lambda: _after(self.isos_status_var.set,
+                                                      "ISOS-V-1 experiment complete."),
+            }
+            # L-1 stresses under light, V-1 in the dark. The runner then
+            # drives the scan boundaries itself via the on_shutter callback.
+            if not self._shutter_set(bool(cfg.get("stress_with_light", True)),
+                                     prompt_if_manual=False):
+                return
+            runner = ContinuousISOSRunner(self.instrument, cfg, callbacks, stop_event)
+            self._isos_active_runner = runner
+            runner.run()
+
+        except Exception as exc:
+            self.root.after(0, lambda e=exc: messagebox.showerror(
+                "ISOS-V-1 Measurement Error", str(e)))
+            self.root.after(0, lambda e=exc: self.isos_status_var.set(f"Error: {e}"))
+        finally:
+            # Every measurement ends with the shutter closed, and it
+            # stays closed until the next one asks for light.
+            self._shutter_close_if_automatic()
+            self._measurement_running = False
+            self._isos_active_runner = None
+            stop_event.clear()
+            self.root.after(0, lambda: self.isos_start_btn.config(state=NORMAL))
+            self.root.after(0, lambda: self.isos_stop_btn.config(state=DISABLED))
+
+    def _isos_v1_shutter_prompt(self, action):
+        """Runner callback, fired from the runner thread; blocks until done.
+
+        ``ContinuousISOSRunner`` is untouched by shutter automation: it has
+        always emitted ``on_shutter`` here and always blocked on it. Only
+        what happens inside changed.
+        """
+        self._shutter_set(action == "open", prompt_if_manual=True)
+
+    def _isos_v1_stress_update(self, t_s, v, j, pce):
+        """Refresh the live ETA during dark stress (throttled to ≤ 5 Hz)."""
+        now = time.time()
+        if now - getattr(self, "_isos_v1_last_update", 0.0) < 0.2:
+            return
+        self._isos_v1_last_update = now
+        self.root.after(0, lambda ts=t_s: self._isos_update_eta(ts))
+
+    def _isos_v1_on_scan_done(self, meas):
+        v_r, j_r = meas.get("v_rev"), meas.get("j_rev")
+        if v_r is not None and j_r is not None:
+            self._isos_v1_latest_illum_jv = {"v": list(v_r), "j": list(j_r),
+                                             "vmpp": meas.get("Vmpp")}
+        dv, dj = meas.get("v_rev_dark"), meas.get("j_rev_dark")
+        if dv is not None and dj is not None:
+            self._isos_v1_latest_dark_jv = {"v": list(dv), "j": list(dj)}
+        try:
+            rows = read_isos_log(self.isos_tracking_file)
+            self._isos_update_treeview(rows)
+        except Exception:
+            pass
+        self._isos_v1_redraw()
+        self._isos_refresh_eta()
+        play_completion_sound()
+
+    def _isos_v1_redraw(self):
+        axes = self.isos_v1_plot_axes
+        if not axes:
+            return
+        from app.gui.mpp_plot_factory import update_v1_plot
+        try:
+            rows = read_isos_log(self.isos_tracking_file) if self.isos_tracking_file else []
+        except Exception:
+            rows = []
+        try:
+            update_v1_plot(axes, rows,
+                           getattr(self, "_isos_v1_latest_illum_jv", None),
+                           getattr(self, "_isos_v1_latest_dark_jv", None))
+            self._isos_overlay_metrics(axes)
+        except Exception:
+            pass
