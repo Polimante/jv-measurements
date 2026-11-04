@@ -2,7 +2,11 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [2.8.0] — 2026-11-04
+
+> **Update with the installer from the release page.** The update prompt opens it for you.
+> No new libraries since 2.7.0, but copies older than 2.7.0 lack scipy and their updater
+> does not check for it, so this release is not offered in place.
 
 ### Added
 - J-V mode now measures how long each scan really took. The status bar and log show the forward and reverse scan times, the rate each one achieved and the total time, and the file saves them in new columns AG-AK (K-L in dark J-V files). The Data Viewer shows them in a "Measured Time" section. The existing Scan Rate column stays the calculated value
