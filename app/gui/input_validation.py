@@ -12,12 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.utils.scan_timing import nplc_duration_ms
+
 # ── Hardware limits ───────────────────────────────────────────────────────────
 
 _NPLC_MIN: float = 0.01
 _NPLC_MAX: float = 25.0          # Keithley 2400 upper limit
 _GPIB_OVERHEAD_MS: float = 50.0  # matches _recalculate_delay_from_scan_rate
-_PLC_HZ: float = 60.0            # power-line frequency (Brazil / North America)
 
 # Windows-forbidden filename characters
 _WINDOWS_FORBIDDEN: frozenset[str] = frozenset('<>:"/\\|?*')
@@ -118,6 +119,29 @@ def validate_delay_ms(raw: str) -> ValidationResult:
         return ValidationResult(
             None,
             error=ValidationError("delay_negative", "Delay cannot be negative."),
+        )
+    return ValidationResult(val)
+
+
+def validate_pixel_count(raw: str) -> ValidationResult:
+    """Validate the pixels-per-sample entry: a whole number, 0 = keep all curves.
+
+    A blank entry means 0.
+
+    Returns:
+        ValidationResult with parsed_value = the pixel count on success.
+    """
+    raw = str(raw).strip()
+    try:
+        val = int(raw) if raw else 0
+    except ValueError:
+        val = -1
+    if val < 0:
+        return ValidationResult(
+            None,
+            error=ValidationError(
+                "pixels_invalid",
+                "Pixels per sample must be a whole number (0 keeps all curves)."),
         )
     return ValidationResult(val)
 
@@ -252,12 +276,13 @@ def validate_scan_rate(
     target_rate_mv_per_s: float,
     step_mv: float,
     nplc: float,
+    line_hz: Optional[float] = None,
 ) -> ValidationResult:
     """Validate a target scan rate; warn when delay would clamp to 0 ms.
 
     Applies the formula documented in CLAUDE.md::
 
-        delay = (step_mV / rate × 1000) − NPLC × 16.7 − 50 ms  (clamped ≥ 0)
+        delay = (step_mV / rate × 1000) − NPLC duration − 50 ms  (clamped ≥ 0)
 
     A ``⚠`` warning is issued when the computed delay is forced to zero,
     meaning the actual achieved rate will be lower than the target.
@@ -266,6 +291,7 @@ def validate_scan_rate(
         target_rate_mv_per_s: Desired scan rate (mV/s).
         step_mv:              Voltage step size (mV/point).
         nplc:                 Integration time (power-line cycles).
+        line_hz:              Line frequency; None uses the default grid.
 
     Returns:
         ValidationResult with parsed_value = target_rate_mv_per_s on success.
@@ -276,7 +302,7 @@ def validate_scan_rate(
             None,
             error=ValidationError("scan_rate_invalid", "Scan rate must be positive."),
         )
-    nplc_ms = nplc * (1000.0 / _PLC_HZ)
+    nplc_ms = nplc_duration_ms(nplc, line_hz)
     time_per_point_ms = step_mv / target_rate_mv_per_s * 1000.0
     delay_ms = max(0.0, time_per_point_ms - nplc_ms - _GPIB_OVERHEAD_MS)
     if delay_ms == 0.0:

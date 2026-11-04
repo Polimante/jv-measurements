@@ -104,11 +104,23 @@ class TSPTransport:
         upper = stripped.upper()
         if upper == "*IDN?":
             return self._inst.query(cmd)          # 2600 answers *IDN? natively
+        if upper == ":SYST:LFR?":
+            return self._inst.query("print(localnode.linefreq)")
         if upper in (":READ?", "READ?"):
             if self._settle_s > 0.0:
                 time.sleep(self._settle_s)        # per-point settling wait
             return self._inst.query(self._read_tsp())
         raise UnsupportedSCPICommand(f"No TSP translation for query {cmd!r}")
+
+    @property
+    def timeout(self):
+        return self._inst.timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        # __getattr__ only proxies reads: without this setter, assigning would
+        # create an attribute here and leave the real session's timeout alone.
+        self._inst.timeout = value
 
     def write_raw(self, tsp: str) -> None:
         """Send a TSP statement straight through, with no SCPI translation.

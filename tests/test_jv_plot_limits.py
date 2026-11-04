@@ -151,3 +151,29 @@ def test_limits_are_always_ordered(case):
     (x_lo, x_hi), (y_lo, y_hi) = jv_plot_limits([case])
     assert x_lo < x_hi
     assert y_lo < y_hi
+
+
+# ── Pixels per sample ────────────────────────────────────────────────────────
+
+class TestNextPlotStart:
+    def _walk(self, pixels, n):
+        from app.gui.plot_limits import next_plot_start
+        start, seen = 0, []
+        for entries in range(1, n + 1):
+            start = next_plot_start(start, entries, pixels)
+            seen.append(start)
+        return seen
+
+    def test_five_pixels_stay_together_and_the_sixth_starts_over(self):
+        assert self._walk(5, 11) == [0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 10]
+
+    def test_zero_keeps_accumulating(self):
+        assert self._walk(0, 8) == [0] * 8
+
+    def test_one_pixel_shows_only_the_latest(self):
+        assert self._walk(1, 4) == [0, 1, 2, 3]
+
+    def test_stale_start_after_the_session_was_cleared(self):
+        from app.gui.plot_limits import next_plot_start
+        assert next_plot_start(7, 1, 5) == 0
+        assert next_plot_start(7, 1, 0) == 0

@@ -818,6 +818,16 @@
     </div>
 
     <div class="param-block">
+      <div class="param-name">Pixels per sample</div>
+      <div class="param-row"><span class="param-key">Default:</span><span class="param-val">0 (keep every curve)</span></div>
+      <p style="margin-top:8px;">How many pixels the substrate has, to compare them on one plot. With 5,
+         the plot keeps measurements 1 to 5 together; measurement 6 belongs to the next substrate, so it
+         clears the plot and is drawn alone. The status bar shows the position, such as
+         <em>Pixel 3/5</em>. Only the plot is cleared: every file stays saved. A failed or stopped
+         measurement does not count. <strong>Clear Session</strong> starts the count again.</p>
+    </div>
+
+    <div class="param-block">
       <div class="param-name">Measure from REV to FWD</div>
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">Off</span></div>
       <p style="margin-top:8px;">Off: the forward scan (Start &rarr; End) runs first, then the reverse
@@ -830,7 +840,7 @@
     </div>
 
     <h3>Scan rate reference table</h3>
-    <p>Brazil grid 60 Hz; 1 NPLC ≈ 16.7 ms. The 20 ms software overhead is included.</p>
+    <p>Calculated for a 60 Hz grid (1 NPLC ≈ 16.7 ms); on a 50 Hz grid 1 NPLC = 20 ms, so rates at high NPLC are lower. The 20 ms software overhead is included.</p>
     <table>
       <thead>
         <tr><th>Delay (ms)</th><th>NPLC</th><th>Time/point (ms)</th><th>Rate at 25 mV step</th><th>Use case</th></tr>
@@ -871,8 +881,12 @@
       <div class="param-row"><span class="param-key">Default:</span><span class="param-val">1.0</span></div>
       <div class="param-row"><span class="param-key">Range:</span><span class="param-val">0.01 – 25</span></div>
       <div class="param-row"><span class="param-key">SCPI:</span><span class="param-val"><code>:SENS:CURR:NPLC {value}</code></span></div>
-      <p style="margin-top:8px;">Integration time of the Keithley ADC. At 60 Hz, 1 NPLC = 16.7 ms.
-         Higher NPLC averages out more 60 Hz noise at the cost of slower scan speed.
+      <p style="margin-top:8px;">Integration time of the Keithley ADC, in cycles of the power line:
+         1 NPLC = 16.7 ms at 60 Hz and 20 ms at 50 Hz. The software reads the line frequency from
+         the instrument when it connects, shows it in the connection bar, uses it for every scan
+         rate and saves it in the Excel file. If the instrument cannot report it, the bar warns
+         that 60 Hz is being assumed.
+         Higher NPLC averages out more line noise at the cost of slower scan speed.
          Use NPLC 5–10 for dark J-V where currents are in the nA–μA range;
          NPLC 1.0 is sufficient for illuminated measurements.</p>
     </div>
@@ -896,7 +910,7 @@
             shown read-only, so you can verify the effective rate at a glance without arithmetic.</li>
         <li><strong>Scan Rate mode:</strong> click the <strong>Scan Rate →</strong> toggle button
             to switch. Enter a target scan rate in mV/s; the software back-calculates the delay as:
-            <pre>delay = (step_mV / rate_mV_s × 1000) − NPLC × 16.7 − 50 ms</pre>
+            <pre>delay = (step_mV / rate_mV_s × 1000) − NPLC / f_line × 1000 − 50 ms</pre>
             The 50 ms constant accounts for GPIB overhead. The result is clamped to 0 ms when the
             formula yields a negative value. A <code>⚠</code> symbol is appended to the displayed
             scan rate when the delay was clamped, indicating the hardware cannot sustain the
@@ -3174,6 +3188,10 @@ python probe_shutter.py --lines 1-8  # restrict the range if other kit shares th
         <tr><td>AB</td><td>Scan Order (FWD-&gt;REV / REV-&gt;FWD)</td><td>✓</td><td>—</td></tr>
         <tr><td>AC</td><td>Illumination (mW/cm²) — the P<sub>in</sub> the PCE is divided by</td><td>✓</td><td>—</td></tr>
         <tr><td>AD–AE</td><td>Detector Power (mW), Detector Area (cm²)</td><td>✓</td><td>—</td></tr>
+        <tr><td>AF</td><td>Line Frequency (Hz), as reported by the instrument</td><td>✓</td><td>—</td></tr>
+        <tr><td>AG–AH</td><td>Forward and Reverse Scan Time (s), measured by the clock; pre-bias excluded</td><td>✓</td><td>—</td></tr>
+        <tr><td>AI</td><td>Total Measurement Time (s), from Start to the end of the illuminated scans, including dark J-V, light soaking, pre-bias and any wait for the operator</td><td>✓</td><td>—</td></tr>
+        <tr><td>AJ–AK</td><td>Measured Forward and Reverse Scan Rate (mV/s). AA is the calculated rate; these come from the measured time</td><td>✓</td><td>—</td></tr>
       </tbody>
     </table>
     <p>The <code>CLAUDE.md</code> file in the repository documents the column mappings for all

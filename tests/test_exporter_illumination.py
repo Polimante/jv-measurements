@@ -63,7 +63,7 @@ def test_pce_can_be_recomputed_from_the_file(tmp_path):
 def test_old_file_without_the_columns_still_opens(tmp_path):
     fp = _save(tmp_path)
     wb = openpyxl.load_workbook(fp)
-    wb["MeasurementData"].delete_cols(28, 4)     # what a pre-2026-10 file looks like
+    wb["MeasurementData"].delete_cols(28, 10)     # what a pre-2026-10 file looks like
     wb.save(fp)
     meta = load_jv_file(fp)
     assert meta["illumination"] is None
@@ -110,7 +110,7 @@ def test_viewer_says_so_when_an_old_file_has_no_illumination(tk_root, tmp_path):
 
     fp = _save(tmp_path)
     wb = openpyxl.load_workbook(fp)
-    wb["MeasurementData"].delete_cols(28, 4)
+    wb["MeasurementData"].delete_cols(28, 10)
     wb.save(fp)
     win = DataViewerWindow(tk_root, fp)
     try:
@@ -118,3 +118,34 @@ def test_viewer_says_so_when_an_old_file_has_no_illumination(tk_root, tmp_path):
     finally:
         win.win.destroy()
     assert "not recorded (older file)" in text
+
+
+@pytest.mark.gui
+def test_viewer_shows_line_frequency_and_measured_time(tk_root, tmp_path):
+    from app.gui.data_viewer import DataViewerWindow
+
+    fp = _save(tmp_path, line_hz=50.0,
+               timing={"fwd_s": 12.34, "rev_s": 13.0, "total_s": 30.0,
+                       "fwd_rate": 96.8, "rev_rate": 95.5})
+    win = DataViewerWindow(tk_root, fp)
+    try:
+        text = _panel_text(win._meta_inner)
+    finally:
+        win.win.destroy()
+    assert "50 Hz" in text
+    assert "Measured Time" in text
+    assert "12.3 s" in text
+    assert "30.0 s" in text
+    assert "96.8 mV/s" in text
+
+
+@pytest.mark.gui
+def test_viewer_omits_measured_time_for_a_file_without_it(tk_root, tmp_path):
+    from app.gui.data_viewer import DataViewerWindow
+
+    win = DataViewerWindow(tk_root, _save(tmp_path))
+    try:
+        text = _panel_text(win._meta_inner)
+    finally:
+        win.win.destroy()
+    assert "Measured Time" not in text

@@ -63,9 +63,11 @@ class FakeKeithley:
     """
 
     def __init__(self, cell: DummyCell | None = None, area: float = 0.07,
-                 voc: float = 1.0, dark_factor: float = 1e-6):
+                 voc: float = 1.0, dark_factor: float = 1e-6,
+                 line_hz: float = 60.0):
         self.cell = cell if cell is not None else DummyCell(mode="ideal_stable")
         self.area = area
+        self.line_hz = line_hz
         self.voc  = voc
         self.v    = 0.0
         self.func = "VOLT"
@@ -131,6 +133,8 @@ class FakeKeithley:
     def query(self, cmd: str) -> str:
         if cmd == "*IDN?":
             return SIMULATED_IDN
+        if cmd == ":SYST:LFR?":
+            return f"{self.line_hz:g}"
         if cmd == ":READ?":
             if self.func == "CURR":          # OC mode → Voc in field 0
                 return f"{self.voc:.6f},0,0,0,0"

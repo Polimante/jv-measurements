@@ -274,3 +274,20 @@ class TestValidateThresholdRange:
         res = validate_threshold_range(min_val=5.0, max_val=25.0)
         assert res.error is None
         assert res.parsed_value == pytest.approx(20.0)
+
+
+# ── Pixels per sample ────────────────────────────────────────────────────────
+
+class TestValidatePixelCount:
+    @pytest.mark.parametrize("raw, expected", [
+        ("0", 0), ("4", 4), (" 5 ", 5), ("", 0), ("  ", 0),
+    ])
+    def test_valid(self, raw, expected):
+        from app.gui.input_validation import validate_pixel_count
+        res = validate_pixel_count(raw)
+        assert res.error is None and res.parsed_value == expected
+
+    @pytest.mark.parametrize("raw", ["-1", "2.5", "abc"])
+    def test_invalid(self, raw):
+        from app.gui.input_validation import validate_pixel_count
+        assert validate_pixel_count(raw).error.code == "pixels_invalid"

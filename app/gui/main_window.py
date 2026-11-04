@@ -21,10 +21,14 @@ from app.gui.theme import PLOT_COLORS
 from app.utils.constants import APP_NAME, stop_event
 from app.utils.sound import play_completion_sound
 from app.utils.updater import check_for_updates, get_local_version
+from app.utils.scan_timing import (
+    DEFAULT_LINE_HZ, format_scan_times, nplc_duration_ms,
+    read_line_frequency, scan_rate_mv_s, timed_scan,
+)
 from app.gui.tooltip import ToolTip
 from app.gui.mpp_settings_frame import build_mpp_settings_frame, build_param_grid
 from app.gui.instrument_dialog import InstrumentDialog
-from app.gui.plot_limits import jv_plot_limits
+from app.gui.plot_limits import jv_plot_limits, next_plot_start
 from app.gui.shutter_dialog import ShutterDialog
 from app.instrument.tsp_transport import TSPTransport, is_tsp_instrument
 from app.shutter import CLOSED, OPEN, ShutterError
@@ -85,6 +89,15 @@ class JVMeasurementApp:
         self.current_mode         = "jv"
         self._measurement_running = False
         self.isos_tracking_file   = None
+
+        # Line frequency the scan-rate arithmetic uses. Read from the
+        # instrument at connect; see _detect_line_frequency().
+        self._line_hz          = DEFAULT_LINE_HZ
+        self._line_hz_detected = False
+
+        # First session entry the J-V plot draws; see next_plot_start().
+        self._plot_start_idx = 0
+        self._pmpp_tracker   = None
 
         # ── Shutter ───────────────────────────────────────────────────────
         # Created before setup_gui() because the Instrument tab renders the
@@ -215,6 +228,19 @@ class JVMeasurementApp:
         self.input_widgets.append(self.export_entry)
         ToolTip(self.export_entry, "Select output directory for measurement data")
 
+        Label(sf, text="Pixels per sample:").grid(
+            row=2, column=0, sticky=W, padx=4, pady=3)
+        self.pixels_per_sample_var = StringVar(value="0")
+        pixels_entry = Entry(sf, textvariable=self.pixels_per_sample_var, width=6)
+        pixels_entry.grid(row=2, column=1, sticky=W, padx=4, pady=3)
+        self.input_widgets.append(pixels_entry)
+        ToolTip(pixels_entry,
+                "How many pixels this substrate has. The plot keeps that many\n"
+                "measurements together; the next one belongs to the next substrate,\n"
+                "so it clears the plot and is drawn alone.\n\n"
+                "0 (default): keep every measurement on the plot.\n"
+                "Only the plot is cleared: all data stays saved in the files.")
+
         # Scan Parameters
         pf = LabelFrame(tab_scan, text="Scan Parameters", padx=6, pady=4)
         pf.pack(fill=X, pady=(0, 6))
@@ -315,7 +341,8 @@ class JVMeasurementApp:
         Label(inf, text="(0.01\u201325)", fg="#666666").grid(row=2, column=2, sticky=W)
         self.input_widgets.append(nplc_entry)
         ToolTip(nplc_entry,
-                "Number of Power Line Cycles per reading (Brazil: 60 Hz \u2192 1 NPLC \u2248 16.7 ms).\n"
+                "Number of Power Line Cycles per reading: 1 NPLC = 16.7 ms at 60 Hz,\n"
+                "20 ms at 50 Hz. The line frequency is read from the instrument.\n"
                 "Higher = less noise, slower. Range: 0.01 \u2013 25.")
 
         # ── Target scan rate row (visible only in "scan_rate" mode) ──────────
@@ -335,7 +362,7 @@ class JVMeasurementApp:
         ToolTip(self._sr_input_entry,
                 "Target voltage sweep rate in mV/s.\n\n"
                 "Delay per point is calculated automatically:\n"
-                "  delay = (step_mV / scan_rate \u00d7 1000) \u2212 NPLC \u00d7 16.7 \u2212 50 ms\n\n"
+                "  delay = (step_mV / scan_rate \u00d7 1000) \u2212 NPLC / line_Hz \u00d7 1000 \u2212 50 ms\n\n"
                 "The 50 ms accounts for GPIB + Python overhead.\n"
                 "If the result is negative (rate too fast for step/NPLC),\n"
                 "delay is clamped to 0 ms and the actual rate shown.\n\n"
@@ -377,7 +404,7 @@ class JVMeasurementApp:
         ToolTip(sr_lbl,
                 "Effective voltage sweep rate, calculated automatically from:\n"
                 "  Scan rate (mV/s) = Step Voltage (mV) \u00f7 Time per point (s)\n\n"
-                "Time per point = Delay + NPLC \u00d7 16.7 ms + 50 ms (GPIB overhead)\n\n"
+                "Time per point = Delay + NPLC / line_Hz + 50 ms (GPIB overhead)\n\n"
                 "For perovskite solar cells, typical values in the literature:\n"
                 "  Fast scan:   50\u2013200 mV/s  (maximises hysteresis)\n"
                 "  Standard:    10\u2013100 mV/s  (good balance of speed and accuracy)\n"
@@ -753,11 +780,14 @@ class JVMeasurementApp:
         self.instrument_addr = addr
         self.instrument_idn  = idn
 
+        self._detect_line_frequency()
+
         short_idn = idn[:60] + ("\u2026" if len(idn) > 60 else "")
         badge = f" \u2014 TSP/SMU {self.tsp_channel_var.get()}" if tsp else ""
+        line = self._line_frequency_note()
         self._apply_connected_state(
-            f"\u2714  Connected: {short_idn}{badge}  [{addr}]",
-            f"Instrument connected: {addr}{badge}")
+            f"\u2714  Connected: {short_idn}{badge}  [{addr}]  |  {line}",
+            f"Instrument connected: {addr}{badge}  |  {line}")
 
         # The shutter shares this session. Hand it over and assert a closed
         # shutter straight away \u2014 see _shutter_close_on_connect().
@@ -782,6 +812,7 @@ class JVMeasurementApp:
         self.instrument_addr = "SIMULATOR"
         self.instrument_idn  = self.instrument.query("*IDN?").strip()
         self._simulated = True
+        self._detect_line_frequency()
 
         self._apply_connected_state(
             f"\u2699  SIMULATION \u2014 {mode}  (no hardware)",
@@ -964,6 +995,35 @@ class JVMeasurementApp:
                 "and use Test: Close.\n\nUntil then the illumination state is "
                 "unknown — do not trust a dark measurement.")
 
+    def _detect_line_frequency(self):
+        """Ask the connected instrument for its line frequency.
+
+        NPLC lasts 16.7 ms at 60 Hz and 20 ms at 50 Hz, so every scan rate and
+        scan-rate-derived delay on screen is recomputed from the answer.
+        """
+        hz = read_line_frequency(self.instrument)
+        self._line_hz_detected = hz is not None
+        self._line_hz = hz if hz is not None else DEFAULT_LINE_HZ
+        self._refresh_scan_timing()
+
+    def _detected_line_hz(self):
+        """The frequency to record in a file: None when it is only assumed."""
+        return self._line_hz if self._line_hz_detected else None
+
+    def _line_frequency_note(self):
+        """Connection-bar text, which must say so when the value is a guess."""
+        if self._line_hz_detected:
+            return f"Line: {self._line_hz:.0f} Hz"
+        return (f"\u26a0 Line frequency not read \u2014 assuming "
+                f"{self._line_hz:.0f} Hz for scan rates")
+
+    def _refresh_scan_timing(self):
+        """Recompute the scan rates and delays of every measurement mode."""
+        self._on_measurement_params_change()
+        self._lij_params_changed()
+        self.update_mpp_scan_rate()
+        self._isos_on_measurement_params_change()
+
     def _apply_connected_state(self, label_text, status_text):
         """Flip the UI into the 'instrument connected' state (real or simulated)."""
         self.instrument_label_var.set(label_text)
@@ -976,6 +1036,9 @@ class JVMeasurementApp:
 
     def disconnect_instrument(self):
         self._close_instrument()
+        self._line_hz = DEFAULT_LINE_HZ
+        self._line_hz_detected = False
+        self._refresh_scan_timing()
         self.instrument_label_var.set(
             "\u26a0  No instrument connected \u2014 use Instrument \u2192 Connect")
         self.status_var.set("Instrument disconnected.")
@@ -1100,6 +1163,7 @@ class JVMeasurementApp:
         ):
             return
         self.session_data.clear()
+        self._plot_start_idx = 0
         self.draw_placeholder_plot()
         self.status_var.set("Session data cleared.")
 
@@ -1140,7 +1204,7 @@ class JVMeasurementApp:
         try:
             step_mv        = self.step_voltage_var.get() * 1000.0
             delay_ms       = self.delay_ms_var.get()
-            nplc_ms        = self.nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms        = nplc_duration_ms(self.nplc_var.get(), self._line_hz)
             time_per_point = (delay_ms + nplc_ms + 50.0) / 1000.0
             if time_per_point <= 0 or step_mv <= 0:
                 self.scan_rate_var.set("\u2014")
@@ -1181,7 +1245,7 @@ class JVMeasurementApp:
         try:
             step_mv          = self.step_voltage_var.get() * 1000.0
             target_rate      = self.target_scan_rate_var.get()
-            nplc_ms          = self.nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms          = nplc_duration_ms(self.nplc_var.get(), self._line_hz)
             gpib_overhead_ms = 50.0
 
             if step_mv <= 0 or target_rate <= 0:
@@ -1203,7 +1267,7 @@ class JVMeasurementApp:
         from app.gui.input_validation import (
             validate_filename, validate_voltage_range,
             validate_cell_area, validate_delay_ms, validate_nplc,
-            validate_illumination,
+            validate_illumination, validate_pixel_count,
         )
 
         def _sv(var, fallback=""):
@@ -1236,6 +1300,9 @@ class JVMeasurementApp:
             if res.error:
                 raise ValueError(res.error.message)
             res = validate_nplc(_sv(self.nplc_var))
+            if res.error:
+                raise ValueError(res.error.message)
+            res = validate_pixel_count(self.pixels_per_sample_var.get())
             if res.error:
                 raise ValueError(res.error.message)
             if self.prebias_enabled_var.get() and self.prebias_duration_var.get() <= 0:
@@ -1336,7 +1403,7 @@ class JVMeasurementApp:
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
 
-    def _log_dark_jv(self, v_df, j_df, v_dr, j_dr, filepath):
+    def _log_dark_jv(self, v_df, j_df, v_dr, j_dr, filepath, timing=None):
         """Append a Dark J-V entry to the measurement log."""
         self.log_text.config(state=NORMAL)
         if self.log_text.get("1.0", "end-1c"):
@@ -1355,18 +1422,25 @@ class JVMeasurementApp:
             f"NPLC: {self.nplc_var.get():.2f}  |  "
             f"4-Wire: {'ON' if self.four_wire_var.get() else 'OFF'}\n"
             f"Forward: {len(v_df)} pts  |  Reverse: {len(v_dr)} pts\n"
-            f"Saved: {os.path.basename(filepath)}\n"
+            + (f"Scan time: {format_scan_times(timing)}\n" if timing else "")
+            + f"Saved: {os.path.basename(filepath)}\n"
         )
         self.log_text.see(END)
         self.log_text.config(state=DISABLED)
 
     def update_results_display(self, fwd, rev, HI, v_f, j_f, v_r, j_r,
-                               v_df=None, j_df=None, v_dr=None, j_dr=None):
+                               v_df=None, j_df=None, v_dr=None, j_dr=None,
+                               timing=None):
         Voc_f, Jsc_f, FF_f, PCE_f, Rs_f, Rsh_f = fwd
         Voc_r, Jsc_r, FF_r, PCE_r, Rs_r, Rsh_r = rev
 
         # ── Accumulate session data ───────────────────────────────────────────
-        color = PLOT_COLORS[len(self.session_data) % len(PLOT_COLORS)]
+        self._plot_start_idx = next_plot_start(
+            self._plot_start_idx, len(self.session_data) + 1,
+            self._pixels_per_sample())
+        # By position on the plot, so each substrate restarts the colours.
+        color = PLOT_COLORS[
+            (len(self.session_data) - self._plot_start_idx) % len(PLOT_COLORS)]
         self.session_data.append({
             "sample_name": self.sample_name_var.get(),
             "timestamp":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1381,6 +1455,7 @@ class JVMeasurementApp:
             "Voc_rev": Voc_r, "Jsc_rev": Jsc_r, "FF_rev": FF_r, "PCE_rev": PCE_r,
             "HI": HI,
             "scan_order": self._scan_order_label(),
+            "timing": timing,
             "color": color,
             "single_diode_fit": None,   # populated later if auto-fit is enabled
         })
@@ -1397,7 +1472,8 @@ class JVMeasurementApp:
             f"NPLC: {self.nplc_var.get():.2f}  |  "
             f"4-Wire: {'ON' if self.four_wire_var.get() else 'OFF'}\n"
             f"Scan order: {self._scan_order_label()}\n"
-            f"{pb}{ls}\n"
+            + (f"Scan time: {format_scan_times(timing)}\n" if timing else "")
+            + f"{pb}{ls}\n"
             f"Forward Scan:\n"
             f"  Voc:  {Voc_f:.3f} V\n  Jsc:  {Jsc_f:.3f} mA/cm\u00b2\n"
             f"  FF:   {FF_f:.2f} %\n  PCE:  {PCE_f:.2f} %\n"
@@ -1594,12 +1670,24 @@ class JVMeasurementApp:
         except Exception:
             return None
 
+    def _pixels_per_sample(self):
+        """The Pixels per sample box as an int; anything unusable means 0."""
+        from app.gui.input_validation import validate_pixel_count
+        return validate_pixel_count(self.pixels_per_sample_var.get()).parsed_value or 0
+
+    def _pixel_progress(self):
+        """Status-bar prefix showing the position within the substrate."""
+        pixels = self._pixels_per_sample()
+        if not pixels:
+            return ""
+        return f"Pixel {len(self.session_data) - self._plot_start_idx}/{pixels}  |  "
+
     def _scan_order_label(self):
         """The scan order as written to the Excel file and the log."""
         return "REV->FWD" if self.rev_first_var.get() else "FWD->REV"
 
     def _measure_jv_pair(self, status_prefix, readback_f=None, readback_r=None,
-                         before_rev=None):
+                         before_rev=None, timing=None):
         """Measure one forward + one reverse scan, in the order the
         "Measure from REV to FWD" box asks for.
 
@@ -1608,16 +1696,24 @@ class JVMeasurementApp:
         the reverse scan whichever order is chosen, because that is what it
         conditions. Returns ``(v_f, j_f, v_r, j_r)``, or ``None`` when the
         run was stopped.
+
+        *timing*, when given a dict, receives each scan's measured duration
+        and achieved sweep rate (``fwd_s``, ``fwd_rate``, ``rev_s``,
+        ``rev_rate``). The clock covers the sweep only, not the pre-bias.
         """
         start = self.start_voltage_var.get()
         end   = self.end_voltage_var.get()
         step  = self.step_voltage_var.get()
         area  = self.cell_area_var.get()
 
+        def timed(name, v_from, v_to, v_step, readback):
+            return timed_scan(timing, name, lambda: measure_scan(
+                self.instrument, v_from, v_to, v_step, area,
+                stop_event, readback=readback))
+
         def fwd():
             self.status_var.set(f"{status_prefix}Measuring forward scan\u2026")
-            return measure_scan(self.instrument, start, end, step, area,
-                                stop_event, readback=readback_f)
+            return timed("fwd", start, end, step, readback_f)
 
         def rev():
             if before_rev is not None:
@@ -1625,8 +1721,7 @@ class JVMeasurementApp:
                 if stop_event.is_set():
                     return None, None
             self.status_var.set(f"{status_prefix}Measuring reverse scan\u2026")
-            return measure_scan(self.instrument, end, start, -step, area,
-                                stop_event, readback=readback_r)
+            return timed("rev", end, start, -step, readback_r)
 
         result = {}
         for name, scan in ((("rev", rev), ("fwd", fwd)) if self.rev_first_var.get()
@@ -1666,6 +1761,7 @@ class JVMeasurementApp:
 
     def run_measurement(self):
         v_df = j_df = v_dr = j_dr = None   # dark J-V data (None if not measured)
+        t_run_start = time.perf_counter()
         try:
             # Put the shutter where this run starts: a dark J-V begins closed,
             # anything else begins open.
@@ -1681,7 +1777,8 @@ class JVMeasurementApp:
 
             # ── Dark J-V (optional) ───────────────────────────────────────
             if self.dark_jv_var.get():
-                dark = self._measure_jv_pair("Dark J-V: ")
+                dark_timing = {}
+                dark = self._measure_jv_pair("Dark J-V: ", timing=dark_timing)
                 if dark is None:
                     return
                 v_df, j_df, v_dr, j_dr = dark
@@ -1703,8 +1800,9 @@ class JVMeasurementApp:
                     self.four_wire_var.get(),
                     self.instrument_idn or "",
                     scan_order=self._scan_order_label(),
+                    timing=dark_timing,
                 )
-                self._log_dark_jv(v_df, j_df, v_dr, j_dr, dark_fp)
+                self._log_dark_jv(v_df, j_df, v_dr, j_dr, dark_fp, dark_timing)
                 self.status_var.set(
                     "Dark J-V complete — opening shutter…")
 
@@ -1736,6 +1834,7 @@ class JVMeasurementApp:
 
             # ── Illuminated J-V ───────────────────────────────────────────
             rb_f, rb_r = [], []    # (v_set, v_meas, i_raw) per point
+            timing = {}
 
             def prebias():
                 apply_prebias(
@@ -1748,10 +1847,12 @@ class JVMeasurementApp:
 
             illum_pair = self._measure_jv_pair(
                 "", readback_f=rb_f, readback_r=rb_r,
-                before_rev=prebias if self.prebias_enabled_var.get() else None)
+                before_rev=prebias if self.prebias_enabled_var.get() else None,
+                timing=timing)
             if illum_pair is None:
                 return
             v_f, j_f, v_r, j_r = illum_pair
+            timing["total_s"] = time.perf_counter() - t_run_start
 
             # Checked before the parameters: a lost contact usually also
             # breaks the Voc search, and the operator must hear about the
@@ -1773,7 +1874,8 @@ class JVMeasurementApp:
 
             self.update_results_display(fwd, rev, HI, v_f, j_f, v_r, j_r,
                                         v_df=v_df, j_df=j_df,
-                                        v_dr=v_dr, j_dr=j_dr)
+                                        v_dr=v_dr, j_dr=j_dr,
+                                        timing=timing)
             self.update_plot()
 
             # \u2500\u2500 Auto single-diode fit (reverse scan) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -1800,7 +1902,9 @@ class JVMeasurementApp:
                 self.prebias_voltage_var.get(),
                 self.prebias_duration_var.get(),
                 self.instrument_idn or "",
-                scan_rate=float(self.scan_rate_var.get()) if self.scan_rate_var.get() != "\u2014" else None,
+                scan_rate=scan_rate_mv_s(
+                    self.step_voltage_var.get() * 1000.0,
+                    self.delay_ms_var.get(), self.nplc_var.get(), self._line_hz),
                 fit_result=fit_result,
                 readback_fwd=rb_f,
                 readback_rev=rb_r,
@@ -1808,13 +1912,18 @@ class JVMeasurementApp:
                 scan_order=self._scan_order_label(),
                 detector_power=self._safe_float(self.detector_power_var),
                 detector_area=self._safe_float(self.detector_area_var),
+                line_hz=self._detected_line_hz(),
+                timing=timing,
             )
 
+            times = format_scan_times(timing)
             if oc_notes:
                 self.status_var.set(
-                    "Measurement complete \u2014 WARNING: possible open contact.")
+                    f"{self._pixel_progress()}Measurement complete \u2014 "
+                    f"WARNING: possible open contact.  {times}")
             else:
-                self.status_var.set("Measurement complete.")
+                self.status_var.set(
+                    f"{self._pixel_progress()}Measurement complete \u2014 {times}")
             play_completion_sound()
 
         except Exception as exc:
@@ -1837,7 +1946,8 @@ class JVMeasurementApp:
 
     def update_plot(self):
         """
-        Redraw the complete session plot from self.session_data.
+        Redraw the current substrate's measurements from self.session_data
+        (every measurement unless "Pixels per sample" is set).
         Each measurement gets its own color.
         Forward scan: solid line + filled circle markers.
         Reverse scan: dashed line + hollow circle markers.
@@ -1851,12 +1961,13 @@ class JVMeasurementApp:
         self.ax2.clear()
         self.ax2.yaxis.set_label_position("right")
 
-        if not self.session_data:
+        entries = self.session_data[self._plot_start_idx:]
+        if not entries:
             self.draw_placeholder_plot()
             return
 
         # Check whether any entry has dark data
-        has_any_dark = any(e["v_dark_fwd"] is not None for e in self.session_data)
+        has_any_dark = any(e["v_dark_fwd"] is not None for e in entries)
         if has_any_dark:
             self.ax.axhline(0, color="#aaaaaa", linewidth=0.8,
                             linestyle="--", zorder=1)
@@ -1864,7 +1975,7 @@ class JVMeasurementApp:
         # The frame follows the data (see jv_plot_limits). ax2 is the power
         # twinx and keeps sharing ax's scale, as it always has, so the power
         # curve stays directly comparable to the current curve.
-        xlim, ylim = jv_plot_limits(self.session_data)
+        xlim, ylim = jv_plot_limits(entries)
         self.ax.set_xlim(*xlim)
         self.ax.set_ylim(*ylim)
         self.ax2.set_ylim(*ylim)
@@ -1873,7 +1984,7 @@ class JVMeasurementApp:
         jv_lines    = []   # J-V lines only (hover attached here)
         legend_lines = []  # lines that go into the legend
 
-        for entry in self.session_data:
+        for entry in entries:
             color  = entry["color"]
             label  = entry["sample_name"]
             v_f    = entry["v_fwd"]
@@ -1960,8 +2071,8 @@ class JVMeasurementApp:
         self.ax.set_ylabel("Current Density (mA/cm\u00b2)", labelpad=8)
         self.ax2.set_ylabel("Power Density (mW/cm\u00b2)", labelpad=8)
 
-        last  = self.session_data[-1]
-        n     = len(self.session_data)
+        last  = entries[-1]
+        n     = len(entries)
         suffix = f" (+{n - 1} more)" if n > 1 else ""
         self.ax.set_title(
             f"{last['sample_name']}{suffix} \u2014 J-V Characteristics",
@@ -2334,7 +2445,7 @@ class JVMeasurementApp:
         try:
             step_mv = self.lij_step_v_var.get() * 1000.0
             delay   = self.lij_delay_ms_var.get()
-            nplc_ms = self.lij_nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms = nplc_duration_ms(self.lij_nplc_var.get(), self._line_hz)
             tpp     = (delay + nplc_ms + 50.0) / 1000.0
             self.lij_scan_rate_var.set(
                 f"{step_mv / tpp:.1f}" if tpp > 0 and step_mv > 0 else "—"
@@ -2371,7 +2482,7 @@ class JVMeasurementApp:
         try:
             step_mv = self.lij_step_v_var.get() * 1000.0
             rate    = self.lij_target_sr_var.get()
-            nplc_ms = self.lij_nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms = nplc_duration_ms(self.lij_nplc_var.get(), self._line_hz)
             if step_mv <= 0 or rate <= 0:
                 return
             tpp_ms  = (step_mv / rate) * 1000.0
@@ -2517,6 +2628,7 @@ class JVMeasurementApp:
             "nplc":     self.lij_nplc_var.get(),
             "cell_area":self.lij_cell_area_var.get(),
             "four_wire":self.lij_four_wire_var.get(),
+            "line_hz":  self._detected_line_hz(),
             "reference_illumination_mw_cm2": self.lij_ref_illum_var.get(),
         }
         prebias = {
@@ -3151,7 +3263,7 @@ class JVMeasurementApp:
         try:
             step_mv = self.mpp_step_v_var.get() * 1000.0
             delay_ms = self.mpp_delay_var.get()
-            nplc_ms  = self.mpp_nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms  = nplc_duration_ms(self.mpp_nplc_var.get(), self._line_hz)
             t        = (delay_ms + nplc_ms + 20.0) / 1000.0
             self.mpp_scan_rate_var.set(f"{step_mv / t:.1f}" if t > 0 else "\u2014")
         except Exception:
@@ -3944,6 +4056,7 @@ class JVMeasurementApp:
 
         from app.measurement.pure_mpp_tracker import PureMPPTracker
         tracker = PureMPPTracker(self.instrument, params, callbacks, stop_event)
+        self._pmpp_tracker = tracker
         threading.Thread(target=self._run_illuminated(tracker.run),
                          daemon=True).start()
 
@@ -4051,6 +4164,7 @@ class JVMeasurementApp:
                 illumination=float(self.pmpp_illumination_var.get()),
                 nplc=self.pmpp_nplc_var.get(),
                 delay_ms=self.pmpp_delay_ms_var.get(),
+                initial_timing=getattr(self._pmpp_tracker, "initial_timing", None),
             )
             self.pmpp_status_var.set(
                 f"Saved \u2192 {os.path.basename(path)}")
@@ -4661,7 +4775,7 @@ class JVMeasurementApp:
         ToolTip(self._isos_sr_entry,
                 "Target voltage sweep rate in mV/s.\n"
                 "Delay is calculated automatically:\n"
-                "  delay = (step_mV / scan_rate × 1000) − NPLC × 16.7 − 50 ms\n"
+                "  delay = (step_mV / scan_rate × 1000) − NPLC / line_Hz × 1000 − 50 ms\n"
                 "If the result would be negative, delay is clamped to 0 ms.")
 
         self.isos_four_wire_var = BooleanVar(value=False)
@@ -4680,7 +4794,7 @@ class JVMeasurementApp:
         ToolTip(isos_sr_lbl,
                 "Effective voltage sweep rate.\n"
                 "Scan rate (mV/s) = Step Voltage (mV) ÷ Time per point (s)\n"
-                "Time per point = Delay + NPLC × 16.7 ms + 50 ms (GPIB overhead)")
+                "Time per point = Delay + NPLC / line_Hz + 50 ms (GPIB overhead)")
 
         self.isos_step_v_var.trace("w",           self._isos_on_measurement_params_change)
         self.isos_delay_ms_var.trace("w",         self._isos_on_measurement_params_change)
@@ -5478,7 +5592,7 @@ class JVMeasurementApp:
     def _isos_update_scan_rate(self, *_):
         try:
             step_mv     = abs(self.isos_step_v_var.get()) * 1000.0
-            nplc_ms     = self.isos_nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms     = nplc_duration_ms(self.isos_nplc_var.get(), self._line_hz)
             delay_ms    = self.isos_delay_ms_var.get()
             t_per_point = (delay_ms + nplc_ms + 50.0) / 1000.0
             if t_per_point <= 0 or step_mv <= 0:
@@ -5499,7 +5613,7 @@ class JVMeasurementApp:
         """Effective illuminated scan rate (mV/s), or None if not computable."""
         try:
             step_mv  = abs(self.isos_step_v_var.get()) * 1000.0
-            nplc_ms  = self.isos_nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms  = nplc_duration_ms(self.isos_nplc_var.get(), self._line_hz)
             delay_ms = self.isos_delay_ms_var.get()
             t_per_pt = (delay_ms + nplc_ms + 50.0) / 1000.0
             if t_per_pt <= 0 or step_mv <= 0:
@@ -5566,7 +5680,7 @@ class JVMeasurementApp:
         try:
             step_mv     = abs(self.isos_step_v_var.get()) * 1000.0
             target_rate = self.isos_target_scan_rate_var.get()
-            nplc_ms     = self.isos_nplc_var.get() * (1000.0 / 60.0)
+            nplc_ms     = nplc_duration_ms(self.isos_nplc_var.get(), self._line_hz)
             if step_mv <= 0 or target_rate <= 0:
                 return
             time_per_point_ms = (step_mv / target_rate) * 1000.0
@@ -6301,17 +6415,23 @@ class JVMeasurementApp:
             except Exception:
                 pin = 0.0
 
+            t_run_start = time.perf_counter()
+            timing = {}
+            dark_timing = {}
+
             # ── Optional dark J-V (instrument on during dark scans) ───────────
             if do_dark:
                 if not self._shutter_set(False, prompt_if_manual=False):
                     return
                 init_instrument(inst, nplc, delay_ms / 1000.0, four_wire)
                 log("Dark J-V: forward scan…")
-                v_df, j_df = measure_scan(inst, start_v, end_v, step_v, cell_area, stop_event)
+                v_df, j_df = timed_scan(dark_timing, "fwd", lambda: measure_scan(
+                    inst, start_v, end_v, step_v, cell_area, stop_event))
                 if stop_event.is_set():
                     return
                 log("Dark J-V: reverse scan…")
-                v_dr, j_dr = measure_scan(inst, end_v, start_v, -step_v, cell_area, stop_event)
+                v_dr, j_dr = timed_scan(dark_timing, "rev", lambda: measure_scan(
+                    inst, end_v, start_v, -step_v, cell_area, stop_event))
                 if stop_event.is_set():
                     return
                 try:
@@ -6324,6 +6444,7 @@ class JVMeasurementApp:
                     v_df, j_df, v_dr, j_dr,
                     cell_area, delay_ms, nplc, four_wire,
                     self.instrument_idn or "",
+                    timing=dark_timing,
                 )
                 log("Dark J-V complete — opening shutter…")
                 if not self._shutter_set(True, prompt_if_manual=True):
@@ -6347,7 +6468,8 @@ class JVMeasurementApp:
 
             # ── Forward illuminated scan ──────────────────────────────────────
             log("Forward scan…")
-            v_f, j_f = measure_scan(inst, start_v, end_v, step_v, cell_area, stop_event)
+            v_f, j_f = timed_scan(timing, "fwd", lambda: measure_scan(
+                inst, start_v, end_v, step_v, cell_area, stop_event))
             if stop_event.is_set():
                 return
 
@@ -6359,9 +6481,11 @@ class JVMeasurementApp:
 
             # ── Reverse illuminated scan ──────────────────────────────────────
             log("Reverse scan…")
-            v_r, j_r = measure_scan(inst, end_v, start_v, -step_v, cell_area, stop_event)
+            v_r, j_r = timed_scan(timing, "rev", lambda: measure_scan(
+                inst, end_v, start_v, -step_v, cell_area, stop_event))
             if stop_event.is_set():
                 return
+            timing["total_s"] = time.perf_counter() - t_run_start
 
             inst.write(":OUTP OFF")
 
@@ -6373,7 +6497,7 @@ class JVMeasurementApp:
             Rs_r,  Rsh_r               = calculate_resistances(v_r, j_r, Voc_r)
             hi                         = calculate_hysteresis_index(PCE_f, PCE_r)
 
-            nplc_ms       = nplc * (1000.0 / 60.0)
+            nplc_ms       = nplc_duration_ms(nplc, self._line_hz)
             t_per_point   = (delay_ms + nplc_ms + 50.0) / 1000.0
             scan_rate_val = (abs(step_v) * 1000.0) / t_per_point if t_per_point > 0 else 0.0
 
@@ -6391,6 +6515,8 @@ class JVMeasurementApp:
                 scan_rate=scan_rate_val,
                 detector_power=self._safe_float(self.isos_detector_power_var),
                 detector_area=self._safe_float(self.isos_detector_area_var),
+                line_hz=self._detected_line_hz(),
+                timing=timing,
             )
 
             # ── Append to cumulative tracking file ────────────────────────────
@@ -6415,6 +6541,7 @@ class JVMeasurementApp:
                 "prebias_voltage": pb_v,
                 "prebias_duration": pb_t,
                 "instrument_idn":  self.instrument_idn or "",
+                **timing,
             })
 
             # ── Refresh UI ────────────────────────────────────────────────────
@@ -6425,6 +6552,7 @@ class JVMeasurementApp:
                 f"Illumination: {pin:.2f} mW/cm²\n"
                 f"Delay/pt: {delay_ms:.0f} ms  |  NPLC: {nplc:.2f}  |  "
                 f"4-Wire: {'ON' if four_wire else 'OFF'}\n"
+                f"Scan time: {format_scan_times(timing)}\n"
                 f"{pb_str}"
                 f"\nForward Scan:\n"
                 f"  Voc:  {Voc_f:.3f} V\n  Jsc:  {Jsc_f:.3f} mA/cm²\n"
@@ -6445,7 +6573,8 @@ class JVMeasurementApp:
                 self._isos_d1_update_metrics(rows)
                 self._isos_redraw_curves(self.isos_tracking_file, new_measurement=True)
                 self._isos_add_to_log(lt)
-                self.isos_status_var.set(f"Done — PCE_rev = {pce_r}%")
+                self.isos_status_var.set(
+                    f"Done — PCE_rev = {pce_r}%  |  {format_scan_times(timing)}")
             self.root.after(0, _refresh)
             play_completion_sound()
 
@@ -6485,6 +6614,7 @@ class JVMeasurementApp:
             "tracking_file_path":       self.isos_tracking_file,
             "instrument_idn":           self.instrument_idn or "",
             "cell_area":                self.isos_cell_area_var.get(),
+            "line_hz":                  self._detected_line_hz(),
             "pin":                      pin,
             "start_v":                  self.isos_start_v_var.get(),
             "end_v":                    self.isos_end_v_var.get(),
@@ -6757,6 +6887,7 @@ class JVMeasurementApp:
             "tracking_file_path":       self.isos_tracking_file,
             "instrument_idn":           self.instrument_idn or "",
             "cell_area":                self.isos_cell_area_var.get(),
+            "line_hz":                  self._detected_line_hz(),
             "pin":                      pin,
             # Illuminated scan range (fast scan) — shared scan-parameter vars.
             "start_v":                  self.isos_start_v_var.get(),

@@ -85,6 +85,7 @@ app/
     isos_recovery.py           # Tk-free orphan-CSV detection / consolidation for crash recovery
   utils/
     constants.py               # APP_NAME, APP_VERSION, global stop_event (threading.Event)
+    scan_timing.py             # nplc_duration_ms() + line-frequency read: the only NPLC-to-time conversion
     sound.py                   # play_completion_sound() with playsound / winsound fallback
     updater.py                 # check_for_updates() — fetches version.json from GitHub
 docs/
@@ -116,6 +117,11 @@ one-off developer scripts, not part of the application.
 **Stop mechanism**: `stop_event` (module-level `threading.Event` in `constants.py`) is shared between the GUI thread and measurement thread. All loops in `keithley.py` check it. Call `stop_event.clear()` in the `finally` block after every measurement.
 
 **Session data**: `self.session_data` is a list of dicts accumulated during the application session. Each entry holds raw arrays (`v_fwd`, `j_fwd`, `v_rev`, `j_rev`, `power_fwd`, `power_rev`, optional dark arrays), all PV parameters, and a color from `PLOT_COLORS`. `update_plot()` redraws from this list on every call — it does not accept data arguments.
+
+**Pixels per sample** (`pixels_per_sample_var`, default 0 = accumulate): the plot draws
+`session_data[self._plot_start_idx:]`. `next_plot_start()` in `plot_limits.py` moves that index
+when a new entry would exceed the count, so N pixels stay together and measurement N+1 starts a
+fresh plot. Only the view changes: `session_data` keeps every entry. Colours restart per substrate.
 
 **J-V plot axis limits** (`jv_plot_limits` in `app/gui/plot_limits.py`, kept out of `main_window` so the tests are not Windows-only — `main_window` imports `winsound`): the upper edges follow the data, with the historical 0-1.2 V / 0-30 mA/cm2 window kept as a floor so ordinary runs look unchanged. Two deliberate exclusions: the **lower X edge stays pinned at 0 V** (sweeps are often started below zero as a conditioning step, and those points carry a settling transient belonging to the treatment, not the device — they are measured and saved, just not drawn), and **dark current is excluded from the vertical fit** (it is exponential and reaches hundreds of mA/cm2, so fitting it would squeeze the photocurrent into a flat line on zero; one linear axis cannot show both, and the semi-log |J| view in the Data Viewer's "Dark Ideality Fit" is the tool for reading a dark diode).
 
@@ -318,10 +324,13 @@ The negation makes photocurrent positive in the power-generating quadrant (stand
 `data_viewer.load_jv_file()` dispatches on sheet name; the two single-measurement
 layouts are:
 - `MeasurementData` — illuminated J-V; row 1 = headers, row 2 = scalar params, row 3+ = V/J/P arrays.
-  Scalars run G-AA as they always have; AB-AE were added in 2026-10 and always
+  Scalars run G-AA as they always have; AB-AK were added in 2026-10/11 and always
   carry their header: **AB** Scan Order, **AC** Illumination (mW/cm², the value
   the PCE is divided by — always written), **AD** Detector Power (mW),
-  **AE** Detector Area (cm²). Older files simply lack them and read back as
+  **AE** Detector Area (cm²), **AF** Line Frequency (Hz, empty when it could not
+  be read from the instrument), **AG-AH** Forward/Reverse Scan Time (s), **AI** Total
+  Measurement Time (s), **AJ-AK** Measured Forward/Reverse Scan Rate (mV/s; AA stays
+  the calculated rate). Older files simply lack them and read back as
   `None`; the Data Viewer then shows "not recorded (older file)".
 - `Dark_JV_Data` — dark J-V; same layout but only V/J (no power, no PV params)
 
@@ -472,13 +481,31 @@ downstream knows the order. It is recorded as the optional trailing
 "Scan Order" column (`FWD->REV` / `REV->FWD`) — AB in `MeasurementData`, J in
 `Dark_JV_Data` — whose value only J-V mode fills in.
 
+`_measure_jv_pair(timing={})` also clocks each sweep (pre-bias excluded). J-V mode shows
+the result in the status bar and log via `format_scan_times()`, and saves it (AG-AK; K-L
+in `Dark_JV_Data`).
+
+Every mode that sweeps goes through `timed_scan()` in `scan_timing.py`, a real stopwatch even
+under the runner's virtual clock. ISOS-D-1, L-1 and V-1 and Light Intensity fill the same
+`save_data` columns; ISOS also adds four trailing `ISOS_Log` columns, Light Intensity four
+trailing `Summary` columns (N-Q), MPP four trailing `MPP_JV` columns (J-M), and Pure MPP
+stores its initial scan in `PureMPP_Data` J-K. Stabilized Current and the P&O phase have no
+sweep; their files already carry a time column.
+
 ### Scan rate mode
 
 The Instrument Settings tab has a toggle between two modes:
 - **Advanced** (default): delay entered manually; scan rate is a read-only calculated field.
-- **Scan rate**: user enters target mV/s; delay is auto-calculated as `(step_mV / rate × 1000) − NPLC × 16.7 − 50 ms` (clamped ≥ 0). `⚠` is appended to the displayed rate when delay was clamped to 0.
+- **Scan rate**: user enters target mV/s; delay is auto-calculated as `(step_mV / rate × 1000) − NPLC duration − 50 ms` (clamped ≥ 0). `⚠` is appended to the displayed rate when delay was clamped to 0.
 
 Both modes use 50 ms as the GPIB overhead constant so they round-trip consistently.
+
+**Line frequency.** One NPLC is 16.7 ms at 60 Hz and 20 ms at 50 Hz. All conversions go
+through `nplc_duration_ms()` in `app/utils/scan_timing.py` — never write `1000 / 60` again.
+`_detect_line_frequency()` asks the instrument at connect (`:SYST:LFR?`, which `TSPTransport`
+translates to `localnode.linefreq`), then `_refresh_scan_timing()` recomputes every mode. If it
+cannot be read, the app assumes 60 Hz, the connection bar says so, and the file's Line Frequency
+cell stays empty. `DummySMU` keeps its own 16.7 ms simulated sleep; it is not a scan-rate calculation.
 
 ### Validation suite — `validation/`
 

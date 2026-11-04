@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+- J-V mode now measures how long each scan really took. The status bar and log show the forward and reverse scan times, the rate each one achieved and the total time, and the file saves them in new columns AG-AK (K-L in dark J-V files). The Data Viewer shows them in a "Measured Time" section. The existing Scan Rate column stays the calculated value
+- The measured scan time also covers ISOS-D-1, L-1 and V-1, Light Intensity, MPP (JV-SPO) and the initial scan of Pure MPP
+- **Pixels per sample** box (J-V, Sample Information). With 5, the plot keeps five measurements together and the sixth, the first of the next substrate, clears the plot. The status bar shows the position (`Pixel 3/5`). The default, 0, keeps every curve as before
+
+### Fixed
+- Scan rates assumed a 60 Hz grid, so on a 50 Hz grid (Europe) the rate shown and saved was too high and the delay calculated in Scan Rate mode too long: about 3 % at NPLC 1 and up to 13 % at NPLC 10. The line frequency is now read from the instrument on connection, shown in the connection bar, used by every mode and saved in the new "Line Frequency (Hz)" column (AF). If it cannot be read, the bar warns that 60 Hz is being assumed
+- A J-V run in Scan Rate mode whose delay was clamped to 0 ms failed when saving, because the rate was read back from on-screen text ending in `⚠`
+
 ## [2.7.0] — 2026-10-23
 
 > **Upgrading from 2.6.x or earlier: run the new installer.** This version needs a

@@ -84,6 +84,10 @@ _LOG_EXTRA = [
     ("Voc_setpoint",               "voc_setpoint"),
     ("Vmpp_setpoint",              "vmpp_setpoint"),
     ("I_dark_during_stress_mean",  "i_dark_during_stress_mean"),
+    ("Fwd_Scan_Time_s",            "fwd_s"),
+    ("Rev_Scan_Time_s",            "rev_s"),
+    ("Measured_Fwd_Rate_mV_s",     "fwd_rate"),
+    ("Measured_Rev_Rate_mV_s",     "rev_rate"),
 ]
 
 _LOG_HEADERS = _LOG_HEADERS_CORE + [h for h, _ in _LOG_EXTRA]
@@ -307,6 +311,10 @@ def append_isos_measurement(tracking_path: str, meas: dict) -> None:
     ]
     # New nullable columns — default to None when the caller does not supply them.
     log_row += [meas.get(key) for _, key in _LOG_EXTRA]
+    # A file created before a column existed still gets that column's header.
+    for c, header in enumerate(_LOG_HEADERS, 1):
+        if ws_log.cell(1, c).value is None:
+            ws_log.cell(1, c, header)
     ws_log.append(log_row)
 
     # Style the new data row
