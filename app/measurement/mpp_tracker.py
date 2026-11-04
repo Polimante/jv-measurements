@@ -23,6 +23,8 @@ References:
 """
 
 import numpy as np
+
+from app.utils.scan_timing import format_scan_times, timed_scan
 import time
 import threading
 
@@ -88,12 +90,13 @@ class MPPTracker:
                 t_jv_start = time.time() - self.t_start
 
                 # ── Optional forward scan ──────────────────────────────────
+                timing = {}
                 v_fwd, j_fwd = None, None
                 if self.params["include_forward"]:
                     self.callbacks["on_status"](f"Cycle {cycle_n} — Forward scan…")
-                    v_fwd, j_fwd = self._measure_scan(
+                    v_fwd, j_fwd = timed_scan(timing, "fwd", lambda: self._measure_scan(
                         self.params["start_v"], self.params["end_v"],
-                        self.params["step_v"])
+                        self.params["step_v"]))
                     if self.stop_event.is_set():
                         break
 
@@ -109,9 +112,9 @@ class MPPTracker:
 
                 # ── Reverse scan ───────────────────────────────────────────
                 self.callbacks["on_status"](f"Cycle {cycle_n} — Reverse scan…")
-                v_rev, j_rev = self._measure_scan(
+                v_rev, j_rev = timed_scan(timing, "rev", lambda: self._measure_scan(
                     self.params["end_v"], self.params["start_v"],
-                    -self.params["step_v"])
+                    -self.params["step_v"]))
                 if self.stop_event.is_set():
                     break
 
@@ -142,6 +145,7 @@ class MPPTracker:
                     "v_rev":       v_rev, "j_rev": j_rev,
                     "v_fwd":       v_fwd, "j_fwd": j_fwd,
                     "jv_interval": (t_jv_start, t_jv_end),
+                    "timing":      timing,
                 }
                 self.cycles.append(cycle_data)
 
@@ -152,13 +156,15 @@ class MPPTracker:
                 )
                 if HI is not None:
                     log_msg += f" | HI = {HI:+.1f}%"
+                times = format_scan_times(timing)
+                log_msg += f"\n  Scan time: {times}"
                 self.callbacks["on_log"](log_msg)
                 self.callbacks["on_jv_update"](cycle_data)
 
                 # ── SPO phase — output stays ON, voltage transition inside _run_spo
                 self.callbacks["on_status"](
                     f"Cycle {cycle_n} — SPO at {Vmpp:.3f} V "
-                    f"for {self.params['spo_duration_s']:.0f} s…")
+                    f"for {self.params['spo_duration_s']:.0f} s…  (J-V: {times})")
                 self._run_spo(cycle_n, Vmpp)
 
                 if self.stop_event.is_set():

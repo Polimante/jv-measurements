@@ -22,6 +22,7 @@ import time
 import numpy as np
 
 from app.instrument.keithley import configure_oc_mode, read_voc_now
+from app.utils.scan_timing import format_scan_times, timed_scan
 
 
 class PureMPPTracker:
@@ -57,14 +58,16 @@ class PureMPPTracker:
 
         # ── Initial J-V scan to find Vmpp ─────────────────────────────────────
         self.callbacks["on_status"]("Initial J-V scan — finding Vmpp…")
-        v_arr, j_arr = self._measure_scan(
+        self.initial_timing = {}
+        v_arr, j_arr = timed_scan(self.initial_timing, "rev", lambda: self._measure_scan(
             self.params["scan_end_v"],   # reverse scan: end → start
             self.params["scan_start_v"],
             -self.params["scan_step_v"],
-        )
+        ))
         v = self._find_vmpp(v_arr, j_arr)
         self.callbacks["on_status"](
-            f"Vmpp found: {v:.3f} V — starting P&O tracking…")
+            f"Vmpp found: {v:.3f} V — starting P&O tracking…  "
+            f"(J-V: {format_scan_times(self.initial_timing)})")
         self.callbacks["on_jv_done"](v_arr, j_arr, v)
 
         # Apply Vmpp and let the cell settle before the first P&O reading
@@ -150,11 +153,12 @@ class PureMPPTracker:
         if not self.params.get("oc_skip_initial_scan", False):
             self._configure_instrument()
             self.callbacks["on_status"]("Initial J-V scan — baseline…")
-            v_arr, j_arr = self._measure_scan(
+            self.initial_timing = {}
+            v_arr, j_arr = timed_scan(self.initial_timing, "rev", lambda: self._measure_scan(
                 self.params["scan_end_v"],
                 self.params["scan_start_v"],
                 -self.params["scan_step_v"],
-            )
+            ))
             vmpp = self._find_vmpp(v_arr, j_arr)
             self.callbacks["on_jv_done"](v_arr, j_arr, vmpp)
 

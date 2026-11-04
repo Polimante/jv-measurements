@@ -269,3 +269,192 @@ def test_rev_first_also_orders_the_dark_scan(app, monkeypatch, tmp_path):
     ws = openpyxl.load_workbook(next(tmp_path.glob("*_Dark_JV_*.xlsx")))["Dark_JV_Data"]
     assert ws.cell(1, 10).value == "Scan Order"
     assert ws.cell(2, 10).value == "REV->FWD"
+
+
+# ── Line frequency (NPLC lasts 20 ms at 50 Hz, 16.7 ms at 60 Hz) ─────────────
+
+def _connect_at(app, monkeypatch, tmp_path, hz):
+    import app.gui.main_window as mw
+
+    monkeypatch.setattr(mw, "read_line_frequency", lambda _inst: hz)
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    _configure_run(app, tmp_path, rev_first=False)
+    app.step_voltage_var.set(0.025)
+    app.nplc_var.set(5.0)
+
+
+def test_connecting_recomputes_the_delay_for_the_grid(app, monkeypatch, tmp_path):
+    """Scan-rate mode: 250 ms per point - NPLC 5 - 50 ms of overhead."""
+    app.scan_rate_mode.set("scan_rate")
+    app.target_scan_rate_var.set(100.0)
+    try:
+        _connect_at(app, monkeypatch, tmp_path, 50.0)
+        assert app.delay_ms_var.get() == pytest.approx(100.0)     # 5 x 20 ms
+        assert app._line_frequency_note() == "Line: 50 Hz"
+        app.disconnect_instrument()
+        assert app.delay_ms_var.get() == pytest.approx(116.7)     # 5 x 16.7 ms
+    finally:
+        app.scan_rate_mode.set("advanced")
+        app.nplc_var.set(1.0)
+
+
+def test_detected_frequency_reaches_the_saved_file(app, monkeypatch, tmp_path):
+    _connect_at(app, monkeypatch, tmp_path, 50.0)
+    app.delay_ms_var.set(100.0)
+    try:
+        app.run_measurement()
+    finally:
+        app.nplc_var.set(1.0)
+    ws = openpyxl.load_workbook(next(tmp_path.glob("OrderCell_2*.xlsx")))["MeasurementData"]
+    assert ws.cell(2, 32).value == 50
+    assert ws.cell(2, 27).value == pytest.approx(100.0)       # mV/s, at 50 Hz
+
+
+def test_unread_frequency_warns_and_stays_out_of_the_file(app, monkeypatch, tmp_path):
+    _connect_at(app, monkeypatch, tmp_path, None)
+    assert "assuming 60 Hz" in app._line_frequency_note()
+    try:
+        app.run_measurement()
+    finally:
+        app.nplc_var.set(1.0)
+    ws = openpyxl.load_workbook(next(tmp_path.glob("OrderCell_2*.xlsx")))["MeasurementData"]
+    assert ws.cell(2, 32).value is None
+
+
+def test_clamped_scan_rate_does_not_stop_the_file_being_saved(app, monkeypatch, tmp_path):
+    """Regression: the saved rate was parsed from text ending in a warning sign."""
+    app.scan_rate_mode.set("scan_rate")
+    app.target_scan_rate_var.set(10000.0)
+    try:
+        _connect_at(app, monkeypatch, tmp_path, 50.0)
+        assert "\u26a0" in app.scan_rate_var.get()
+        app.run_measurement()
+    finally:
+        app.scan_rate_mode.set("advanced")
+        app.nplc_var.set(1.0)
+    assert list(tmp_path.glob("OrderCell_2*.xlsx"))
+
+
+# ── Measured scan time ───────────────────────────────────────────────────────
+
+def test_measured_times_reach_status_bar_log_and_file(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    _configure_run(app, tmp_path, rev_first=False)
+    app.run_measurement()
+
+    timing = app.session_data[-1]["timing"]
+    assert timing["fwd_s"] > 0 and timing["rev_s"] > 0
+    assert timing["total_s"] >= timing["fwd_s"] + timing["rev_s"]
+    assert timing["fwd_rate"] > 0
+
+    status = app.status_var.get()
+    assert status.startswith("Measurement complete")
+    assert "FWD" in status and "REV" in status and "total" in status
+    assert "Scan time: FWD" in app.log_text.get("1.0", "end")
+
+    ws = openpyxl.load_workbook(next(tmp_path.glob("OrderCell_2*.xlsx")))["MeasurementData"]
+    assert ws.cell(2, 33).value == pytest.approx(timing["fwd_s"])
+    assert ws.cell(2, 34).value == pytest.approx(timing["rev_s"])
+    assert ws.cell(2, 35).value == pytest.approx(timing["total_s"])
+
+
+def test_scan_clock_excludes_the_pre_bias(app, monkeypatch, tmp_path):
+    import app.gui.main_window as mw
+    import time
+
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    _configure_run(app, tmp_path, rev_first=False, prebias=True)
+    monkeypatch.setattr(mw, "apply_prebias", lambda *a, **k: time.sleep(1.0))
+    app.run_measurement()
+
+    timing = app.session_data[-1]["timing"]
+    assert timing["rev_s"] < 1.0                 # the sweep alone
+    assert timing["total_s"] > 1.0               # the whole run
+
+
+def test_dark_file_records_its_scan_times(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    _configure_run(app, tmp_path, rev_first=False, dark=True)
+    app.run_measurement()
+    ws = openpyxl.load_workbook(next(tmp_path.glob("*_Dark_JV_*.xlsx")))["Dark_JV_Data"]
+    assert ws.cell(1, 11).value == "Forward Scan Time (s)"
+    assert ws.cell(2, 11).value > 0
+    assert ws.cell(2, 12).value > 0
+
+
+# ── Pixels per sample ────────────────────────────────────────────────────────
+
+def _measure_pixels(app, monkeypatch, tmp_path, pixels, runs):
+    """Run *runs* measurements; return (curves on the plot, first colour) after each."""
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    _configure_run(app, tmp_path, rev_first=False)
+    app.pixels_per_sample_var.set(pixels)
+    seen = []
+    try:
+        for _ in range(runs):
+            app.run_measurement()
+            # Each measurement draws one forward and one reverse J-V line.
+            seen.append(len(app.ax.get_lines()) // 2)
+    finally:
+        app.pixels_per_sample_var.set("0")
+    return seen
+
+
+def test_plot_keeps_a_substrate_together_then_starts_over(app, monkeypatch, tmp_path):
+    assert _measure_pixels(app, monkeypatch, tmp_path, "2", 5) == [1, 2, 1, 2, 1]
+    assert len(app.session_data) == 5                 # only the view was cleared
+    assert len(list(tmp_path.glob("OrderCell_2*.xlsx"))) >= 1
+    # Colours restart on each substrate, so pixel 1 always looks the same.
+    colours = [e["color"] for e in app.session_data]
+    assert colours[0] == colours[2] == colours[4]
+    assert colours[1] == colours[3] != colours[0]
+
+
+def test_status_bar_shows_the_pixel_position(app, monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    _configure_run(app, tmp_path, rev_first=False)
+    app.pixels_per_sample_var.set("5")
+    try:
+        app.run_measurement()
+        assert app.status_var.get().startswith("Pixel 1/5  |  Measurement complete")
+        app.run_measurement()
+        assert app.status_var.get().startswith("Pixel 2/5")
+    finally:
+        app.pixels_per_sample_var.set("0")
+
+
+def test_default_keeps_every_curve(app, monkeypatch, tmp_path):
+    assert _measure_pixels(app, monkeypatch, tmp_path, "0", 3) == [1, 2, 3]
+    assert not app.status_var.get().startswith("Pixel")
+
+
+def test_clear_session_restarts_the_count(app, monkeypatch, tmp_path):
+    import app.gui.main_window as mw
+
+    assert _measure_pixels(app, monkeypatch, tmp_path, "2", 3) == [1, 2, 1]
+    monkeypatch.setattr(mw.messagebox, "askokcancel", lambda *a, **k: True)
+    app._clear_session_data()
+    assert app._plot_start_idx == 0
+    assert _measure_pixels(app, monkeypatch, tmp_path, "2", 2) == [1, 2]
+
+
+def test_invalid_pixel_count_is_refused_before_measuring(app, monkeypatch, tmp_path):
+    import app.gui.main_window as mw
+
+    errors = []
+    monkeypatch.setattr(mw.messagebox, "showerror", lambda *a, **k: errors.append(a))
+    monkeypatch.setattr(app, "_ask_simulator_mode", lambda: "ideal_stable")
+    app.open_simulator_dialog()
+    _configure_run(app, tmp_path, rev_first=False)
+    app.pixels_per_sample_var.set("abc")
+    try:
+        assert not app.validate_inputs()
+    finally:
+        app.pixels_per_sample_var.set("0")
+    assert errors

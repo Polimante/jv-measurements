@@ -56,6 +56,7 @@ from app.io.isos_tracking import (
 )
 from app.measurement.stability_metrics import compute_stability_metrics
 from app.io.isos_autosave import CSVStream, consolidate_csv_into_xlsx
+from app.utils.scan_timing import format_scan_times, nplc_duration_ms, timed_scan
 
 try:  # exporter is xlsxwriter-based and GUI-independent
     from app.io.exporter import save_data, save_dark_jv_data
@@ -589,9 +590,11 @@ class ContinuousISOSRunner:
             if self.stop_event.is_set():
                 return None
 
+        timing = {}
         self._status("Illuminated forward scan…")
-        v_f, j_f = measure_scan(self.inst, c["start_v"], c["end_v"], c["step_v"],
-                                area, self.stop_event)
+        v_f, j_f = timed_scan(timing, "fwd", lambda: measure_scan(
+            self.inst, c["start_v"], c["end_v"], c["step_v"],
+            area, self.stop_event))
         if v_f is None or self.stop_event.is_set():
             return None
 
@@ -603,10 +606,12 @@ class ContinuousISOSRunner:
                 return None
 
         self._status("Illuminated reverse scan…")
-        v_r, j_r = measure_scan(self.inst, c["end_v"], c["start_v"], -c["step_v"],
-                                area, self.stop_event)
+        v_r, j_r = timed_scan(timing, "rev", lambda: measure_scan(
+            self.inst, c["end_v"], c["start_v"], -c["step_v"],
+            area, self.stop_event))
         if v_r is None or self.stop_event.is_set():
             return None
+        self._emit("on_log", f"J-V scan time: {format_scan_times(timing)}")
         try:
             self.inst.write(":OUTP OFF")
         except Exception:
@@ -640,6 +645,7 @@ class ContinuousISOSRunner:
             "prebias_voltage": c.get("prebias_v"),
             "prebias_duration": c.get("prebias_t"),
             "instrument_idn": c.get("instrument_idn", ""),
+            **timing,
         }
 
         if save_backup and save_data is not None:
@@ -655,6 +661,8 @@ class ContinuousISOSRunner:
                     c.get("prebias_v", 0), c.get("prebias_t", 0),
                     c.get("instrument_idn", ""),
                     scan_rate=scan_rate,
+                    line_hz=c.get("line_hz"),
+                    timing=timing,
                 )
             except Exception as exc:
                 self._emit("on_log", f"Backup save failed: {exc}")
@@ -672,12 +680,15 @@ class ContinuousISOSRunner:
         init_instrument(self.inst, float(c.get("nplc", 1.0)),
                         float(c.get("delay_ms", 20)) / 1000.0,
                         bool(c.get("four_wire", False)))
+        timing = {}
         self._status("Dark forward scan…")
-        v_f, j_f = measure_scan(self.inst, start, end, step, area, self.stop_event)
+        v_f, j_f = timed_scan(timing, "fwd", lambda: measure_scan(
+            self.inst, start, end, step, area, self.stop_event))
         if v_f is None or self.stop_event.is_set():
             return None
         self._status("Dark reverse scan…")
-        v_r, j_r = measure_scan(self.inst, end, start, -step, area, self.stop_event)
+        v_r, j_r = timed_scan(timing, "rev", lambda: measure_scan(
+            self.inst, end, start, -step, area, self.stop_event))
         if v_r is None or self.stop_event.is_set():
             return None
         try:
@@ -744,6 +755,7 @@ class ContinuousISOSRunner:
                     v_f, j_f, v_r, j_r,
                     area, c.get("delay_ms", 20), c.get("nplc", 1.0),
                     c.get("four_wire", False), c.get("instrument_idn", ""),
+                    timing=timing,
                 )
             except Exception as exc:
                 self._emit("on_log", f"Dark backup save failed: {exc}")
@@ -914,7 +926,7 @@ class ContinuousISOSRunner:
 
     def _scan_rate(self):
         c = self.cfg
-        nplc_ms     = float(c.get("nplc", 1.0)) * (1000.0 / 60.0)
+        nplc_ms     = nplc_duration_ms(float(c.get("nplc", 1.0)), c.get("line_hz"))
         t_per_point = (float(c.get("delay_ms", 20)) + nplc_ms + 50.0) / 1000.0
         step_v      = abs(float(c.get("step_v", 0.025)))
         return (step_v * 1000.0) / t_per_point if t_per_point > 0 else 0.0

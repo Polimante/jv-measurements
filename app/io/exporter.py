@@ -5,6 +5,8 @@ import xlsxwriter
 import openpyxl
 from datetime import datetime
 
+from app.utils.scan_timing import nplc_duration_ms
+
 # Sheet name used for the single-diode model fit results
 FIT_SHEET = "SingleDiodeFit"
 # Sheet name used for the dark ideality factor fit results
@@ -276,6 +278,8 @@ def save_data(
     scan_order=None,
     detector_power=None,
     detector_area=None,
+    line_hz=None,
+    timing=None,
 ):
     """Save an illuminated J-V measurement to xlsx.
 
@@ -288,12 +292,19 @@ def save_data(
         scan_order: Optional ``"FWD->REV"`` / ``"REV->FWD"`` (column AB).
         detector_power, detector_area: Optional reference-detector reading
             (mW) and area (cm²) that *illum* was derived from (AD, AE).
+        line_hz: Line frequency the instrument reported (AF). None leaves
+            the cell empty: the frequency was not read, only assumed.
+        timing: Optional dict of measured times and rates, with keys
+            ``fwd_s``, ``rev_s``, ``total_s``, ``fwd_rate``, ``rev_rate``
+            (AG-AK). "Scan Rate" (AA) stays the calculated value; these are
+            what the clock measured.
 
     *illum* — the irradiance (mW/cm²) the PCE was divided by — is always
     written, in column AC, so the PCE can be recomputed from the file.
-    Columns AB-AE always carry their header; a value left as None leaves
+    Columns AB-AK always carry their header; a value left as None leaves
     its cell empty, which keeps the positions fixed for the readers.
     """
+    timing = timing or {}
     p_f = v_f * j_f
     p_r = v_r * j_r
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -304,7 +315,7 @@ def save_data(
     hf, pf, nf = _fmt(wb)
 
     ws.set_column("A:F", 15)
-    ws.set_column("G:AE", 14)
+    ws.set_column("G:AK", 14)
 
     headers = [
         "Forward Voltage (V)", "Forward Current Density (mA.cm-²)",
@@ -323,6 +334,10 @@ def save_data(
         "Instrument IDN", "Scan Rate (mV/s)",
         "Scan Order", "Illumination (mW/cm²)",
         "Detector Power (mW)", "Detector Area (cm²)",
+        "Line Frequency (Hz)",
+        "Forward Scan Time (s)", "Reverse Scan Time (s)",
+        "Total Measurement Time (s)",
+        "Measured Forward Scan Rate (mV/s)", "Measured Reverse Scan Rate (mV/s)",
     ]
     for c, h in enumerate(headers):
         ws.write(0, c, h, hf)
@@ -331,7 +346,7 @@ def save_data(
     pb_t = prebias_duration if prebias_enabled else 0.0
 
     if scan_rate is None:
-        _nplc_ms        = nplc * (1000.0 / 60.0)
+        _nplc_ms        = nplc_duration_ms(nplc, line_hz)
         _time_per_point = (delay_ms + _nplc_ms + 20.0) / 1000.0
         _step_mv        = abs(v_f[-1] - v_f[0]) / max(len(v_f) - 1, 1) * 1000.0
         scan_rate = _step_mv / _time_per_point if _time_per_point > 0 else 0.0
@@ -352,6 +367,10 @@ def save_data(
         illum,                                       # AC
         detector_power,                              # AD (optional)
         detector_area,                               # AE (optional)
+        line_hz,                                     # AF (optional)
+        timing.get("fwd_s"), timing.get("rev_s"),    # AG, AH (optional)
+        timing.get("total_s"),                       # AI (optional)
+        timing.get("fwd_rate"), timing.get("rev_rate"),  # AJ, AK (optional)
     ]):
         if val is not None:
             ws.write(1, col, val, pf)
@@ -383,13 +402,15 @@ def save_dark_jv_data(
     cell_area, delay_ms, nplc, four_wire,
     instrument_idn,
     scan_order=None,
+    timing=None,
 ):
     """Save dark J-V raw data to a separate Excel file.
 
     No PCE/FF/Voc/Jsc are extracted — those parameters have no physical
     meaning without illumination.  The file contains raw V and J columns
     for forward and reverse scans plus measurement metadata.
-    *scan_order*, when given, is written as a trailing "Scan Order" column (J).
+    *scan_order*, when given, is written as a trailing "Scan Order" column (J),
+    followed by the measured scan times (K, L) from the *timing* dict.
     """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fp = os.path.join(export_folder, f"{sample_name}_Dark_JV_{ts}.xlsx")
@@ -407,8 +428,9 @@ def save_dark_jv_data(
         "Solar Cell Area (cm²)", "Delay per point (ms)", "NPLC",
         "4-Wire Sensing", "Instrument IDN",
     ]
-    if scan_order is not None:
+    if scan_order is not None or timing:
         headers.append("Scan Order")  # J
+        headers += ["Forward Scan Time (s)", "Reverse Scan Time (s)"]  # K, L
     for c, h in enumerate(headers):
         ws.write(0, c, h, hf)
 
@@ -420,6 +442,8 @@ def save_dark_jv_data(
         1 if four_wire else 0,        # H
         instrument_idn,               # I
         scan_order,                   # J (optional)
+        (timing or {}).get("fwd_s"),  # K (optional)
+        (timing or {}).get("rev_s"),  # L (optional)
     ]):
         if val is not None:
             ws.write(1, col, val, pf)
@@ -487,8 +511,13 @@ def save_pure_mpp_data(
     export_folder, sample_name,
     time_s, v_track, j_track, pce_track,
     cell_area, illumination, nplc, delay_ms,
+    initial_timing=None,
 ):
-    """Save Pure MPP Tracking measurement to xlsx (standardised layout)."""
+    """Save Pure MPP Tracking measurement to xlsx (standardised layout).
+
+    *initial_timing* holds the measured time and rate of the initial reverse
+    J-V scan (``rev_s``, ``rev_rate``), written to columns J and K.
+    """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     fp = os.path.join(export_folder, f"{sample_name}_PureMPP_{ts}.xlsx")
 
@@ -497,19 +526,25 @@ def save_pure_mpp_data(
     hf, pf, nf = _fmt(wb)
 
     ws.set_column("A:E", 14)
-    ws.set_column("F:I", 18)
+    ws.set_column("F:K", 18)
 
     headers = [
         "Time (s)", "Time (min)", "Vmpp (V)",
         "J (mA/cm⁻²)", "PCE (%)",
         "Cell Area (cm²)", "Illumination (mW/cm²)",
         "NPLC", "Delay/point (ms)",
+        "Initial Scan Time (s)", "Measured Initial Scan Rate (mV/s)",
     ]
     for c, h in enumerate(headers):
         ws.write(0, c, h, hf)
 
-    for col, val in enumerate([cell_area, illumination, nplc, delay_ms]):
-        ws.write(1, col + 5, val, pf)
+    initial_timing = initial_timing or {}
+    for col, val in enumerate([
+        cell_area, illumination, nplc, delay_ms,
+        initial_timing.get("rev_s"), initial_timing.get("rev_rate"),
+    ]):
+        if val is not None:
+            ws.write(1, col + 5, val, pf)
 
     for i, (t, v, j, pce) in enumerate(zip(time_s, v_track, j_track, pce_track)):
         r = i + 2
@@ -568,11 +603,13 @@ def save_mpp_data(
 
     # ── Sheet 2: JV parameters per cycle ─────────────────────────────────────
     ws_jv = wb.add_worksheet("MPP_JV")
-    ws_jv.set_column("A:I", 14)
+    ws_jv.set_column("A:M", 14)
 
     jv_headers = [
         "Cycle", "Time (min)", "Vmpp (V)", "Jmpp (mA/cm⁻²)",
         "Voc (V)", "Jsc (mA/cm⁻²)", "FF (%)", "PCE (%)", "HI (%)",
+        "Forward Scan Time (s)", "Reverse Scan Time (s)",
+        "Measured Forward Scan Rate (mV/s)", "Measured Reverse Scan Rate (mV/s)",
     ]
     for c, h in enumerate(jv_headers):
         ws_jv.write(0, c, h, hf)
@@ -590,6 +627,10 @@ def save_mpp_data(
         hi_val = cyc.get("HI")
         if hi_val is not None:
             ws_jv.write(r, 8, hi_val, nf)
+        timing = cyc.get("timing") or {}
+        for col, key in enumerate(("fwd_s", "rev_s", "fwd_rate", "rev_rate"), start=9):
+            if timing.get(key) is not None:
+                ws_jv.write(r, col, timing[key], nf)
 
     # ── Sheets 3+: raw J-V data per cycle ─────────────────────────────────────
     for cyc in cycles:

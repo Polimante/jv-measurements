@@ -177,13 +177,15 @@ _SUMMARY_HEADERS = [
     "HI (%)",
     "Individual Backup File",
     "Status",
+    "Forward Scan Time (s)", "Reverse Scan Time (s)",
+    "Measured Forward Scan Rate (mV/s)", "Measured Reverse Scan Rate (mV/s)",
 ]
 
 
 def _write_summary_sheet(wb, intensities, results):
     ws = wb.create_sheet("Summary")
     ws.column_dimensions["A"].width = 8
-    for col in "BCDEFGHIJKLMN":
+    for col in "BCDEFGHIJKLMNOPQ":
         ws.column_dimensions[col].width = 18
     ws.column_dimensions["M"].width = 40
 
@@ -220,6 +222,11 @@ def _write_summary_sheet(wb, intensities, results):
         cell.font      = Font(name="Calibri", size=10, color=_WHITE, bold=True)
         cell.fill      = PatternFill("solid", fgColor=bg)
         cell.alignment = _center()
+
+        timing = getattr(r, "timing", None) or {}
+        for c, key in enumerate(("fwd_s", "rev_s", "fwd_rate", "rev_rate"), start=14):
+            if timing.get(key) is not None:
+                _dat(ws, row, c, timing[key])
 
 
 # ── Sheet: LightIdealityAnalysis ──────────────────────────────────────────────

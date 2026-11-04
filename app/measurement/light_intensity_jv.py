@@ -30,6 +30,7 @@ from app.measurement.analysis import (
     fit_single_diode,
 )
 from app.io.exporter import save_data
+from app.utils.scan_timing import format_scan_times, timed_scan
 
 
 @dataclass
@@ -59,6 +60,7 @@ class IntensityResult:
     single_diode_fit: object = None
     individual_backup_path: str = ""
     error_message: str = ""
+    timing: Optional[dict] = None
 
 
 class LightIntensityJVMeasurement:
@@ -222,10 +224,11 @@ class LightIntensityJVMeasurement:
             # 4. Forward scan
             self._on_status(f"[{intensity} sun] Measuring forward scan…")
             sp = self._scan_params
-            v_f, j_f = self._smu.measure_scan(
+            timing = {}
+            v_f, j_f = timed_scan(timing, "fwd", lambda: self._smu.measure_scan(
                 sp["start_v"], sp["end_v"], sp["step_v"],
                 sp["cell_area"], self._stop_event,
-            )
+            ))
             if v_f is None or self._stop_event.is_set():
                 result.status = "skipped"
                 return result
@@ -244,10 +247,10 @@ class LightIntensityJVMeasurement:
 
             # 6. Reverse scan
             self._on_status(f"[{intensity} sun] Measuring reverse scan…")
-            v_r, j_r = self._smu.measure_scan(
+            v_r, j_r = timed_scan(timing, "rev", lambda: self._smu.measure_scan(
                 sp["end_v"], sp["start_v"], -sp["step_v"],
                 sp["cell_area"], self._stop_event,
-            )
+            ))
             if v_r is None or self._stop_event.is_set():
                 result.status = "skipped"
                 return result
@@ -271,6 +274,7 @@ class LightIntensityJVMeasurement:
             result.FF_rev  = FF_r;  result.PCE_rev = PCE_r
             result.Rs_rev  = Rs_r;  result.Rsh_rev = Rsh_r
             result.HI      = HI
+            result.timing  = timing
 
             # 8. Optional single-diode fit
             if self._auto_fit:
@@ -301,7 +305,10 @@ class LightIntensityJVMeasurement:
                 self._prebias.get("duration", 0.0)  if self._prebias else 0.0,
                 self._instrument_idn,
                 fit_result=result.single_diode_fit,
+                line_hz=sp.get("line_hz"),
+                timing=timing,
             )
+            self._on_status(f"[{intensity} sun] Done \u2014 {format_scan_times(timing)}")
             # save_data builds its own filename; we track the expected name
             result.individual_backup_path = backup_path
             result.status = "completed"

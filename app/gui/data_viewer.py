@@ -76,11 +76,17 @@ def _read_illuminated(ws):
         "prebias_v":  p(24),  "prebias_t": p(25),
         "instrument": p(26),
         "scan_rate":  p(27),
-        # AB-AE: absent (None) in files written before 2026-10.
+        # AB-AF: absent (None) in files written before 2026-10 or 2026-11.
         "scan_order":     p(28),
         "illumination":   p(29),
         "detector_power": p(30),
         "detector_area":  p(31),
+        "line_hz":        p(32),
+        "fwd_time_s":     p(33),
+        "rev_time_s":     p(34),
+        "total_time_s":   p(35),
+        "fwd_rate_meas":  p(36),
+        "rev_rate_meas":  p(37),
     }
 
     v_f, j_f, p_f = [], [], []
@@ -204,6 +210,8 @@ def _read_dark(ws):
         "nplc":       p(7),
         "four_wire":  p(8),
         "instrument": p(9),
+        "fwd_time_s": p(11),
+        "rev_time_s": p(12),
     }
 
     v_f, j_f, v_r, j_r = [], [], [], []
@@ -302,6 +310,8 @@ def _read_pure_mpp(ws):
         "illumination": p(7),
         "nplc":         p(8),
         "delay_ms":     p(9),
+        "initial_scan_s":    p(10),
+        "initial_scan_rate": p(11),
     }
 
     times, times_min, v_track, j_track, pce_track = [], [], [], [], []
@@ -948,6 +958,16 @@ class DataViewerWindow:
             fw_str = ("ON" if int(fw) else "OFF") if fw is not None else "—"
             row(si, "4-Wire:", fw_str)
             row(si, "Scan rate:", _fmt(data.get("scan_rate"), "%.1f mV/s"))
+            if data.get("fwd_time_s") is not None or data.get("rev_time_s") is not None:
+                st = section("Measured Time")
+                row(st, "Forward scan:", _fmt(data.get("fwd_time_s"), "%.1f s"))
+                row(st, "Reverse scan:", _fmt(data.get("rev_time_s"), "%.1f s"))
+                if data.get("total_time_s") is not None:
+                    row(st, "Whole run:", _fmt(data.get("total_time_s"), "%.1f s"))
+                if data.get("fwd_rate_meas") is not None:
+                    row(st, "Fwd rate:", _fmt(data.get("fwd_rate_meas"), "%.1f mV/s"))
+                if data.get("rev_rate_meas") is not None:
+                    row(st, "Rev rate:", _fmt(data.get("rev_rate_meas"), "%.1f mV/s"))
             idn = str(data.get("instrument") or "—")
             row(si, "Instrument:", (idn[:34] + "…") if len(idn) > 34 else idn)
 
@@ -966,6 +986,8 @@ class DataViewerWindow:
                     row(sl, "Detector area:", _fmt(data.get("detector_area"), "%.4f cm²"))
                 if data.get("scan_order"):
                     row(si, "Scan order:", str(data["scan_order"]))
+                if data.get("line_hz"):
+                    row(si, "Line frequency:", _fmt(data["line_hz"], "%.0f Hz"))
 
                 sp = section("Pre-bias Conditioning")
                 pb_v = data.get("prebias_v") or 0
@@ -1060,6 +1082,10 @@ class DataViewerWindow:
             si = section("Instrument Settings")
             row(si, "NPLC:", _fmt(data.get("nplc"), "%.2f"))
             row(si, "Delay/pt:", _fmt(data.get("delay_ms"), "%.0f ms"))
+            if data.get("initial_scan_s") is not None:
+                st = section("Measured Time")
+                row(st, "Initial scan:", _fmt(data.get("initial_scan_s"), "%.1f s"))
+                row(st, "Initial rate:", _fmt(data.get("initial_scan_rate"), "%.1f mV/s"))
 
             if len(pce_track):
                 sr = section("Results")

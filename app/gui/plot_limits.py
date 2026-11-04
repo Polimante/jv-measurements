@@ -27,6 +27,21 @@ def _span(arrays):
     return (min(lows), max(highs)) if lows else None
 
 
+def next_plot_start(plot_start, n_entries, pixels):
+    """Index of the first session entry the J-V plot should draw.
+
+    *n_entries* includes the measurement just added. With *pixels* > 0 the plot
+    keeps one substrate's pixels together: the entry that would exceed *pixels*
+    belongs to the next substrate, so it starts a fresh plot. *pixels* <= 0
+    keeps accumulating. A *plot_start* left over from a session that has since
+    been cleared is pulled back into range.
+    """
+    plot_start = max(0, min(plot_start, n_entries - 1))
+    if pixels > 0 and n_entries - plot_start > pixels:
+        return n_entries - 1
+    return plot_start
+
+
 def jv_plot_limits(session_data):
     """Axis limits for the J-V plot: the default frame, grown to fit the data.
 
