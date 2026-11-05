@@ -567,15 +567,16 @@ Only then are the files copied. Every dialog goes through `parent.after` — the
 - `launcher.bat` — runs with a visible CMD window; kept for developer use.
 - `install.bat` — runs `pip install -r requirements.txt`; executed post-install by the Inno Setup wizard.
 - To build the installer: open `build_installer/setup.iss` in Inno Setup 6 and compile. Output goes to `dist/`.
+- The installer lists what it ships in `[Files]`. From `docs/` that is only what the running application opens: `help.html`, `figures/`, `screenshots/` and `arduino_shutter.ino`, not the developer notes. `tests/test_installer_manifest.py` fails if the help page or anything it references is left out.
 
 ### Releasing a new version
 
 1. On the feature branch, update `version.json` (version, release_date, release_notes, and `zip_url` / `download_url` pointing at the new tag)
 2. Update `CHANGELOG.md`
 3. Update `APP_VERSION` in `app/utils/constants.py`
-4. Bump the version in `build_installer/setup.iss` as well
+4. Bump the version in `build_installer/setup.iss` as well (`#define AppVersion`, `AppVersion=` and `OutputBaseFilename=`)
 5. Merge into `main`, tag that merge commit `vX.Y.Z` and push the tag **in the same sitting** — installed copies read `version.json` from `main` immediately, and its `zip_url` 404s until the tag exists
-6. Create the GitHub Release from the tag and attach the installer `.exe` compiled **from that tag** — the "Latest" release is what a new user downloads, so its installer must match its version
+6. Create the GitHub Release from the tag and attach the installer `.exe` compiled **from that tag** — the "Latest" release is what a new user downloads, so its installer must match its version. Compile from a clean export (`git archive vX.Y.Z`), because a build from the working folder also packages `__pycache__` and leftover files in `Samples/`
 
 `version.json` and `APP_VERSION` must agree — the updater compares them. A release that adds a line to `requirements.txt` cannot be applied in place (see "Auto-update system"); say so in its release notes, since existing users must run the new installer.
 

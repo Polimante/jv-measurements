@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [2.8.1] — 2026-11-05
+
+> **Update with the installer from the release page.** The update prompt opens it for you.
+
+### Fixed
+- Help → the help page did not open in installed copies, because the installer did not include `docs/help.html` or its figures and screenshots. It now does, along with the example Arduino sketch named in the shutter settings
+
 ## [2.8.0] — 2026-11-04
 
 > **Update with the installer from the release page.** The update prompt opens it for you.

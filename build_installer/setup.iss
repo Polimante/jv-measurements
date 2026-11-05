@@ -3,20 +3,20 @@
 ; Build: Open this file in Inno Setup Compiler and click Build â†’ Compile
 
 #define AppName "JV Measurements"
-#define AppVersion "2.8.0"
+#define AppVersion "2.8.1"
 #define AppPublisher "UFABC â€” Lucas Polimante"
 #define AppURL "https://github.com/Polimante/jv-measurements"
 
 [Setup]
 AppId={{8F3A2B1C-4D5E-6F7A-8B9C-0D1E2F3A4B5C}
 AppName=JV Measurements
-AppVersion=2.8.0
+AppVersion=2.8.1
 AppPublisher=UFABC - Lucas Polimante
 AppPublisherURL=https://github.com/Polimante/jv-measurements
 DefaultDirName={autopf}\JV Measurements
 DefaultGroupName=JV Measurements
 OutputDir=..\dist
-OutputBaseFilename=JV-Measurements-Setup-v2.8.0
+OutputBaseFilename=JV-Measurements-Setup-v2.8.1
 SetupIconFile=..\assets\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -41,6 +41,10 @@ Source: "..\launcher.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\install.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Samples\*"; DestDir: "{app}\Samples"; Flags: ignoreversion recursesubdirs
+Source: "..\docs\help.html"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\docs\arduino_shutter.ino"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\docs\figures\*"; DestDir: "{app}\docs\figures"; Flags: ignoreversion recursesubdirs
+Source: "..\docs\screenshots\*"; DestDir: "{app}\docs\screenshots"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{group}\JV Measurements"; Filename: "{app}\launcher.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\icon.ico"
