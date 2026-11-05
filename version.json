@@ -1,9 +1,9 @@
 {
-    "version": "2.8.0",
-    "release_date": "2026-11-04",
-    "release_notes": "Line frequency is now read from the instrument (50 or 60 Hz) and used for every scan rate. Every mode that sweeps records how long each scan really took, shown in the status bar or log and saved in the file. J-V: new Pixels per sample box keeps one substrate together on the plot. Fixed a J-V save failure when the delay was clamped to 0 ms in Scan Rate mode. Please update with the installer from the release page.",
+    "version": "2.8.1",
+    "release_date": "2026-11-05",
+    "release_notes": "Fixed the Help menu in installed copies: the installer did not include the help page, its figures or the example Arduino sketch. Please update with the installer from the release page.",
     "minimum_python": "3.9",
     "zip_url": "",
-    "download_url": "https://github.com/Polimante/jv-measurements/releases/tag/v2.8.0",
+    "download_url": "https://github.com/Polimante/jv-measurements/releases/tag/v2.8.1",
     "changelog_url": "https://github.com/Polimante/jv-measurements/blob/main/CHANGELOG.md"
 }
